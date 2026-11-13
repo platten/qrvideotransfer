@@ -200,27 +200,28 @@ func TestParseBaseMatricesErrors(t *testing.T) {
 	all := section(t, "1/2") + section(t, "2/3") + section(t, "3/4") + section(t, "5/6")
 	row := strings.Repeat("-1 ", 24) + "\n"
 	tests := []struct {
-		name, in string
+		name, in, want string
 	}{
-		{"empty", ""},
-		{"row before header", row + all},
-		{"unknown rate", "rate 1/3\n" + all},
-		{"header without rate", "rate\n" + all},
-		{"header with extra field", "rate 1/2 x\n" + all},
-		{"duplicate rate", all + section(t, "3/4")},
-		{"missing rate", section(t, "1/2") + section(t, "2/3") + section(t, "3/4")},
-		{"too few rows then header", trimLast(section(t, "1/2")) + section(t, "2/3") + section(t, "3/4") + section(t, "5/6")},
-		{"too few rows at end", trimLast(all)},
-		{"too many rows", all + row},
-		{"wrong column count", strings.Replace(all, "\n 3 -1 28", "\n 3 28", 1)},
-		{"not an integer", strings.Replace(all, "57 -1", "5x -1", 1)},
-		{"shift too large", strings.Replace(all, "57 -1", "81 -1", 1)},
-		{"shift too small", strings.Replace(all, "57 -1", "-2 -1", 1)},
+		{"empty", "", "0 of 4 rates"},
+		{"row before header", row + all, "before a rate header"},
+		{"unknown rate", "rate 1/3\n" + all, "bad header"},
+		{"header without rate", "rate\n" + all, "bad header"},
+		{"header with extra field", "rate 1/2 x\n" + all, "bad header"},
+		{"duplicate rate", all + section(t, "3/4"), "repeated"},
+		{"missing rate", section(t, "1/2") + section(t, "2/3") + section(t, "3/4"), "3 of 4 rates"},
+		{"too few rows then header", trimLast(section(t, "1/2")) + section(t, "2/3") + section(t, "3/4") + section(t, "5/6"), "has 11 rows"},
+		{"too few rows at end", trimLast(all), "has 3 rows"},
+		{"too many rows", all + row, "more than 4 rows"},
+		{"wrong column count", strings.Replace(all, "\n 3 -1 28", "\n 3 28", 1), "23 columns"},
+		{"not an integer", strings.Replace(all, "57 -1", "5x -1", 1), "bad shift"},
+		{"shift too large", strings.Replace(all, "57 -1", "81 -1", 1), "bad shift"},
+		{"shift too small", strings.Replace(all, "57 -1", "-2 -1", 1), "bad shift"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := ParseBaseMatrices(strings.NewReader(tt.in)); err == nil {
-				t.Fatalf("no error")
+			_, err := ParseBaseMatrices(strings.NewReader(tt.in))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want one containing %q", err, tt.want)
 			}
 		})
 	}
