@@ -57,10 +57,11 @@ type bitReader struct {
 	n int
 }
 
-func (r *bitReader) get(width int) uint64 {
-	var v uint64
+// get reads a field of width bits; width must not exceed the size of T.
+func get[T ~uint8 | ~uint16 | ~uint32](r *bitReader, width int) T {
+	var v T
 	for range width {
-		v = v<<1 | uint64(r.b[r.n/8]>>(7-r.n%8)&1)
+		v = v<<1 | T(r.b[r.n/8]>>(7-r.n%8)&1)
 		r.n++
 	}
 	return v
@@ -142,17 +143,17 @@ func DecodeHeader(soft []int8) (Header, bool) {
 	}
 	r := bitReader{b: b[:]}
 	h := Header{
-		Version:     uint8(r.get(4)),
-		Session:     uint16(r.get(16)),
-		FrameIndex:  uint32(r.get(22)),
-		TotalFrames: uint32(r.get(22)),
-		GridX:       uint16(r.get(11)),
-		GridY:       uint16(r.get(11)),
-		Modulation:  uint8(r.get(3)),
-		InnerCode:   uint8(r.get(3)),
-		Reserved:    uint8(r.get(4)),
+		Version:     get[uint8](&r, 4),
+		Session:     get[uint16](&r, 16),
+		FrameIndex:  get[uint32](&r, 22),
+		TotalFrames: get[uint32](&r, 22),
+		GridX:       get[uint16](&r, 11),
+		GridY:       get[uint16](&r, 11),
+		Modulation:  get[uint8](&r, 3),
+		InnerCode:   get[uint8](&r, 3),
+		Reserved:    get[uint8](&r, 4),
 	}
-	if uint16(r.get(16)) != CRC16(b[:12]) || h.Validate() != nil {
+	if get[uint16](&r, 16) != CRC16(b[:12]) || h.Validate() != nil {
 		return Header{}, false
 	}
 	return h, true

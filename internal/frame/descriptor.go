@@ -52,12 +52,19 @@ func (d Descriptor) Marshal() [DescriptorSize]byte {
 	return b
 }
 
+// put48 writes the low 48 bits of v, big-endian.
 func put48(b []byte, v uint64) {
-	binary.BigEndian.PutUint16(b, uint16(v>>32))
-	binary.BigEndian.PutUint32(b[2:], uint32(v))
+	var t [8]byte
+	binary.BigEndian.PutUint64(t[:], v)
+	copy(b, t[2:])
 }
 
-func put24(b []byte, v uint32) { b[0], b[1], b[2] = byte(v>>16), byte(v>>8), byte(v) }
+// put24 writes the low 24 bits of v, big-endian.
+func put24(b []byte, v uint32) {
+	var t [4]byte
+	binary.BigEndian.PutUint32(t[:], v)
+	copy(b, t[1:])
+}
 
 func get24(b []byte) int { return int(b[0])<<16 | int(b[1])<<8 | int(b[2]) }
 

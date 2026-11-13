@@ -47,20 +47,28 @@ type DecodeConfig struct {
 
 // Encoder writes frames to a video file.
 type Encoder interface {
+	// WriteFrame encodes one frame.
 	WriteFrame(*Frame) error
+	// Close finishes and closes the file.
 	Close() error
 }
 
 // Decoder reads frames from a video file. Next returns io.EOF at the end.
 type Decoder interface {
+	// Info describes the file being read.
 	Info() ClipInfo
+	// Next reads the next frame into the given frame, reusing its buffers.
 	Next(*Frame) error
+	// Close releases the decoder.
 	Close() error
 }
 
 // Backend opens video files for reading and writing.
 type Backend interface {
+	// Probe describes a video file without decoding it.
 	Probe(ctx context.Context, path string) (ClipInfo, error)
+	// NewEncoder creates a video file at path.
 	NewEncoder(ctx context.Context, path string, c EncodeConfig) (Encoder, error)
+	// NewDecoder opens a video file for reading.
 	NewDecoder(ctx context.Context, path string, c DecodeConfig) (Decoder, error)
 }

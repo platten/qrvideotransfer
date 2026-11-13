@@ -29,7 +29,7 @@ func parity(v int) uint8 {
 	for ; v != 0; v &= v - 1 {
 		p ^= 1
 	}
-	return uint8(p) //nolint:gosec // 0 or 1
+	return uint8(p)
 }
 
 // Encode returns the 2*len(bits) coded bits of bits (one bit per byte, 0 or 1), starting from the
@@ -78,8 +78,8 @@ func Decode(llr []int8) []uint8 {
 	out := make([]uint8, n)
 	s := 0
 	for t := n - 1; t >= 0; t-- {
-		out[t] = uint8(s >> 5)                 //nolint:gosec // 0 or 1
-		s = (s<<1)&63 | int(decisions[t]>>s&1) //nolint:gosec // s < 64
+		out[t] = uint8(s >> 5)
+		s = (s<<1)&63 | int(decisions[t]>>s&1)
 	}
 	return out
 }

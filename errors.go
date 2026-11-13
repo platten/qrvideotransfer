@@ -24,6 +24,7 @@ type NotEnoughDataError struct {
 	Blocks []Shortfall // only the blocks that are short
 }
 
+// Error implements the error interface.
 func (e *NotEnoughDataError) Error() string {
 	missing := 0
 	for _, s := range e.Blocks {
@@ -38,6 +39,7 @@ type UnsafeArchiveError struct {
 	Reason string
 }
 
+// Error implements the error interface.
 func (e *UnsafeArchiveError) Error() string {
 	return fmt.Sprintf("qrvt: unsafe archive entry %q: %s", e.Path, e.Reason)
 }
@@ -48,6 +50,7 @@ type LimitError struct {
 	Value, Max int64
 }
 
+// Error implements the error interface.
 func (e *LimitError) Error() string {
 	return fmt.Sprintf("qrvt: %s %d exceeds the limit %d", e.Limit, e.Value, e.Max)
 }
@@ -58,6 +61,7 @@ type UnsupportedVersionError struct {
 	Value int
 }
 
+// Error implements the error interface.
 func (e *UnsupportedVersionError) Error() string {
 	return fmt.Sprintf("qrvt: unsupported %s %d", e.What, e.Value)
 }

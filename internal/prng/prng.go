@@ -43,7 +43,7 @@ func Shuffle(n int, seed uint64) []uint32 {
 	}
 	a := make([]uint32, n)
 	for i := range a {
-		a[i] = uint32(i) //nolint:gosec // n <= 2^32
+		a[i] = uint32(i)
 	}
 	g := SplitMix64{State: seed}
 	for i := n - 1; i > 0; i-- {
