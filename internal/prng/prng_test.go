@@ -10,7 +10,7 @@ import (
 )
 
 type golden struct {
-	SplitMix64 struct {
+	SplitMix64 []struct {
 		State   uint64   `json:"state"`
 		Outputs []string `json:"outputs"`
 	} `json:"splitmix64"`
@@ -57,11 +57,12 @@ func TestSplitMix64(t *testing.T) {
 			t.Errorf("output %d = %016x, want %016x", i, got, w)
 		}
 	}
-	gold := loadGolden(t)
-	g = SplitMix64{State: gold.SplitMix64.State}
-	for i, s := range gold.SplitMix64.Outputs {
-		if got := g.Next(); got != hex64(t, s) {
-			t.Errorf("golden output %d = %016x, want %s", i, got, s)
+	for _, c := range loadGolden(t).SplitMix64 {
+		g = SplitMix64{State: c.State}
+		for i, s := range c.Outputs {
+			if got := g.Next(); got != hex64(t, s) {
+				t.Errorf("state %x output %d = %016x, want %s", c.State, i, got, s)
+			}
 		}
 	}
 }
