@@ -160,21 +160,36 @@ func hasVersion(t tool, p string) (bool, string) {
 	if err != nil {
 		return false, err.Error()
 	}
-	return strings.Contains(out, t.version), strings.TrimSpace(strings.SplitN(out, "\n", 2)[0])
+	return hasVersionToken(out, t.version), strings.TrimSpace(strings.SplitN(out, "\n", 2)[0])
 }
 
-func hasVersionToken(out, version string) bool { return false }
+// hasVersionToken reports whether out contains version, optionally preceded by "v", as a whole
+// whitespace-separated token: 2.15.0 matches "version 2.15.0" and "v2.15.0" but not "2.15.01",
+// "12.15.0" or "2.15.0-rc.1".
+func hasVersionToken(out, version string) bool {
+	for _, f := range strings.Fields(out) {
+		if f == version || f == "v"+version {
+			return true
+		}
+	}
+	return false
+}
 
-func toolCandidates(name, dir string, lookPath func(string) (string, error)) []string { return nil }
+// toolCandidates lists where to look for a tool: first the GOBIN copy that install-tools
+// installed and verified, then whatever is on PATH.
+func toolCandidates(name, dir string, lookPath func(string) (string, error)) []string {
+	first := filepath.Join(dir, exe(name))
+	out := []string{first}
+	if p, err := lookPath(name); err == nil && filepath.Clean(p) != first {
+		out = append(out, p)
+	}
+	return out
+}
 
-// find returns the path of a pinned tool at its pinned version, looking on PATH and then in GOBIN.
+// find returns the path of a pinned tool at its pinned version, looking in GOBIN and then on PATH.
 func find(t tool) (string, error) {
 	var seen []string
-	candidates := []string{filepath.Join(gobin(), exe(t.name))}
-	if p, err := exec.LookPath(t.name); err == nil {
-		candidates = append([]string{p}, candidates...)
-	}
-	for _, p := range candidates {
+	for _, p := range toolCandidates(t.name, gobin(), exec.LookPath) {
 		if _, err := os.Stat(p); err != nil {
 			continue
 		}

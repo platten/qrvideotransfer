@@ -207,7 +207,12 @@ func lint(args []string) error {
 // dependency fails the check and needs a human decision.
 var allowedLicenses = []string{
 	"0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CC0-1.0", "GPL-3.0", "ISC",
-	"LGPL-2.1", "LGPL-3.0", "MIT", "MPL-2.0", "Unlicense", "Zlib",
+	"LGPL-2.1", "LGPL-3.0", "MIT", "Unlicense", "Zlib",
+	// MPL-2.0 is GPL-compatible only through its Secondary Licenses clause. Code whose notice says
+	// "Incompatible With Secondary Licenses" (MPL-2.0 Exhibit B) must be refused, and go-licenses
+	// cannot see that marking: check every new MPL-2.0 dependency's notices by hand before adding
+	// it. No dependency was MPL-2.0 when this list was written (2026-11-13).
+	"MPL-2.0",
 }
 
 // licenses checks that every package linked into the module's programs, on each target system,
