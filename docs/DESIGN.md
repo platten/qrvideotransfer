@@ -276,14 +276,17 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
 - Encoder (`internal/fec/ldpc`): systematic, through the dual-diagonal parity structure; the first
   parity block is the sum of the per-row syndromes of the information part, each later one follows
   from the row before.
-- Decoder: layered normalised min-sum, one layer per block row, scaling 0.75 (computed as
-  floor(3m/4)), 8-bit soft bits, int16 messages, at most 25 iterations (`ldpc.MaxIterations`). The
+- Decoder: layered normalised min-sum, one layer per block row, scaling 13/16 (computed as
+  floor(13m/16)), 8-bit soft bits multiplied by 4 on entry so that small messages keep their
+  precision, int16 messages, at most 25 iterations (`ldpc.MaxIterations`). M1 shipped scaling 0.75
+  (floor(3m/4)) on the soft bits as given; the follow-up below replaced it by measurement. The
   checks are tested before the first iteration (a clean codeword costs 0 iterations) and after each
   one, stopping when all pass; then the CRC. Block columns that are entirely shortened are left out of
   the schedule; the known-zero bits of the one partly shortened column always send the largest
-  magnitude with sign 0, so the checks can never flip them. Posteriors are clamped to +-8,191, which
-  keeps every message within int16 without saturation (|R| <= 24,573, |L - R| <= 32,764), so no input
-  can overflow; a fuzz target checks that arbitrary soft bits never panic and stop within the cap.
+  magnitude with sign 0, so the checks can never flip them. Posteriors are clamped to +-8,191 and
+  check-to-variable magnitudes to 24,573, which keeps every message within int16 without saturation
+  (|L - R| <= 32,764), so no input can overflow; a fuzz target checks that arbitrary soft bits never
+  panic and stop within the cap.
   A `Code` holds its working memory and belongs to one worker.
 - Speed (spike S3, `normal` code, one core, sent bits): 7.6 Mbit/s at a fixed 10 iterations in portable
   Go, against a threshold of 20 Mbit/s, which is **not met**; 18.6 Mbit/s with the experimental
@@ -297,6 +300,10 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   against 8.2-10.8 and 13.0-16.0 for the production decoder in the same session: the same speed within
   the noise. Both are below S3's own figures (13.4 and 19.4) because the machine was shared with other
   jobs during M1; the S3 verdict (threshold not met per core) stands. No SIMD path was written.
+- Speed after the decoder follow-up (`BenchmarkDecodeCandidates`, the same 64 codewords, M1 and new
+  decoder in 5 alternating runs pinned to one core, median): 12.9 against 12.2 Mbit/s at Eb/N0 2.5 dB
+  (5.73 against 6.03 mean iterations) and 19.7 against 18.9 Mbit/s at 3.0 dB (3.55 against 3.67): the
+  new decoder is no slower, because it needs fewer iterations.
 - Release builds must not depend on a Go experiment or an amd64-only package. The portable decoder is
   the default on all six targets; a SIMD path may exist only as an optional build behind a build tag,
   tested to give output identical to the portable decoder.
@@ -307,44 +314,45 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   frame errors in 1,000 frames per rate; 20,000 frames with `QRVT_LONG_TESTS=1`). Measured
   (`TestErrorRateCurves`, 4,000 frames per 0.1 dB step), Eb/N0 at FER 1e-2:
 
-  | Rate | Published | Source | Measured |
-  | --- | --- | --- | --- |
-  | 1/2 | 1.81 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 1.82 dB |
-  | 2/3 | 2.32 dB | [B], flooding sum-product, 20 iterations | 2.23 dB |
-  | 3/4 | 2.84 dB | [B], flooding sum-product, 20 iterations | 2.77 dB |
-  | 5/6 | 3.70 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 3.53 dB |
+  | Rate | Published | Source | Measured (decoder of the follow-up) | Measured (M1 decoder) |
+  | --- | --- | --- | --- | --- |
+  | 1/2 | 1.81 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 1.51 dB | 1.82 dB |
+  | 2/3 | 2.32 dB | [B], flooding sum-product, 20 iterations | 2.23 dB | 2.23 dB |
+  | 3/4 | 2.84 dB | [B], flooding sum-product, 20 iterations | 2.76 dB | 2.77 dB |
+  | 5/6 | 3.70 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 3.50 dB | 3.53 dB |
 
   [A] Balatsoukas-Stimming, Giard, Burg, "Comparison of Polar Decoders with Existing Low-Density
   Parity-Check and Turbo Decoders", arXiv:1702.04707v2, 2017, curve "IEEE 802.11n (I = 12)", BPSK,
   Eb/N0. [B] S. Tavildar, github.com/tavildar/LDPC, `results/wifi_ldpc_qpsk.png`, curves N = 1944, one
   bit per real dimension, Eb/N0; the only source found for rates 2/3 and 3/4, and not peer-reviewed.
   Each published value is a log-linear interpolation between the two bracketing points of the curve.
-  Our decoder is within 0.2 dB of every reference (better than [A] and [B] where it runs more
-  iterations). A cross-check from Roth et al., IEEE ASSCC 2010, Fig. 5 (Z = 81, 10 iterations of a
+  Our decoder is within 0.3 dB of every reference and never behind it (it runs more iterations than
+  [A] and [B]). A cross-check from Roth et al., IEEE ASSCC 2010, Fig. 5 (Z = 81, 10 iterations of a
   5-bit offset min-sum) gives 2.16 dB and 3.71 dB for rates 1/2 and 5/6.
 - The shortened inner codes that ship (ids 1-4) have no published curves, so they are checked against
   the binary-input AWGN capacity limit for their rate, counted with the CRC: R = (8S + 32) / N sent
   bits (`TestShortenedErrorRate`, the weaker check). Measured (BPSK, AWGN, same channel as above):
 
-  | Code | R | Capacity limit | FER 1e-2 at Eb/N0 | Gap | Es/N0 at FER 1e-2 |
-  | --- | --- | --- | --- | --- | --- |
-  | 1 `fast` | 0.829 | 2.32 dB | 3.46 dB | 1.14 dB | 2.64 dB |
-  | 2 `normal` | 0.685 | 1.17 dB | 2.48 dB | 1.31 dB | 0.84 dB |
-  | 3 | 0.620 | 0.79 dB | 2.07 dB | 1.28 dB | -0.01 dB |
-  | 4 `robust` | 0.359 | -0.40 dB | 2.20 dB | 2.60 dB | -2.25 dB |
+  | Code | R | Capacity limit | FER 1e-2 at Eb/N0 | Gap | Es/N0 at FER 1e-2 | M1 decoder: Eb/N0, gap |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | 1 `fast` | 0.829 | 2.32 dB | 3.44 dB | 1.12 dB | 2.63 dB | 3.46, 1.14 dB |
+  | 2 `normal` | 0.685 | 1.17 dB | 2.49 dB | 1.32 dB | 0.85 dB | 2.48, 1.31 dB |
+  | 3 | 0.620 | 0.79 dB | 2.10 dB | 1.31 dB | 0.02 dB | 2.07, 1.28 dB |
+  | 4 `robust` | 0.359 | -0.40 dB | 1.35 dB | 1.75 dB | -3.10 dB | 2.20, 2.60 dB |
 
   Es/N0 = Eb/N0 + 10 log10(R) is per sent bit, which is what the noise of a cell sets. The test
-  asserts FER below 1e-2 at the limit plus 2.5 dB for codes 1-3. **With the shipped decoder, `robust`
-  misses that fallback criterion by about 0.1 dB, and the cause is the decoder, not the code.** For
-  `robust` the test is a regression check at the limit plus 2.8 dB, on 10,000 frames because its
-  waterfall is shallow.
+  asserts FER below 1e-2 at the limit plus 2.5 dB for all four codes. With the M1 decoder `robust`
+  missed that criterion by about 0.1 dB, and the cause was the decoder, not the code; with the decoder
+  of the follow-up it meets it with 0.75 dB to spare, and a regression check holds it at the limit
+  plus 2.1 dB (the measured 1.75 dB plus 0.3 dB of margin, 5,000 frames because its waterfall is
+  shallow). Codes 1-3 moved by at most 0.03 dB, within the resolution of these sweeps.
 - Decoder comparison (`TestMinSumVariants`, `QRVT_LONG_TESTS=1`; a test-only floating-point reference
   with the same layered schedule; 4,000 frames per 0.1 dB step, the same frames for every decoder; Eb/N0
   at FER 1e-2, each code's capacity gap in brackets):
 
   | Decoder | `robust` (4) | code 3 | `normal` (2) | `fast` (1) |
   | --- | --- | --- | --- | --- |
-  | Shipped: int16, x0.75 as floor(3m/4), 25 iterations | 2.26 (2.66) | 2.07 (1.29) | 2.49 (1.32) | 3.48 (1.16) |
+  | M1 decoder: int16, x0.75 as floor(3m/4), 25 iterations | 2.26 (2.66) | 2.07 (1.29) | 2.49 (1.32) | 3.48 (1.16) |
   | Sum-product, 50 iterations, float LLRs | 1.13 (1.53) | 1.97 (1.18) | 2.43 (1.25) | 3.41 (1.10) |
   | Sum-product, 50 iterations, the shipped 8-bit soft bits | 1.14 | 1.98 | 2.42 | 3.42 |
   | Min-sum x0.75, float, 25 iterations | 1.96 | 2.07 | 2.49 | 3.46 |
@@ -354,17 +362,55 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   | Offset min-sum, 0.25 LLR, float, 25 iterations | 1.33 | 2.20 | 2.62 | 3.50 |
   | Offset min-sum, 0.5 LLR, float, 25 iterations | 1.33 | 2.07 | 2.51 | 3.47 |
 
-  For codes 1-3 the shipped decoder is within 0.1 dB of sum-product, and x0.75 is the best of the
+  For codes 1-3 the M1 decoder is within 0.1 dB of sum-product, and x0.75 is the best of the
   min-sum variants. For `robust` it is 1.13 dB behind sum-product. About 0.3 dB of that is integer
   truncation: floor(3m/4) of small messages at the low Es/N0 where `robust` works (the float model of
-  the same algorithm is at 1.96 dB, and soft bits at 8 or 16 per unit of LLR instead of 4 bring the
-  shipped decoder to 2.09 and 2.02 dB). About 0.6 dB is the normalisation: after shortening, `robust`'s
-  checks keep only 5 to 7 unshortened variables, and min-sum over few inputs needs less damping than
-  x0.75. Offset min-sum with 0.5 LLR, the most uniform variant, is within 0.03 dB of x0.75 on codes 1-3
-  and 0.6 dB better on `robust`. The 8-bit soft bits cost nothing (sum-product on them equals
-  sum-product on float LLRs). Not changed in M1: changing the decoder changes no format bit, and the
-  choice is the designer's. `robust` buys its 2.24 dB of Es/N0 over code 3 with 56% of the payload per
-  sent bit.
+  the same algorithm is at 1.96 dB, and soft bits at 8 or 16 per unit of LLR instead of 4 bring the M1
+  decoder to 2.09 and 2.02 dB, `TestSoftBitUnits`). About 0.6 dB is the normalisation: after
+  shortening, `robust`'s checks keep only 5 to 7 unshortened variables, and min-sum over few inputs
+  needs less damping than x0.75. The 8-bit soft bits cost nothing (sum-product on them equals
+  sum-product on float LLRs).
+- Decoder follow-up (after M1, designer's decision; no format bit changes). Two integer candidates
+  in shipping form were measured on the same frames (`TestDecoderCandidates`, `QRVT_LONG_TESTS=1`,
+  20,000 frames per 0.1 dB step, sum-product on the first 4,000), with the soft bits handed to the
+  decoder multiplied by 0.5, 1 and 2 relative to their true LLRs before quantisation and clipping
+  (that is 2, 4 and 8 steps per unit of LLR). Eb/N0 in dB at FER 1e-2 / 1e-3:
+
+  | Decoder | Scale | `robust` | code 3 | `normal` | `fast` |
+  | --- | --- | --- | --- | --- | --- |
+  | M1: x0.75 | 0.5 | 2.60 / 3.05 | 2.13 / 2.34 | 2.50 / 2.71 | 3.51 / 3.72 |
+  | | 1 | 2.28 / 2.80 | 2.08 / 2.26 | 2.47 / 2.68 | 3.48 / 3.71 |
+  | | 2 | 2.11 / 2.64 | 2.07 / 2.26 | 2.46 / 2.66 | 3.47 / 3.71 |
+  | A1: offset 1 step | 0.5 | 1.37 / 1.60 | 2.09 / 2.29 | 2.49 / 2.72 | 3.49 / 3.72 |
+  | | 1 | 1.34 / 1.60 | 2.20 / 2.40 | 2.58 / 2.81 | 3.53 / 3.75 |
+  | | 2 | 1.50 / 1.76 | 2.34 / 2.54 | 2.70 / 2.92 | 3.58 / 3.79 |
+  | A2: offset 2 steps (0.5 LLR) | 0.5 | 2.20 / 2.38 | 2.28 / 2.42 | 2.63 / 2.82 | 3.58 / 3.77 |
+  | | 1 | 1.34 / 1.61 | 2.07 / 2.26 | 2.48 / 2.71 | 3.48 / 3.71 |
+  | | 2 | 1.34 / 1.62 | 2.19 / 2.38 | 2.58 / 2.81 | 3.52 / 3.75 |
+  | A3: offset 3 steps | 0.5 | 3.16 / 3.32 | 2.76 / 2.88 | 3.03 / 3.19 | 3.84 / 3.99 |
+  | | 1 | 1.68 / 1.90 | 2.11 / 2.29 | 2.50 / 2.71 | 3.49 / 3.70 |
+  | | 2 | 1.29 / 1.54 | 2.11 / 2.31 | 2.51 / 2.75 | 3.49 / 3.73 |
+  | **B: x13/16, soft bits x4 inside** | 0.5 | 1.47 / 1.89 | 2.08 / 2.27 | 2.47 / 2.68 | 3.47 / 3.69 |
+  | | 1 | 1.41 / 1.82 | 2.09 / 2.28 | 2.48 / 2.67 | 3.46 / 3.69 |
+  | | 2 | 1.39 / 1.77 | 2.09 / 2.27 | 2.48 / 2.70 | 3.46 / 3.67 |
+  | Sum-product, float, 50 iterations | 0.5 | 1.72 / 1.84 | 2.60 / 2.71 | 2.95 / 3.05 | 3.82 / 3.94 |
+  | | 1 | 1.13 / 1.41 | 1.96 / 2.13 | 2.37 / 2.61 | 3.43 / 3.68 |
+  | | 2 | 1.42 / 1.66 | 2.25 / 2.43 | 2.61 / 2.76 | 3.53 / 3.77 |
+
+  A2 with the soft bits multiplied by 4 inside (offset 8) gives exactly A2's results: offset min-sum
+  scales exactly, so up-scaling buys it nothing, and integer A2 at scale 1 (1.34 dB) equals its float
+  model (1.33 dB). Frames that converged to a wrong codeword (every check satisfied, information wrong;
+  CRC-32C catches them), summed over the sweep: none for any decoder on codes 2 and 3; on `robust` 1
+  for A1 (scale 1), A2 and A3 (scale 2 each), none for B, M1 and sum-product; on `fast`, at high error
+  rates, 5-7 per scale for every min-sum decoder including M1 and B (0 for A3 at scale 0.5), and 0-1 for sum-product.
+
+  **Choice: B, one factor for all codes.** At scale 1 it keeps codes 1-3 within 0.02 dB of M1 at FER
+  1e-2 and is no slower (above). At FER 1e-3 it is better than M1 on `fast` and `normal` and 0.01 dB
+  behind on code 3 (2.278 against 2.270 dB in a 100,000-frame check, below the resolution of the
+  measurement). It improves `robust` by 0.87 dB at scale 1 and has the smallest worst case over the
+  three scales (1.47 dB, against 1.50 for A1, which also fails code 2 by 0.11 dB, 2.20 for A2 and 3.16
+  for A3): offset min-sum depends on the soft-bit scale, normalised min-sum does not. `robust` buys its
+  3.1 dB of Es/N0 over code 3 with 56% of the payload per sent bit.
 - Codeword bits are spread over the whole frame by a pseudo-random permutation with a per-frame rotation,
   so glare in one corner costs every codeword a little instead of a few codewords everything.
 - No mature Go library does soft-decision LDPC, so this is written in the repository. The DVB-S2
@@ -1136,6 +1182,7 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream E: section 15 moves interference fringes from the optics stage to the sensor stage (their amplitude is in code values), completes the presets with a second table (panel black and response, capture jitter, exposure gain, colour matrix, colour noise reduction, veiling glare), and states how each parameter is read and the values every preset shares (panel scan-out, flicker frequency, field of view, shake walk, distortion convention, glare patch, recorder stand-in step) |
 | 2026-11-13 | M1 stream E review: section 15 adds the panel scan rotation (0 in every preset) and says player tearing is not modelled; noise is exact Gaussian and jitter is clipped at 4 times its RMS; HLG output applies the BT.2087 primaries matrix first; noise and fringe amplitudes are stated as per-channel full-range units (about 0.64 and 0.86 times in brightness codes); the field of view is 70.0 degrees; the readout wording and the quantiser-step figures are corrected |
 | 2026-11-13 | M1 stream B: section 8 describes the encoder and the decoder as built (int16 bounds, pinned shortened bits, check before the first iteration), records the production decoder's speed beside the S3 decoder, and records the error-rate test: published FER 1e-2 points for the four 802.11n n = 1944 mother codes with their sources, our measured points (all within 0.2 dB), and the shortened codes' points; section 12 records the `noasm`/`nounsafe` measurement and the decision that the whole release can be built with `-tags noasm,nounsafe` |
-| 2026-11-13 | M1 stream B, review of PR #8: section 8 checks the four shipped inner codes against the binary-input AWGN capacity limit with the rate counted with the CRC (codes 1-3 within 2.5 dB; `robust` 2.60 dB away, missing that criterion by about 0.1 dB because of the frozen shortening), corrects the Es/N0 values for the CRC, and states the shard store's sparse file on Windows and its 64 GiB stream cap; section 12 limits the `noasm,nounsafe` claim to the three `klauspost` libraries and calls Reed-Solomon reconstruction marginally below the bar, accepted because it is 30-50 times faster than LDPC decoding |
+| 2026-11-13 | M1 stream B, review of PR #8: section 8 checks the four shipped inner codes against the binary-input AWGN capacity limit with the rate counted with the CRC (codes 1-3 within 2.5 dB; `robust` 2.60 dB away, missing that criterion by about 0.1 dB because of the frozen shortening; corrected below: the cause was the decoder), corrects the Es/N0 values for the CRC, and states the shard store's sparse file on Windows and its 64 GiB stream cap; section 12 limits the `noasm,nounsafe` claim to the three `klauspost` libraries and calls Reed-Solomon reconstruction marginally below the bar, accepted because it is 30-50 times faster than LDPC decoding |
 | 2026-11-13 | M1 stream B, designer's follow-up on PR #8: section 8 compares the shipped decoder with a test-only sum-product reference and min-sum variants on the four inner codes, and corrects the cause of `robust`'s capacity gap: the decoder (integer truncation about 0.3 dB, normalisation x0.75 about 0.6 dB), not the shortening; the shipped decoder is unchanged pending the designer's decision |
 | 2026-11-13 | M1 stream B, designer's note on PR #8: section 12 states that Reed-Solomon reconstruction with `noasm` measured 45-49 MB/s per core in the worst case, below the bar of about 50 MB/s, and why the tags are accepted anyway (seconds of Reed-Solomon against hours of video decoding; 30-50 times faster than one core of LDPC) |
+| 2026-11-13 | Decoder follow-up to M1 stream B (designer's decision): section 8 records the measured candidates (offset min-sum 1-3 steps, normalised x13/16 with soft bits x4 inside, M1 and sum-product) at soft-bit scales 0.5, 1 and 2, FER 1e-2 and 1e-3, wrong-codeword counts and the choice of x13/16 for all codes; the decoder description, the measured points of the mother and shortened codes (`robust` now 1.75 dB from capacity, meeting the 2.5 dB criterion) and the speed are updated. No format bit changes |
