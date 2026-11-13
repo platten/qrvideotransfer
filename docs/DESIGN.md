@@ -476,7 +476,8 @@ Costs a user should expect:
       continues.
     - On any error, panic or refused stream the slice is decoded by the engine. CI decodes the test
       clips with both and requires identical output.
-    - The decoder's assembly is excluded. Its `noasm` build tag is global: `klauspost/reedsolomon` and
+    - The decoder's assembly is excluded, and the flag does not ship until it can be. Its `noasm` build
+      tag is global: `klauspost/reedsolomon` and
       `klauspost/compress` also honour it. M1 measures the whole release built with `-tags noasm` and
       accepts it only if Reed-Solomon and zstd each stay above about 50 MB/s per core; otherwise the
       fast path needs a package-specific tag upstream. This concerns the fast path and those
@@ -494,8 +495,17 @@ Costs a user should expect:
   the resident memory (spike S1). A 1 GiB reservation raised the worst-case process memory from 920 MB
   to 1,434 MB, so the limit stays at 512 MiB.
 - **Sandbox.** When decoding, the module sees only the input file, read-only, where the runtime allows
-  that, and otherwise the file's directory read-only. When encoding it sees one output directory. It
-  has no network and a memory ceiling.
+  that, and otherwise the file's directory read-only. When encoding it sees one output directory. The
+  instance that copies an HEVC stream out of its container for the fast path sees the input the same
+  way, read-only, and one temporary directory, writable; nothing else. It has no network and a memory
+  ceiling.
+- **Watchdog.** qrvt creates the wazero runtime and passes it to go-ffmpreg, with
+  `RuntimeConfig.WithCloseOnContextDone(true)`: without it, cancelling a context cannot interrupt
+  running Wasm. An instance that makes no progress for 30 s (no output frame when decoding; no output
+  or input consumed when probing or copying) is cancelled and the decode stops with an error naming
+  the limit (SECURITY.md section 5, `EngineStallTimeout`). The option adds periodic checks to the
+  compiled code, so M1 stream D re-runs the S1 decode and encode figures with it on and records both;
+  a cost above about 10% goes to the owner. The implementation and its test are M1 stream D work.
 
 Rejected as a foundation: the pure-Go H.264 stack (`oops1/go.264`, `go-avkit/*`). An independent check
 found it is one author's 2.5-month-old project that links glibc on Linux through purego and silently
@@ -935,3 +945,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 spikes S1 and S3: section 3 records the wazero against wasmtime outcome (1.22-1.30x, continue in Go) and that HEVC is decoded outside the sandbox; section 4 (F3) says which x264 settings give 8.4 bits per cell; section 5 records the HDR output measurements (libaom AV1 10-bit unusable, H.264 High 10 the candidate, choice in M6); section 8 records the LDPC decoder as built and its measured speed (threshold not met), forbids Go experiments and amd64-only packages in release builds, and sizes the default worker count on the worst measured engine memory; section 12 gives the tuned x264 settings, even-length encode runs, the pure-Go HEVC path with its recover boundary, limits, engine fallback and the `noasm` tag problem, lazy module loading, and reserved linear memory |
 | 2026-11-13 | M0 review: section 12 runs the HEVC decoder with `Threads(1)` inside per-slice recover boundaries, checks parameter sets before decoding (4:2:0, 8 or 10 bits, at most 7680 x 4320, a buffer of at most 6 pictures, justified from HEVC Annex A.4.2), states the 10 s limit abandons rather than stops a decode, and plans the M1 measurement for the `noasm` tag; the engine reservation is 512 MiB and equals its ceiling; section 8 sizes workers on the larger worst case, 920 MB |
 | 2026-11-13 | M0 review round 2 and the owner's decision for version 1: every codec, HEVC included, is decoded by the sandboxed engine; the pure-Go `gen2brain/h265` is only an opt-in HEVC fast path, because it allocates a full picture for every missing reference a slice names (about 6.5 GB at 8K), so the 720 MB bound is withdrawn. Section 3 records this; section 8 does not count the fast path; section 11 gives the default decode time (about 2.8-3.6 times the duration for 4K60 on 8 cores, 25-40% slower per core than the fast path) and the two speed-ups; section 12 gives the engine's 4K HEVC figures, keeps skipping the loop filter off, and lists the fast path's protections (exactly `Threads(1)`, the per-sub-layer `sps_max_dec_pic_buffering_minus1 + 1 <= 6` check, `-c copy` before decoding, a stop at the first abandoned decode) as reducing risk, not bounding it; section 13 adds the fast-path flag |
+| 2026-11-13 | M0 review round 3: section 12 requires `WithCloseOnContextDone(true)` on the runtime qrvt creates, adds the 30 s no-progress watchdog with the M1 stream D cost measurement, gives the stream-copy instance's mounts, and states that the HEVC fast-path flag does not ship until the decoder's assembly can be excluded |
