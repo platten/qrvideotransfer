@@ -1,0 +1,170 @@
+# GoReleaser v2.20.2 configuration (DESIGN.md section 17). Pinned in tools/dev; run locally with
+# `go run ./tools/dev release-snapshot`, which also checks that every target and package format was
+# produced. The release workflow (.github/workflows/release.yml) runs it on `v*` tags only.
+#
+# Every step that needs a secret is skipped when the secret is absent, so a release without them still
+# produces the archives, packages, checksums, SBOMs, signature and provenance.
+version: 2
+
+project_name: qrvt
+
+env:
+  # RELEASE_TAGS is the one place where the release build's Go build tags are defined (none by
+  # default; for example `noasm`). tools/dev build reads this line too, so local and release builds
+  # agree. A comma-separated list.
+  - RELEASE_TAGS=
+
+before:
+  hooks:
+    - go mod verify
+
+builds:
+  - id: qrvt
+    main: ./cmd/qrvt
+    binary: qrvt
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+      - -tags={{ .Env.RELEASE_TAGS }}
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      post:
+        # Authenticode-signs Windows binaries when the certificate is configured; otherwise a no-op.
+        - cmd: >-
+            {{ if and (eq .Os "windows") (isEnvSet "WINDOWS_SIGN_PFX_BASE64") }}go run ./tools/dev sign-windows {{ .Path }}{{ else }}go version{{ end }}
+          output: true
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# One SPDX SBOM per archive, made by syft (pinned in tools/dev).
+sboms:
+  - artifacts: archive
+
+# Keyless cosign signature of the checksum file, using the workflow's OIDC identity. Skipped in
+# snapshots (`--skip=sign`), because there is no identity to sign with.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --bundle=${signature}
+      - ${artifact}
+      - --yes
+    output: true
+
+# macOS signing and notarisation (free edition, through quill). Enabled only when the certificate
+# is configured.
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      sign:
+        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+        key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        wait: true
+        timeout: 20m
+
+nfpms:
+  - id: packages
+    package_name: qrvt
+    file_name_template: "{{ .ConventionalFileName }}"
+    formats: [deb, rpm, apk]
+    vendor: qrvt
+    homepage: https://github.com/platten/qrvideotransfer
+    maintainer: qrvt maintainers <https://github.com/platten/qrvideotransfer>
+    description: Transfers files through a looping on-screen video filmed with a phone.
+    license: GPL-3.0-or-later
+    section: utils
+    bindir: /usr/bin
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/qrvt/LICENSE
+      - src: NOTICE
+        dst: /usr/share/doc/qrvt/NOTICE
+      - src: README.md
+        dst: /usr/share/doc/qrvt/README.md
+
+homebrew_casks:
+  - name: qrvt
+    repository:
+      owner: platten
+      name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+    directory: Casks
+    homepage: https://github.com/platten/qrvideotransfer
+    description: Transfers files through a looping on-screen video filmed with a phone
+    license: GPL-3.0-or-later
+    binaries: [qrvt]
+    skip_upload: '{{ if isEnvSet "HOMEBREW_TAP_TOKEN" }}false{{ else }}true{{ end }}'
+
+scoops:
+  - name: qrvt
+    repository:
+      owner: platten
+      name: scoop-bucket
+      token: '{{ envOrDefault "SCOOP_BUCKET_TOKEN" "" }}'
+    directory: bucket
+    homepage: https://github.com/platten/qrvideotransfer
+    description: Transfers files through a looping on-screen video filmed with a phone.
+    license: GPL-3.0-or-later
+    skip_upload: '{{ if isEnvSet "SCOOP_BUCKET_TOKEN" }}false{{ else }}true{{ end }}'
+
+winget:
+  - name: qrvt
+    publisher: platten
+    package_identifier: platten.qrvt
+    short_description: Transfers files through a looping on-screen video filmed with a phone.
+    license: GPL-3.0-or-later
+    license_url: https://github.com/platten/qrvideotransfer/blob/main/LICENSE
+    homepage: https://github.com/platten/qrvideotransfer
+    publisher_url: https://github.com/platten
+    tags: [file-transfer, qr-code, video, air-gap]
+    repository:
+      owner: platten
+      name: winget-pkgs
+      branch: "qrvt-{{ .Version }}"
+      token: '{{ envOrDefault "WINGET_TOKEN" "" }}'
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+    skip_upload: '{{ if isEnvSet "WINGET_TOKEN" }}false{{ else }}true{{ end }}'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+changelog:
+  # release-please writes the changelog and the release notes; GoReleaser only adds the files.
+  disable: true
+
+release:
+  github:
+    owner: platten
+    name: qrvideotransfer
+  mode: keep-existing
+  prerelease: auto
