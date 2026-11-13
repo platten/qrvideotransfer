@@ -121,7 +121,7 @@ func TestFetchVerified(t *testing.T) {
 }
 
 func TestInstallDownloaded(t *testing.T) {
-	data := archiveOf(t, false, "fake-tool")
+	data := archiveOf(t, false, exe("fake-tool"))
 	h := sha256.Sum256(data)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(data) }))
 	defer srv.Close()
