@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"math"
 	"time"
 
 	qrvt "github.com/platten/qrvideotransfer"
@@ -10,8 +13,8 @@ import (
 // jsonOut prints one JSON object per line to Out, following events.schema.json: a start line,
 // every event, then a summary or an error line.
 type jsonOut struct {
-	enc *json.Encoder
-	err error
+	out io.Writer
+	err error // first write error
 }
 
 type jsonField struct {
@@ -71,8 +74,7 @@ type jsonError struct {
 }
 
 func newJSON(o Options, info Info) *jsonOut {
-	j := &jsonOut{enc: json.NewEncoder(o.Out)}
-	j.enc.SetEscapeHTML(false)
+	j := &jsonOut{out: o.Out}
 	start := jsonStart{Type: "start", Command: Clean(info.Command), Sources: cleanAll(info.Sources), Output: Clean(info.Output), Video: jsonFields(info.Video)}
 	for _, s := range info.Stages {
 		start.Stages = append(start.Stages, StageName(s))
@@ -81,11 +83,37 @@ func newJSON(o Options, info Info) *jsonOut {
 	return j
 }
 
-// write encodes one line, keeping the first error.
+// write encodes one line, keeping the first write error. Values are clamped to the schema before,
+// so encoding cannot fail; if it did, the line would be dropped rather than fail the job.
 func (j *jsonOut) write(v any) {
-	if err := j.enc.Encode(v); err != nil && j.err == nil {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if enc.Encode(v) != nil {
+		return
+	}
+	if _, err := j.out.Write(b.Bytes()); err != nil && j.err == nil {
 		j.err = err
 	}
+}
+
+// WriteJSONFailure prints a failure as the single error line of the --json output, for failures
+// that happen before a job starts, such as usage errors.
+func WriteJSONFailure(w io.Writer, f Failure) error {
+	j := &jsonOut{out: w}
+	j.write(jsonError{Type: "error", Message: Clean(f.Message), Guidance: Clean(f.Guidance), Exit: f.Exit})
+	return j.err
+}
+
+// count clamps a count to the schema's minimum of 0.
+func count[T int | int64](n T) T { return max(n, 0) }
+
+// fraction clamps a fraction to [0, 1]; NaN becomes 0.
+func fraction(x float64) float64 {
+	if math.IsNaN(x) {
+		return 0
+	}
+	return min(max(x, 0), 1)
 }
 
 func jsonFields(fs []Field) []jsonField {
@@ -103,9 +131,10 @@ func jsonWarn(w qrvt.Warning) jsonWarning {
 // Event implements Renderer.
 func (j *jsonOut) Event(e qrvt.Event) {
 	je := jsonEvent{Type: "event", Time: e.Time.UTC().Format(time.RFC3339Nano), Stage: StageName(e.Stage), Kind: KindName(e.Kind),
-		Done: e.Done, Total: e.Total, Unit: UnitName(e.Unit)}
+		Done: count(e.Done), Total: count(e.Total), Unit: UnitName(e.Unit)}
 	if s := e.Stats; s != nil {
-		je.Stats = &jsonStats{s.Captures, s.FramesSeen, s.FramesTotal, s.CleanFraction, s.RawBitErrors, s.CodewordsOK, s.BlocksReady, s.BlocksTotal}
+		je.Stats = &jsonStats{count(s.Captures), count(s.FramesSeen), count(s.FramesTotal), fraction(s.CleanFraction),
+			fraction(s.RawBitErrors), count(s.CodewordsOK), count(s.BlocksReady), count(s.BlocksTotal)}
 	}
 	if e.Warn != nil {
 		w := jsonWarn(*e.Warn)

@@ -95,11 +95,11 @@ func isTerminal(stream any) bool {
 // printed on env.Err, that the process should exit with; see [ExitCode]. An interrupt signal
 // cancels the running command.
 func Execute(ctx context.Context, env *Env, args []string) error {
-	root := newRoot(env)
+	a, root := newApp(env)
 	root.SetArgs(args)
 	root.SetIn(env.In)
 	root.SetOut(env.Out)
 	root.SetErr(env.Err)
 	return fang.Execute(ctx, root, fang.WithVersion(env.Version), fang.WithoutManpage(),
-		fang.WithErrorHandler(handleError), fang.WithNotifySignal(os.Interrupt))
+		fang.WithErrorHandler(a.errorHandler(args)), fang.WithNotifySignal(os.Interrupt))
 }

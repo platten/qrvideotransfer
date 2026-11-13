@@ -9,8 +9,9 @@ import (
 
 // Clean returns s without control characters, for printing a string that may come from the input
 // (SECURITY.md T6): escape sequences (7-bit, 8-bit and UTF-8 encoded C1), other C0 and C1 controls,
-// DEL, bidirectional controls and line or paragraph separators. Tabs and line breaks become spaces;
-// invalid UTF-8 becomes U+FFFD.
+// DEL, bidirectional controls, every other format character (Unicode category Cf: zero-width
+// characters, BOM, soft hyphen, tag characters) and line or paragraph separators. Tabs and line
+// breaks become spaces; invalid UTF-8 becomes U+FFFD.
 func Clean(s string) string {
 	// Invalid bytes, including raw 8-bit C1 introducers, become U+FFFD. UTF-8 encoded C1 controls
 	// are rewritten as their 7-bit equivalents (U+009B becomes ESC [) so that the escape parser
@@ -27,7 +28,7 @@ func Clean(s string) string {
 		switch {
 		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f' || r == '\u2028' || r == '\u2029':
 			return ' '
-		case unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r):
+		case unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) || unicode.Is(unicode.Cf, r):
 			return -1
 		}
 		return r

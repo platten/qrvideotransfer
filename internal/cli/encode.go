@@ -34,7 +34,7 @@ func (a *app) encodeCmd() *cobra.Command {
 	}
 	fs := cmd.Flags()
 	fs.StringVarP(&f.output, "output", "o", "", "The video to write (required).\nExample: -o transfer.mp4")
-	fs.StringVar(&f.resolution, "resolution", "1080p", "Video size: a preset (480p, 720p, 1080p, 1440p, 4k) or WxH. "+
+	fs.StringVar(&f.resolution, "resolution", "1080p", "Video size: a preset (480p, 720p, 1080p, 1440p, 4k or its other name 2160p) or WxH. "+
 		"The height must be at least 480 and the grid at most 2047 cells each way.\nExample: --resolution 1440p or --resolution 2560x1600")
 	fs.IntVar(&f.fps, "fps", 12, "Display frame rate, 1 to 240. Your camera should record at least twice this rate.\nExample: --fps 30")
 	fs.StringVar(&f.mode, "mode", "gray4", "How cells carry bits: gray4 (four greys, 2 bits), bw (black and white, 1 bit, the most robust) "+

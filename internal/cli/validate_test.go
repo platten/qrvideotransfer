@@ -94,12 +94,16 @@ func TestFlagValidation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			fa := &fakeAPI{}
-			_, errOut, err := run(t, fa, nil, tc.args...)
+			out, errOut, err := run(t, fa, nil, tc.args...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error %v, want it to contain %q", err, tc.want)
 			}
-			if !strings.Contains(errOut, tc.want) {
-				t.Errorf("stderr %q does not show the error", errOut)
+			shown := errOut // with --json, the error is a line on stdout instead
+			if tc.args[0] == "--json" {
+				shown = out
+			}
+			if !strings.Contains(shown, tc.want) {
+				t.Errorf("output %q does not show the error", shown)
 			}
 			if code := ExitCode(err); code != 2 {
 				t.Errorf("exit code %d, want 2", code)

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/platten/qrvideotransfer/blob/main/internal/cli/ui/events.schema.json",
   "title": "qrvt --json output",
-  "description": "Each line qrvt prints with --json is one object of this schema: a start line, any number of event lines, then one summary or error line. Every string is stripped of control characters. Fields may be added in later versions; consumers should ignore what they do not know.",
+  "description": "Each line qrvt prints with --json is one object of this schema: a start line, any number of event lines, then one summary or error line; a failure before the job starts, such as a usage error, is a single error line. Nothing is written on standard error. Every string is stripped of control characters. Fields may be added in later versions; consumers should ignore what they do not know.",
   "oneOf": [
     { "$ref": "#/$defs/start" },
     { "$ref": "#/$defs/event" },

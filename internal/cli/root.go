@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"charm.land/fang/v2"
 	qrvt "github.com/platten/qrvideotransfer"
@@ -18,10 +19,18 @@ import (
 type app struct {
 	env                         *Env
 	json, plain, quiet, verbose bool
+	warnings                    []qrvt.Warning // found while reading the flags, shown by the renderer
+	reported                    bool           // the JSON renderer has printed the error line
 }
 
 // newRoot builds the command tree.
 func newRoot(env *Env) *cobra.Command {
+	_, root := newApp(env)
+	return root
+}
+
+// newApp builds the command tree and the state its commands share.
+func newApp(env *Env) (*app, *cobra.Command) {
 	a := &app{env: env}
 	root := &cobra.Command{
 		Use:   "qrvt",
@@ -47,7 +56,7 @@ func newRoot(env *Env) *cobra.Command {
 	pf.BoolVarP(&a.verbose, "verbose", "v", false, "Print more: progress in 5% steps and decoding statistics, and every warning on the dashboard.\nExample: -v")
 	root.AddCommand(a.encodeCmd(), a.decodeCmd(), a.calibrateCmd(), a.inspectCmd(), a.keygenCmd(),
 		a.profilesCmd(), a.versionCmd(), a.manCmd(), a.demoCmd())
-	return root
+	return a, root
 }
 
 // helpOrUnknown is the action of a command that only groups others: it shows help, or refuses an
@@ -138,6 +147,9 @@ func (a *app) run(cmd *cobra.Command, info ui.Info, d *qrvt.DecodeOptions, do jo
 		keys = a.env.In
 	}
 	r := ui.New(ui.Options{Mode: a.mode(), Verbose: a.verbose, Out: a.env.Out, Err: a.env.Err, In: keys, Cancel: cancel}, info)
+	for _, w := range a.warnings {
+		r.Event(qrvt.Event{Time: time.Now(), Kind: qrvt.KindWarning, Warn: &w})
+	}
 	var last *qrvt.Stats
 	sum, err := do(ctx, r, func(e qrvt.Event) {
 		if e.Stats != nil {
@@ -149,13 +161,50 @@ func (a *app) run(cmd *cobra.Command, info ui.Info, d *qrvt.DecodeOptions, do jo
 	err = guide(err, last, d)
 	var f *ui.Failure
 	if err != nil {
-		msg, g := splitGuidance(err)
-		sum, f = nil, &ui.Failure{Message: msg, Guidance: g, Exit: ExitCode(err)}
+		sum, f = nil, failure(err)
+		a.reported = a.json
 	}
 	if ferr := r.Finish(sum, f); err == nil {
 		err = ferr
 	}
 	return err
+}
+
+// failure describes an error for a renderer.
+func failure(err error) *ui.Failure {
+	msg, g := splitGuidance(err)
+	return &ui.Failure{Message: msg, Guidance: g, Exit: ExitCode(err)}
+}
+
+// jsonRequested reports whether the command line asks for --json, for errors met before or while
+// the flags are parsed.
+func (a *app) jsonRequested(args []string) bool {
+	if a.json {
+		return true
+	}
+	for _, s := range args {
+		if s == "--" {
+			break
+		}
+		if v, ok := strings.CutPrefix(s, "--json"); ok && (v == "" || v == "=true" || v == "=1") {
+			return true
+		}
+	}
+	return false
+}
+
+// errorHandler prints an error: in JSON mode as the single error line on stdout (unless the job's
+// renderer printed it already) and nothing on stderr; otherwise as text on stderr.
+func (a *app) errorHandler(args []string) fang.ErrorHandler {
+	return func(w io.Writer, s fang.Styles, err error) {
+		if !a.jsonRequested(args) {
+			handleError(w, s, err)
+			return
+		}
+		if !a.reported {
+			_ = ui.WriteJSONFailure(a.env.Out, *failure(err))
+		}
+	}
 }
 
 // splitGuidance separates an error's message from its guidance.

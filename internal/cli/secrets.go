@@ -1,18 +1,22 @@
 package cli
 
 import (
-	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
+	qrvt "github.com/platten/qrvideotransfer"
 	"github.com/platten/qrvideotransfer/internal/cli/ui"
 )
 
@@ -23,18 +27,33 @@ const (
 	maxSecretFile = 4096 // bytes read from a key or passphrase file
 )
 
-// readPassphraseFile returns the first line of a passphrase file, without its line ending.
+// hidden is said instead of echoing a value that names no file: it may be a mistyped secret.
+const hidden = "(the value is not shown, in case it is a secret)"
+
+// readPassphraseFile returns the first line of a passphrase file, without its line ending or a
+// leading byte order mark. The line must be shorter than maxSecretFile bytes and hold no control
+// characters.
 func readPassphraseFile(path string) (string, error) {
 	f, err := os.Open(path) //nolint:gosec // the user names the file
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", usagef("--passphrase-file: no such file %s", hidden)
+	}
 	if err != nil {
 		return "", usagef("--passphrase-file %s: %v", path, pathError(err))
 	}
 	defer func() { _ = f.Close() }()
-	line, err := bufio.NewReader(io.LimitReader(f, maxSecretFile)).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return "", usagef("--passphrase-file %s: %v", path, err)
+	b, err := io.ReadAll(io.LimitReader(f, maxSecretFile+1))
+	if err != nil {
+		return "", usagef("--passphrase-file %s: %v", path, pathError(err))
 	}
-	line = strings.TrimRight(line, "\r\n")
+	first, _, _ := bytes.Cut(b, []byte("\n"))
+	if len(first) >= maxSecretFile {
+		return "", usagef("--passphrase-file %s: the first line is longer than %d bytes", path, maxSecretFile-1)
+	}
+	line := strings.TrimPrefix(strings.TrimSuffix(string(first), "\r"), "\ufeff")
+	if !utf8.ValidString(line) || strings.IndexFunc(line, unicode.IsControl) >= 0 {
+		return "", usagef("--passphrase-file %s: the first line holds control characters or is not UTF-8 text", path)
+	}
 	if line == "" {
 		return "", usagef("--passphrase-file %s: the first line is empty", path)
 	}
@@ -122,41 +141,60 @@ func keyBytes(line, prefix string) ([]byte, bool) {
 	return b, err == nil && len(b) == 32
 }
 
-// readSignKey reads --sign-key and warns when the file is readable by others (SECURITY.md T10).
+// readSignKey reads --sign-key and returns its key line, trimmed. It warns, through the renderer,
+// when the file is readable by others (SECURITY.md T10).
 func (a *app) readSignKey(path string) ([]byte, error) {
 	b, st, err := readKeyFile("--sign-key", path)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := keyBytes(string(b), privatePrefix); !ok {
+	line := strings.TrimSpace(string(b))
+	if _, ok := keyBytes(line, privatePrefix); !ok {
 		return nil, usagef("--sign-key %s: not a qrvt private key", path)
 	}
 	if runtime.GOOS != "windows" && st.Mode().Perm()&0o077 != 0 {
-		_, _ = fmt.Fprintf(a.env.Err, "warning: the private key %s is readable by others; make it owner-only (chmod 600 %s)\n",
-			ui.Clean(path), ui.Clean(path))
+		a.warnings = append(a.warnings, qrvt.Warning{Code: warnReadableKey,
+			Text: fmt.Sprintf("The private key %s is readable by others; make it owner-only (chmod 600 %s).", path, path)})
 	}
-	return b, nil
+	return []byte(line), nil
 }
 
-// readVerifyKey reads a --verify-key value: a key line, or the path of a public key file.
+// warnReadableKey is the code of the warning for a private key file readable by others.
+const warnReadableKey qrvt.WarningCode = "ReadableKey"
+
+// readVerifyKey reads a --verify-key value, a key line or the path of a public key file, and
+// returns the key line, trimmed. A value that names no file is not echoed.
 func readVerifyKey(v string) ([]byte, error) {
-	if strings.HasPrefix(v, publicPrefix) {
-		if _, ok := keyBytes(v, publicPrefix); !ok {
-			return nil, usagef("--verify-key %q: not a qrvt public key", v)
+	const private = "this is a private key; give the public key"
+	t := strings.TrimSpace(v)
+	switch {
+	case strings.HasPrefix(t, privatePrefix):
+		return nil, usagef("--verify-key: %s", private)
+	case strings.HasPrefix(t, publicPrefix):
+		if _, ok := keyBytes(t, publicPrefix); !ok {
+			return nil, usagef("--verify-key: not a valid qrvt public key %s", hidden)
 		}
-		return []byte(v), nil
+		return []byte(t), nil
+	}
+	if _, err := os.Stat(v); errors.Is(err, fs.ErrNotExist) {
+		return nil, usagef("--verify-key: no such file, and not a qrvt public key %s", hidden)
 	}
 	b, _, err := readKeyFile("--verify-key", v)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := keyBytes(string(b), publicPrefix); !ok {
+	line := strings.TrimSpace(string(b))
+	if strings.HasPrefix(line, privatePrefix) {
+		return nil, usagef("--verify-key %s: %s", v, private)
+	}
+	if _, ok := keyBytes(line, publicPrefix); !ok {
 		return nil, usagef("--verify-key %s: not a qrvt public key", v)
 	}
-	return b, nil
+	return []byte(line), nil
 }
 
-// fingerprint is the first 16 hexadecimal digits of the SHA-256 of a 32-byte public key.
+// fingerprint is the first 16 hexadecimal digits of the SHA-256 of a raw 32-byte public key, as
+// DecodeReport.SignerKey holds it.
 func fingerprint(key []byte) string {
 	sum := sha256.Sum256(key)
 	return hex.EncodeToString(sum[:8])

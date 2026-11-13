@@ -568,7 +568,8 @@ qrvt profiles | version | completion | man
   terminal it prints plain lines; `--json` prints one JSON event per line. Plain progress lines and
   warnings go to standard error and the summary to standard output; `--json` writes only to standard
   output, a start line, every event, then a summary or an error line, following the committed schema
-  `internal/cli/ui/events.schema.json`. A hidden `qrvt demo` command plays a recorded decode through
+  `internal/cli/ui/events.schema.json`, with nothing on standard error; a failure before the job
+  starts, such as a usage error, is a single error line, and warnings are events. A hidden `qrvt demo` command plays a recorded decode through
   any of the three, for trying the display without a recording.
 - **Output folder and inputs.** `-o` is required by every command that writes. Inputs, recordings, key
   files and `--ffmpeg` paths are checked before any work starts; every bad flag is a usage error naming
@@ -965,3 +966,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc`; section 14's `DecodeOptions` (and the root package's `AnalyzeOptions` and `InspectOptions`) gain `UnsandboxedHEVC` |
 | 2026-11-13 | M1 stream F: section 13 resolves what the command line left open: the `--resolution` presets (with `2160p` as another name for `4k`) and its use by `calibrate make` for the monitor resolution; ranges for `--fps` (1-240) and `--jobs` (0-1024, 0 the CPU count); `--hdr` replaces `--mode`; `--passphrase-file` reads the first line and needs `--encrypt` on encode; `--verify-key` takes a key file or a key line; the `--max-size` units; which output flags exclude each other; where plain, summary and JSON output go and the JSON schema; the hidden `demo` command; required `-o`; and the exit codes |
+| 2026-11-13 | M1 stream F, PR #11 review: section 13 says that with `--json` nothing goes to standard error, that a failure before the job starts is a single error line, and that warnings are events |
