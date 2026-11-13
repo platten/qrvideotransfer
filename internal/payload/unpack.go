@@ -439,3 +439,10 @@ func (x *extractor) close() {
 	}
 	_ = x.root.Close()
 }
+
+// Test hooks: testHookPlace runs before each file is placed; linkFile places a staged file.
+var (
+	testHookPlace   func(root *os.Root, path string) error
+	defaultLinkFile = func(r *os.Root, oldname, newname string) error { return r.Link(oldname, newname) }
+	linkFile        = defaultLinkFile
+)

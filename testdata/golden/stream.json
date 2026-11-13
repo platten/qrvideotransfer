@@ -140,6 +140,50 @@
     {
       "rule": "file under a file",
       "manifest": "{\"version\":1,\"entries\":[{\"path\":\"a\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"},{\"path\":\"a/b\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "equal after case folding (Cherokee)",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"Ꭰ\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"},{\"path\":\"ꭰ\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "less-than",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"a<b\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "greater-than",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"a>b\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "double quote",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"a\\\"b\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "vertical bar",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"a|b\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "question mark",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"a?b\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "asterisk",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"a*b\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "device name with superscript digit",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"COM¹\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "console device name",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"CONIN$.txt\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "device name with spaces before the dot",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"NUL  .txt\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+    },
+    {
+      "rule": "file under a file at depth",
+      "manifest": "{\"version\":1,\"entries\":[{\"path\":\"a\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"},{\"path\":\"a/b/c\",\"type\":\"file\",\"size\":0,\"mode\":420,\"mtime\":\"2026-11-13T10:00:00Z\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
     }
   ]
 }

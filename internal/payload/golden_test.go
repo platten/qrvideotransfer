@@ -84,6 +84,17 @@ var refusedRules = []struct{ rule, path, second string }{
 	{"path over 4096 bytes", strings.Repeat("p/", 2048) + "p", ""},
 	{"equal after case folding", "Straße", "STRASSE"},
 	{"file under a file", "a", "a/b"},
+	{"equal after case folding (Cherokee)", "Ꭰ", "ꭰ"},
+	{"less-than", "a<b", ""},
+	{"greater-than", "a>b", ""},
+	{"double quote", "a\"b", ""},
+	{"vertical bar", "a|b", ""},
+	{"question mark", "a?b", ""},
+	{"asterisk", "a*b", ""},
+	{"device name with superscript digit", "COM¹", ""},
+	{"console device name", "CONIN$.txt", ""},
+	{"device name with spaces before the dot", "NUL  .txt", ""},
+	{"file under a file at depth", "a", "a/b/c"},
 }
 
 func goldenTree() (tree, map[string]uint32) {
@@ -174,9 +185,15 @@ func TestGoldenStream(t *testing.T) {
 	}
 	for _, r := range g.Refused {
 		t.Run("refuse "+r.Rule, func(t *testing.T) {
+			// The manifest itself must be refused, not merely its missing tar entries.
+			es, err := ParseManifest([]byte(r.Manifest))
+			must(t, err)
+			if err := ValidateManifest(es, DefaultMaxSize); !isUnsafe(err) {
+				t.Fatalf("ValidateManifest(%s) = %v", r.Manifest, err)
+			}
 			a := archive(t, []byte(r.Manifest))
 			out := t.TempDir()
-			_, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out})
+			_, err = unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out})
 			if !isUnsafe(err) {
 				t.Fatalf("%s: %v", r.Manifest, err)
 			}
@@ -199,6 +216,12 @@ func writeGolden(t *testing.T, srcs []source, unsigned, signed []byte) {
 		Unsigned:    goldenStream{hex.EncodeToString(unsigned), sum(unsigned)},
 		Signed:      goldenStream{hex.EncodeToString(signed), sum(signed)},
 	}
+	// Decode vectors once written are kept: the age vector is random and must not churn.
+	if b, err := os.ReadFile(goldenFile); err == nil {
+		var old golden
+		must(t, json.Unmarshal(b, &old))
+		g.Decode = old.Decode
+	}
 	for _, d := range []struct {
 		name string
 		o    PackOptions
@@ -208,7 +231,9 @@ func writeGolden(t *testing.T, srcs []source, unsigned, signed []byte) {
 		{"xz", PackOptions{Compression: CompressXZ}, ""},
 		{"zstd, encrypted", PackOptions{Compression: CompressZstd, Passphrase: passphrase("golden", nil)}, "golden"},
 	} {
-		g.Decode = append(g.Decode, goldenDecode{d.name, d.pw, hex.EncodeToString(goldenPack(t, srcs, d.o))})
+		if len(g.Decode) < 3 {
+			g.Decode = append(g.Decode, goldenDecode{d.name, d.pw, hex.EncodeToString(goldenPack(t, srcs, d.o))})
+		}
 	}
 	for _, r := range refusedRules {
 		es := []Entry{{Path: r.path, Size: 0, Mode: 0o644, MTime: testTime, SHA256: sha256.Sum256(nil)}}
