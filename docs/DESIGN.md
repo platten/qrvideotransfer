@@ -826,13 +826,16 @@ How the parameters are read, and the values every preset shares:
 
 - *Display.* The panel has the video's size unless set otherwise; the player scales bilinearly to fit,
   with black bars. Panel drive is 8-bit; light is black + (1 - black) V^(2.4 + gamma error). The panel
-  refreshes top to bottom in 1/60 s, and a pixel's change is a linear ramp over the response time. The
-  backlight flickers at 240 Hz with the given relative amplitude. Sub-pixel stripes are off unless a
-  test turns them on. The player may hold the last frame longer at the seam; every preset sets 0.
+  refreshes in 1/60 s, top to bottom unless a scan rotation of 90, 180 or 270 degrees makes it run
+  right to left, bottom to top or left to right (0 in every preset); a pixel's change is a linear
+  ramp over the response time. Player tearing is not modelled. The backlight flickers at 240 Hz with
+  the given relative amplitude. Sub-pixel stripes are off unless a test turns them on. The player may
+  hold the last frame longer at the seam; every preset sets 0.
 - *Timing.* A drop starts with the given probability per capture and loses one capture (bursts are a
-  parameter, 1 in every preset). Row *y* of *H* is exposed from start + (y / H) readout for the
-  exposure time.
-- *Geometry.* A pinhole camera with focal length W / 1.4 pixels (about 71 degrees across) looks at
+  parameter, 1 in every preset). The readout is the time over which the rows' exposures start: row
+  *y* of *H* (centre *y* + 0.5) starts at start + ((y + 0.5) / H) readout and is exposed for the
+  exposure time. Capture-time jitter is Gaussian, clipped at 4 times its RMS.
+- *Geometry.* A pinhole camera with focal length W / 1.4 pixels (70.0 degrees across) looks at
   the screen from the distance at which the untilted screen fills the given share of the frame width.
   The screen is tilted by an angle drawn uniformly up to the maximum, about an axis in its plane at a
   uniform direction; in-plane roll and mirroring are parameters, 0 in every preset. Shake is a random
@@ -847,13 +850,18 @@ How the parameters are read, and the values every preset shares:
   place on the code, with a smooth edge out to 1.25 times its radius.
 - *Sensor.* Display white gives the exposure gain as linear signal, clipped at 1. White balance
   multiplies red by 1 + s and blue by 1 - s. The tone curve is gamma 1/2.4 into BT.709 limited range,
-  or for `iphone-hdr` the BT.2100 HLG curve into 10-bit BT.2020 limited range. Fringes are a plane
-  wave with a random period of 8 to 32 pixels and random direction. Noise is Gaussian per colour
-  channel in code values. Sharpening is an unsharp mask of brightness against a 3 x 3 binomial blur;
+  or for `iphone-hdr` the BT.2087 BT.709-to-BT.2020 primaries matrix in linear light, then the
+  BT.2100 HLG curve into 10-bit BT.2020 limited range. Fringes are a plane wave with a random period
+  of 8 to 32 pixels and random direction. Noise is Gaussian (exact, tails included) and independent
+  per colour channel. Noise sigma and fringe amplitude are in 8-bit full-range units of each R'G'B'
+  channel, added after the tone curve; in limited-range brightness codes they come to about 0.64 and
+  0.86 times the table's value (219/255 times the length of the BT.709 luma weights for independent
+  noise, 219/255 for fringes, which are equal in the three channels). For 10-bit output they scale
+  by 4. Sharpening is an unsharp mask of brightness against a 3 x 3 binomial blur;
   colour noise reduction mixes the 4:2:0 colour planes with a 5 x 5 binomial blur of themselves.
 - *Recorder stand-in.* 8 x 8 DCT blocks with a uniform step of 3 / *b* code values, where *b* is the
-  bitrate in bits per camera pixel per frame (`tripod` about 20, `budget-android` about 11, `harsh`
-  about 23). It is not calibrated against x264; it only lets unit tests exercise a lossy recorder.
+  bitrate in bits per camera pixel per frame; the step is about 20 for `tripod`, 11 for
+  `budget-android` and 23 for `harsh`. It is not calibrated against x264; it only lets unit tests exercise a lossy recorder.
 
 | Impairment | Asserted property |
 | --- | --- |
@@ -1001,3 +1009,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc`; section 14's `DecodeOptions` (and the root package's `AnalyzeOptions` and `InspectOptions`) gain `UnsandboxedHEVC` |
 | 2026-11-13 | M1 stream E: section 15 moves interference fringes from the optics stage to the sensor stage (their amplitude is in code values), completes the presets with a second table (panel black and response, capture jitter, exposure gain, colour matrix, colour noise reduction, veiling glare), and states how each parameter is read and the values every preset shares (panel scan-out, flicker frequency, field of view, shake walk, distortion convention, glare patch, recorder stand-in step) |
+| 2026-11-13 | M1 stream E review: section 15 adds the panel scan rotation (0 in every preset) and says player tearing is not modelled; noise is exact Gaussian and jitter is clipped at 4 times its RMS; HLG output applies the BT.2087 primaries matrix first; noise and fringe amplitudes are stated as per-channel full-range units (about 0.64 and 0.86 times in brightness codes); the field of view is 70.0 degrees; the readout wording and the quantiser-step figures are corrected |

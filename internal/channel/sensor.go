@@ -77,15 +77,19 @@ func (rc *recording) sensor(img *rgb, sh *shot, buf *scratch) *video.Frame {
 	wbR, wbB := float32(1+s.WhiteBalance), float32(1-s.WhiteBalance)
 	sat, sat1 := float32(s.Saturation), float32(1+s.Saturation)
 	noise := float64(s.Noise / 255)
+	nz := make([]float32, 3*w) // one row's noise, red, green and blue interleaved
 	amp := float32(s.Fringe / 255)
 	cw, ch := w/2, h/2
 	yp, blurred := buf.planes(w * h)
 	cb, cr := make([]float32, cw*ch), make([]float32, cw*ch)
-	lut := rc.tone
+	lut, hlg := rc.tone, s.HLG
 	for y := range h {
 		pr, pg, pb := img.p[0][y*w:(y+1)*w], img.p[1][y*w:(y+1)*w], img.p[2][y*w:(y+1)*w]
 		py := yp[y*w : (y+1)*w]
 		crow, rrow := cb[(y/2)*cw:(y/2+1)*cw], cr[(y/2)*cw:(y/2+1)*cw]
+		if noise != 0 {
+			fillGauss(nz, noise, &gen)
+		}
 		for x := range py {
 			r := float32(clip01(float32(pr[x]*gain)) * wbR)
 			g := clip01(float32(pg[x] * gain))
@@ -100,11 +104,15 @@ func (rc *recording) sensor(img *rgb, sh *shot, buf *scratch) *video.Frame {
 				f := rc.fringe
 				fr = float32(amp * (float32(f.sx[x]*f.cy[y]) + float32(f.cx[x]*f.sy[y])))
 			}
+			if hlg { // BT.2087: BT.709 to BT.2020 primaries in linear light
+				r, g, b = clip01(r), clip01(g), clip01(b)
+				r, g, b = float32(float32(0.6274*r)+float32(0.3293*g))+float32(0.0433*b),
+					float32(float32(0.0691*r)+float32(0.9195*g))+float32(0.0114*b),
+					float32(float32(0.0164*r)+float32(0.0880*g))+float32(0.8956*b)
+			}
 			r, g, b = tone(lut, clip01(r))+fr, tone(lut, clip01(g))+fr, tone(lut, clip01(b))+fr
 			if noise != 0 {
-				r += float32(noise * gauss(&gen))
-				g += float32(noise * gauss(&gen))
-				b += float32(noise * gauss(&gen))
+				r, g, b = r+nz[3*x], g+nz[3*x+1], b+nz[3*x+2]
 			}
 			yy := float32(float32(kr32*r)+float32(kg32*g)) + float32(kb32*b)
 			py[x] = yy
@@ -146,6 +154,24 @@ func (rc *recording) sensor(img *rgb, sh *shot, buf *scratch) *video.Frame {
 		f.Cr[i] = quantise(float32(float32(224*cr[i])+128)*scale, top)
 	}
 	return f
+}
+
+// fillGauss fills dst with normal noise of standard deviation sigma, drawing exactly what gauss
+// would, with its fast path inlined.
+func fillGauss(dst []float32, sigma float64, g *prng.SplitMix64) {
+	for i := range dst {
+		v := g.Next()
+		var x float64
+		if k, mag := v&127, v>>32&0x7fffffff; mag < zig.k[k] {
+			x = float64(float64(mag) * zig.w[k])
+			if v>>63 == 1 {
+				x = -x
+			}
+		} else {
+			x = gaussSlow(g, v)
+		}
+		dst[i] = float32(sigma * x)
+	}
 }
 
 // tone applies the tone curve to v in [0, 1] by linear interpolation in its table.

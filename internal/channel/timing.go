@@ -139,7 +139,7 @@ func schedule(p TimingParams, start time.Duration, n int, seed uint64) []shot {
 	out := make([]shot, n)
 	left := 0
 	for i := range out {
-		out[i] = shot{slot: i, start: t0 + float64(float64(i)/float64(p.FPS)) + float64(jit*gauss(&g))}
+		out[i] = shot{slot: i, start: t0 + float64(float64(i)/float64(p.FPS)) + float64(jit*clamp(gauss(&g), -4, 4))}
 		u := uniform(&g)
 		switch {
 		case left > 0:

@@ -24,11 +24,12 @@ type screen struct {
 	scale    float64 // panel pixels per video pixel
 	ox, oy   float64 // panel position of the video's top-left corner
 	sub      int     // sample columns per panel pixel: 1, or 3 with sub-pixel stripes
+	rot      int     // scan direction, degrees clockwise from top-to-bottom
 	gammaLUT [256]float32
 }
 
 func newScreen(vw, vh int, p DisplayParams) *screen {
-	s := &screen{vw: vw, vh: vh, pw: p.PanelW, ph: p.PanelH, scale: 1, sub: 1}
+	s := &screen{vw: vw, vh: vh, pw: p.PanelW, ph: p.PanelH, scale: 1, sub: 1, rot: p.ScanRotation}
 	if s.pw == 0 || s.ph == 0 {
 		s.pw, s.ph = vw, vh
 	}
@@ -43,6 +44,21 @@ func newScreen(vw, vh int, p DisplayParams) *screen {
 		s.gammaLUT[v] = float32(p.Black + float64((1-p.Black)*dpow(float64(float64(v)/255), g)))
 	}
 	return s
+}
+
+// scanned returns how far through its scan-out the panel reaches panel point (x, y): 0 where the
+// scan starts, 1 where it ends.
+func (s *screen) scanned(x, y float64) float64 {
+	switch s.rot {
+	case 90: // right to left
+		return (float64(s.pw) - x) / float64(s.pw)
+	case 180: // bottom to top
+		return (float64(s.ph) - y) / float64(s.ph)
+	case 270: // left to right
+		return x / float64(s.pw)
+	default: // top to bottom
+		return y / float64(s.ph)
+	}
 }
 
 // toPanel maps video coordinates to panel coordinates.

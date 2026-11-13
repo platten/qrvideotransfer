@@ -90,3 +90,24 @@ func TestClamp(t *testing.T) {
 		t.Error("lerp")
 	}
 }
+
+func BenchmarkGauss(b *testing.B) {
+	g := prng.SplitMix64{State: 1}
+	s := 0.0
+	for range b.N {
+		s += gauss(&g)
+	}
+	_ = s
+}
+
+// fillGauss draws exactly what gauss would.
+func TestFillGauss(t *testing.T) {
+	a, b := prng.SplitMix64{State: 3}, prng.SplitMix64{State: 3}
+	dst := make([]float32, 100000)
+	fillGauss(dst, 2, &a)
+	for i, v := range dst {
+		if want := float32(2 * gauss(&b)); v != want {
+			t.Fatalf("sample %d = %v, want %v", i, v, want)
+		}
+	}
+}

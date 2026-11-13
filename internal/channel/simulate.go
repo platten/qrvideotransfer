@@ -312,7 +312,7 @@ func (t *Truth) Mix(u, v float64) []Weight {
 	a, b := t.sh.window(&rc.cfg, y)
 	var out []Weight
 	for _, o := range rc.tl.occurrences(a, b) {
-		w := rc.tl.weight(o, a, b, py/float64(rc.scr.ph))
+		w := rc.tl.weight(o, a, b, rc.scr.scanned(px, py))
 		if w <= 0 {
 			continue
 		}

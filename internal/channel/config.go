@@ -33,7 +33,7 @@ type DisplayParams struct {
 // TimingParams describe stage 2, when the camera looks.
 type TimingParams struct {
 	FPS        int           // camera frame rate
-	Jitter     time.Duration // RMS deviation of each capture's start time
+	Jitter     time.Duration // RMS deviation of each capture's start time, clipped at 4 times it
 	Exposure   time.Duration // exposure of one row; must be positive
 	Readout    time.Duration // time from the first row's exposure start to the last row's
 	Drop       float64       // probability that a capture starts a run of dropped captures
@@ -180,31 +180,61 @@ func (c Config) Resize(w, h int) Config {
 	return c
 }
 
-// validate reports the first parameter out of range.
+// in reports whether lo <= v <= hi; it is false for NaN.
+func in(v, lo, hi float64) bool { return v >= lo && v <= hi }
+
+// validate reports the first parameter out of range. The bounds keep every stage's arithmetic
+// meaningful and its buffers bounded; they are far wider than any real camera.
 func (c *Config) validate() error {
-	g, t, s := &c.Geometry, &c.Timing, &c.Sensor
-	switch {
-	case g.Width < 2 || g.Height < 2 || g.Width%2 != 0 || g.Height%2 != 0 || g.Width > maxDimension || g.Height > maxDimension:
-		return fmt.Errorf("channel: camera size %dx%d must be even, from 2 to %d", g.Width, g.Height, maxDimension)
-	case c.Display.PanelW < 0 || c.Display.PanelH < 0 || c.Display.PanelW > maxDimension || c.Display.PanelH > maxDimension:
-		return fmt.Errorf("channel: panel size %dx%d out of range", c.Display.PanelW, c.Display.PanelH)
-	case !(g.Fill > 0 && g.Fill <= 4):
-		return fmt.Errorf("channel: screen fill %v out of range", g.Fill)
-	case !(g.Tilt >= 0 && g.Tilt <= 60):
-		return fmt.Errorf("channel: tilt %v out of range", g.Tilt)
-	case !(g.K1 >= 0 && g.K1 <= 0.2):
-		return fmt.Errorf("channel: k1 %v out of range", g.K1)
-	case t.FPS <= 0 || t.FPS > 1000:
-		return fmt.Errorf("channel: camera rate %d out of range", t.FPS)
-	case t.Exposure <= 0 || t.Readout < 0 || t.Jitter < 0 || t.SeamFreeze < 0 || c.Display.Response < 0 || c.Display.ScanOut < 0:
-		return fmt.Errorf("channel: exposure must be positive and other durations not negative")
-	case !(t.Drop >= 0 && t.Drop < 1) || t.DropBurst < 0:
-		return fmt.Errorf("channel: drop probability %v out of range", t.Drop)
-	case s.Bits != 8 && s.Bits != 10:
-		return fmt.Errorf("channel: bit depth %d is not 8 or 10", s.Bits)
-	case !(s.Gain > 0) || !(s.Noise >= 0) || !(c.Optics.Blur >= 0) || !(c.Optics.Glare >= 0 && c.Optics.Glare < 1) ||
-		!(c.Recorder.Bitrate >= 0) || !(g.Shake >= 0) || !(s.ChromaNR >= 0 && s.ChromaNR <= 1):
-		return fmt.Errorf("channel: a parameter of preset %q is out of range", c.Name)
+	d, t, g, o, s := &c.Display, &c.Timing, &c.Geometry, &c.Optics, &c.Sensor
+	sec := func(v time.Duration) float64 { return v.Seconds() }
+	frame := 0.0
+	if t.FPS > 0 {
+		frame = 1 / float64(t.FPS)
+	}
+	checks := []struct {
+		name string
+		ok   bool
+	}{
+		{"camera size (even, 2 to 16384)", g.Width >= 2 && g.Height >= 2 && g.Width%2 == 0 && g.Height%2 == 0 && g.Width <= maxDimension && g.Height <= maxDimension},
+		{"panel size", d.PanelW >= 0 && d.PanelH >= 0 && d.PanelW <= maxDimension && d.PanelH <= maxDimension},
+		{"gamma error", in(d.GammaError, -2, 2)},
+		{"panel black", in(d.Black, 0, 0.5)},
+		{"panel response", in(sec(d.Response), 0, 1)},
+		{"scan-out", in(sec(d.ScanOut), 0, 1)},
+		{"scan rotation", d.ScanRotation == 0 || d.ScanRotation == 90 || d.ScanRotation == 180 || d.ScanRotation == 270},
+		{"flicker amplitude", in(d.FlickerAmp, 0, 0.999)},
+		{"flicker frequency", in(d.FlickerHz, 0, 1e5)},
+		{"camera rate", t.FPS > 0 && t.FPS <= 1000},
+		{"jitter (up to an eighth of a frame)", in(sec(t.Jitter), 0, frame/8)},
+		{"exposure", t.Exposure > 0 && sec(t.Exposure) <= 1},
+		{"readout", in(sec(t.Readout), 0, 1)},
+		{"drop probability", in(t.Drop, 0, 0.999)},
+		{"drop burst", t.DropBurst >= 0 && t.DropBurst <= 1000},
+		{"seam freeze", in(sec(t.SeamFreeze), 0, 60)},
+		{"screen fill", g.Fill > 0 && g.Fill <= 4},
+		{"tilt", in(g.Tilt, 0, 60)},
+		{"roll", in(g.Roll, -360, 360)},
+		{"shake (up to an eighth of the width)", in(g.Shake, 0, float64(g.Width)/8)},
+		{"k1", in(g.K1, 0, 0.2)},
+		{"blur", in(o.Blur, 0, 20)},
+		{"vignetting", in(o.Vignette, 0, 1)},
+		{"veiling glare", in(o.Veil, 0, 1)},
+		{"glare patch", in(o.Glare, 0, 0.999)},
+		{"bit depth (8 or 10)", s.Bits == 8 || s.Bits == 10},
+		{"gain", s.Gain > 0 && s.Gain <= 100},
+		{"noise", in(s.Noise, 0, 64)},
+		{"white balance", in(s.WhiteBalance, -0.999, 0.999)},
+		{"saturation", in(s.Saturation, 0, 2)},
+		{"sharpening", in(s.Sharpen, 0, 4)},
+		{"colour noise reduction", in(s.ChromaNR, 0, 1)},
+		{"fringe amplitude", in(s.Fringe, 0, 64)},
+		{"recorder bitrate", in(c.Recorder.Bitrate, 0, 1e4)},
+	}
+	for _, k := range checks {
+		if !k.ok {
+			return fmt.Errorf("channel: %s out of range in configuration %q", k.name, c.Name)
+		}
 	}
 	return nil
 }

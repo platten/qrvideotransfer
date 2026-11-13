@@ -102,15 +102,79 @@ func uniform(g *prng.SplitMix64) float64 {
 	return float64(float64(g.Next()>>11) * 0x1p-53)
 }
 
-// gaussScale is the reciprocal standard deviation of a sum of four uniform 16-bit integers.
-var gaussScale = 1 / math.Sqrt(4*(65536.0*65536.0-1)/12)
+// zigR is where the ziggurat's tail begins, and zigV the area of each of its 128 layers
+// (Marsaglia and Tsang, "The Ziggurat Method for Generating Random Variables", 2000).
+const (
+	zigR = 3.442619855899
+	zigV = 9.91256303526217e-3
+	zigM = 1 << 31
+)
 
-// gauss returns an approximately standard normal value: the centred, scaled sum of the four 16-bit
-// parts of one output of g (Irwin-Hall with four terms, bounded at about 3.46).
+// zig holds the ziggurat's tables, computed with this file's deterministic functions: k bounds
+// the fast path of each layer, w scales a 31-bit integer to x, f is the density at each layer's edge.
+var zig = func() (z struct {
+	k    [128]uint64
+	w, f [128]float64
+}) {
+	half := func(x float64) float64 { return dexp(-float64(0.5 * float64(x*x))) }
+	dn, tn := zigR, zigR
+	q := zigV / half(dn)
+	z.k[0] = uint64(float64(float64(dn/q) * zigM))
+	z.w[0], z.w[127] = q/zigM, dn/zigM
+	z.f[0], z.f[127] = 1, half(dn)
+	for i := 126; i >= 1; i-- {
+		dn = math.Sqrt(-float64(2 * dlog(zigV/dn+half(dn))))
+		z.k[i+1] = uint64(float64(float64(dn/tn) * zigM))
+		tn = dn
+		z.f[i], z.w[i] = half(dn), dn/zigM
+	}
+	return z
+}()
+
+// gauss returns a standard normal value by the ziggurat method. One output of g usually
+// suffices; the rest go to gaussSlow.
 func gauss(g *prng.SplitMix64) float64 {
 	v := g.Next()
-	s := v&0xffff + v>>16&0xffff + v>>32&0xffff + v>>48
-	return float64(float64(float64(s)-131070) * gaussScale)
+	if i, mag := v&127, v>>32&0x7fffffff; mag < zig.k[i] {
+		x := float64(float64(mag) * zig.w[i])
+		if v>>63 == 1 {
+			return -x
+		}
+		return x
+	}
+	return gaussSlow(g, v)
+}
+
+// gaussSlow finishes gauss for a draw v outside its layer's rectangle: the tail beyond zigR is
+// sampled exactly, a wedge by rejection against the density, and otherwise gauss starts again.
+func gaussSlow(g *prng.SplitMix64, v uint64) float64 {
+	for {
+		i, mag := v&127, v>>32&0x7fffffff
+		sign := 1.0
+		if v>>63 == 1 {
+			sign = -1
+		}
+		x := float64(float64(mag) * zig.w[i])
+		switch {
+		case mag < zig.k[i]:
+			return sign * x
+		case i == 0:
+			for {
+				x = -dlog(uniform1(g)) / zigR
+				if y := -dlog(uniform1(g)); float64(y+y) >= float64(x*x) {
+					return sign * (zigR + x)
+				}
+			}
+		case float64(float64(uniform(g)*(zig.f[i-1]-zig.f[i])))+zig.f[i] < dexp(-float64(0.5*float64(x*x))):
+			return sign * x
+		}
+		v = g.Next()
+	}
+}
+
+// uniform1 returns a uniform value in (0, 1].
+func uniform1(g *prng.SplitMix64) float64 {
+	return float64(float64(g.Next()>>11+1) * 0x1p-53)
 }
 
 // clamp limits v to [lo, hi].

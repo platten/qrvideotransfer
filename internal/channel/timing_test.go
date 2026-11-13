@@ -131,7 +131,7 @@ func TestSchedule(t *testing.T) {
 	dropped, runs := 0, 0
 	for i, sh := range s {
 		nominal := 1 + float64(i)/30
-		if sh.slot != i || math.Abs(sh.start-nominal) > 0.0035 {
+		if sh.slot != i || math.Abs(sh.start-nominal) > 0.0040001 {
 			t.Fatalf("shot %d = %+v", i, sh)
 		}
 		if sh.dropped {

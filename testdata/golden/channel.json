@@ -1,11 +1,11 @@
 {
   "input": "4 frames of random 4-pixel cells, 64 x 36, 12 fps; preset resized to 128 x 72; start 40 ms, 8 slots, seed 1",
   "presets": {
-    "budget-android": "d8ecc791a399e4b035f59a8fb15372d02242b0e8949532db871d6ed50ff6ccc6",
-    "handheld": "54f626b151cd85acc2d1f70fdc6f0c66dfc9007f001e8c87256c62fb94835c0b",
-    "harsh": "2a8daebe9700080e73fc0e541ece5c84c26d75f051e15bd49d994e6b044e5a8e",
+    "budget-android": "f1dcc977899221f3aefa27ee95aee17efbef2f006a9b3e7186a7f523a0b51284",
+    "handheld": "dbe00fb02f11821243a443562d5f9f01f4776e60e976751dd221038eaa5b91d5",
+    "harsh": "fe66b807e8209fe21dd8944f33a421270884f25235296244dfb63661f658f6c4",
     "ideal": "a629ef46ae771115ddad63889b685e772ed0e3e220470d2d09b6114faf8a7fc3",
-    "iphone-hdr": "ff53ca0672593208b489c8edc3c4076e14bfec58de039d86281d9bbeb1c9b345",
-    "tripod": "1d8af7ffd14ff181e854c715bb5e43af8c19583cd08df7a60712875bcb3b53f7"
+    "iphone-hdr": "fc223743d7063751b7f861fac9af7155ad296ff7b497a1a0e6c80a82d716ba8f",
+    "tripod": "98ea2fb07017b96c8bbd6c9054483ddbe81cff86691827a3c0c5a82b58cfe74d"
   }
 }

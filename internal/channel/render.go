@@ -46,7 +46,7 @@ func (rc *recording) render(img *rgb, sh *shot, occs []occ, panels []*panel) {
 				img.p[0][i], img.p[1][i], img.p[2][i] = surround, surround, surround
 				continue
 			}
-			yd := py / ph
+			yd := rc.scr.scanned(px, py)
 			var r, g, bl float32
 			for k := lo; k < hi; k++ {
 				w := float32(tl.weight(occs[k], a, b, yd))
