@@ -166,6 +166,10 @@ func checkStatic(bin, goos string) error {
 	return nil
 }
 
+func goTest(tags string, args ...string) []string { return nil }
+
+func testCommand(args []string, tags string) (env, goArgs []string) { return nil, nil }
+
 func test(args []string) error {
 	fs := newFlags("test")
 	race := fs.Bool("race", false, "run with the race detector (enables cgo)")
