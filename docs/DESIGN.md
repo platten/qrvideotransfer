@@ -311,7 +311,11 @@ Each engine instance adds its linear memory, which spike S1 measured at 155 MB (
 (10-bit) when decoding 4K HEVC and 140-240 MB when encoding 4K, within a reserved limit of 512 MiB per
 instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of the 21 runs where it
 was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). The default worker count is the CPU count, reduced so that the workers, each counted at the
-worst measured engine figure, 920 MB, stay within half of the machine's physical memory. The opt-in
+worst measured engine figure, 920 MB, stay within half of the machine's physical memory, and to at
+most `video.EngineInstances()`, one fewer than GOMAXPROCS (at least one): compiled Wasm cannot be
+preempted by the Go scheduler, so engine instances on every P would starve the watchdog and
+cancellation (section 12). `internal/video` enforces that cap itself; further instances wait their
+turn. The opt-in
 HEVC fast path of section 12 is not counted: its memory is not bounded against a crafted stream, which
 is why it is opt-in and only for recordings the user made themselves.
 
@@ -542,12 +546,21 @@ Costs a user should expect:
   that exceeds it later in case the probe was lied to. Spike S1 measured at most 75.5 pixels per byte
   on its clips and the S2 pattern files. The option adds periodic checks to the
   compiled code, so M1 stream D re-runs the S1 decode and encode figures with it on and records both;
-  a cost above about 10% goes to the owner. Measured (spike S1 report, section 10): COSTLINE
-  wazero implements the option by calling a check through a trampoline at every loop back-edge,
+  a cost above about 10% goes to the owner. Measured (spike S1 report, section 10): **75-91%**, far
+  above that: decoding 1080p H.264 22.3 -> 5.6 fps, 4K HEVC 8-bit 3.08 -> 0.28 fps, 10-bit
+  3.02 -> 0.29 fps; encoding 1080p 7.7 -> 0.87 fps, 4K 2.1 -> 0.22 fps (one instance, medians of
+  three). Reported to the owner, who chose worker processes (the engine in a child process with the
+  option off, killed by the watchdog), built in a separate change; until it lands the option stays on.
+  wazero v1.12.0 implements the option by calling a check through a trampoline at every loop
+  back-edge (`internal/engine/wazevo/frontend/lower.go`, `OpcodeLoop` with `ensureTermination`),
   so the cost depends on the work: a crafted stream whose decoding is mostly picture-filling loops ran
-  13 times slower (1.1-1.3 s off, 15-17 s on). The option stays on (owner's decision); the watchdog
+  13 times slower (1.1-1.3 s off, 15-17 s on). The watchdog
   ticks once a second, and while an instance waits on qrvt (a full output pipe, an empty input pipe)
-  it is not stalled. Encoding instances count a frame taken as progress.
+  it is not stalled. Encoding instances count a frame taken as progress. Compiled Wasm cannot be
+  preempted by the Go scheduler, so instances running on every P would starve the watchdog and
+  cancellation (seen on the 4-vCPU CI runners: a 30 s stall stopped after 79 s): at most
+  GOMAXPROCS - 1 instances run at once (`video.EngineInstances()`, at least one), and an instance
+  waiting for its turn is not stalled. The worker count of section 8 should not exceed it.
 
 Rejected as a foundation: the pure-Go H.264 stack (`oops1/go.264`, `go-avkit/*`). An independent check
 found it is one author's 2.5-month-old project that links glibc on Linux through purego and silently
@@ -991,3 +1004,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 review round 3: section 12 requires `WithCloseOnContextDone(true)` on the runtime qrvt creates, adds the 30 s no-progress watchdog with the M1 stream D cost measurement, gives the stream-copy instance's mounts, and states that the HEVC fast-path flag does not ship until the decoder's assembly can be excluded |
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc`; section 14's `DecodeOptions` (and the root package's `AnalyzeOptions` and `InspectOptions`) gain `UnsandboxedHEVC` |
+| 2026-11-13 | M1 stream D: section 8 caps the worker count at `video.EngineInstances()` (GOMAXPROCS - 1), because compiled Wasm cannot be preempted and instances on every P starved the watchdog on the 4-vCPU CI runners. Section 12 records the engine as built: the embedded copy of the module and its hash check, the encoder's MP4 and even-length `.h264` runs with `Concat`, how slices are read (1 s preroll with `-noaccurate_seek`, `-copyts`, `showinfo` timestamps, `-fps_mode passthrough`, source pixel format, size changes refused), the instance cap, and the measured cost of `WithCloseOnContextDone` (75-91% on decoding, reported to the owner; kept on); the HEVC fast path is compiled only with the `unsandboxedhevc` tag, sends parameter sets that differ from the probe to the engine, takes timestamps from `framemd5`, and times each picture from its first slice. Section 13: the `--ffmpeg` row says where `ffprobe` comes from and that a path also runs outside the sandbox; the `--unsandboxed-hevc` row says the flag exists only in tagged builds |

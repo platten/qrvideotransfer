@@ -15,7 +15,7 @@ import (
 )
 
 // TestRealRecordings probes and decodes the phone recordings in $QRVT_RECORDINGS/s2 with the
-// embedded engine (all files at once, one instance each), compares the decoded frame count with the
+// embedded engine (all files at once, one instance each, so the speeds are under that load), compares the decoded frame count with the
 // probe and reports decode speed. The recordings are never committed; everything reported comes from
 // the probe, not the file names.
 //
@@ -30,6 +30,15 @@ func TestRealRecordings(t *testing.T) {
 		t.Skip("no recordings in ", filepath.Join(root, "s2"))
 	}
 	b := embedded(t)
+	// QRVT_CLOSE_ON_DONE=0 measures with close-on-cancel off (the speed the owner's worker processes
+	// are to restore); with it on, the 4K files would take hours.
+	if os.Getenv("QRVT_CLOSE_ON_DONE") == "0" {
+		e, err := newEngine(t.Context(), defaultCacheDir(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b = &Embedded{ff{r: e}}
+	}
 	r := b.r
 	rows := make([]string, len(files))
 	var wg sync.WaitGroup
