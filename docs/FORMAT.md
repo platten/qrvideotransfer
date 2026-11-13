@@ -418,7 +418,8 @@ The stream is what the outer code protects. Its length L includes every field be
 - Every directory that contains an entry is itself an entry.
 - Entries are sorted by path, compared byte by byte. A directory therefore precedes its contents.
 - Two inputs with the same base name, or any path that breaks the path rules below, stop the encode
-  with an error. Nothing is renamed silently.
+  with an error. The error lists every path that breaks a path rule, each with the rule it breaks, not
+  only the first. Nothing is renamed silently.
 - `mtime` is in whole seconds, UTC, written as RFC 3339 with a `Z` suffix.
 - The manifest is written with its keys in the order shown above and no whitespace between tokens.
 - Tar headers carry the path, size, the low 9 mode bits and the modification time. User and group ids
@@ -459,6 +460,10 @@ decompress and unpack. It must validate the entire manifest before writing any f
   `COM1`-`COM9`, `LPT1`-`LPT9`, and `COM` or `LPT` followed by `¹`, `²` or `³`), compared without regard
   to case after removing anything from the first dot and any spaces before it;
 - each component at most 255 bytes and the whole path at most 4,096 bytes;
+- at most 64 components. There are two reasons. On macOS, and partly on Windows, the time spent on
+  each path component grows with the depth of the folder, so a deep manifest within the size limits
+  could keep extraction busy for hours (SECURITY.md section 5). And a tree far deeper than
+  operating-system shells handle is a nuisance payload in itself;
 - no two entries equal after Unicode case folding: full case folding exactly as CaseFolding.txt
   statuses C and F (so `Straße` equals `STRASSE`, and the Cherokee small letters fold to the capital
   ones, U+AB70 to U+13A0), then normalisation form C;
@@ -478,7 +483,7 @@ and reviewed by hand against this document:
 | Shuffle(10, 1) and the first 4 SplitMix64 outputs for state 0 | Section 1 |
 | LDPC (`ldpc.json`, frozen in M1): for each inner code, an all-zero shard and a fixed pseudo-random shard (big-endian SplitMix64 outputs from state = inner-code id) to sent bits, packed most significant bit first with zero padding; and `H c = 0` for both | Section 8 |
 | Frame: fixed stream, session and seed to the SHA-256 of the luma plane of frames 0 and 1, for Gray2, Gray4 and RGB8 at 480p | Sections 4 to 11 |
-| Stream (`stream.json`): fixed inputs to stream bytes with compression 0, unsigned and signed with a fixed key (seed bytes 0 to 31); zstd, xz and age-encrypted streams of the same inputs that must still decode; one manifest per path rule that must be refused. The tar bytes are those Go's `archive/tar` writes for the headers section 12 lists (pax format, with a pax record only where ustar cannot hold a field, such as a long or non-ASCII path). An encoder that wants identical bytes must match that; a decoder accepts any conforming pax tar | Section 12 |
+| Stream (`stream.json`): fixed inputs to stream bytes with compression 0, unsigned and signed with a fixed key (seed bytes 0 to 31); zstd, xz and age-encrypted streams of the same inputs that must still decode; one manifest per path rule that must be refused, and manifests at the edge of a rule that must be accepted (a file of exactly 64 components). The tar bytes are those Go's `archive/tar` writes for the headers section 12 lists (pax format, with a pax record only where ustar cannot hold a field, such as a long or non-ASCII path). An encoder that wants identical bytes must match that; a decoder accepts any conforming pax tar | Section 12 |
 | Reference video: a small encoded MP4 that every later release must decode | Whole format |
 
 Worked numbers for cross-checking, at 480 x 270, Gray4, `normal`, parity 20:
@@ -530,3 +535,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-13 | M1 stream A: section 12 stream vectors frozen (`testdata/golden/stream.json`, reproduced by an independent script that recomputes the Ed25519 signature). Section 12 states: a directory's tar name ends in `/` (accepted without); decompression must yield exactly the archive length; `.` is stored under its folder's name and a root folder is refused; links and special files are skipped with a warning; the default compression rule and the zstd window, xz dictionary and scrypt work factor written; the decoder's manifest strictness (UTF-8, no repeated keys, plain integers, RFC 3339 `mtime`, lowercase `sha256`) and tar checks; case folding is full Unicode folding followed by NFC; "file under a file" applies at any depth. Section 13's stream row names the file and its contents |
 | 2026-11-13 | M1 stream A, review of PR 7: section 12 path rules also refuse `<`, `>`, `"`, `|`, `?`, `*`, `CONIN$`, `CONOUT$`, `COM` and `LPT` with a superscript digit, and device names followed by spaces. Case folding is stated as exactly CaseFolding.txt C and F (the Cherokee small letters fold to the capitals). "No entry beneath a file" becomes "every folder that contains an entry is an entry of type `dir`", which the encoder already wrote. The decoder rejects a zstd window over 8 MiB, an xz dictionary over 8 MiB or a filter other than LZMA2, and a scrypt work factor over 18, and accepts any conforming pax tar. Section 13 says where the frozen tar bytes come from; the golden file gains the new refused manifests. The frozen streams did not change |
 | 2026-11-13 | M1 stream A, review of PR 7 round 2: section 12 says an xz body is exactly one xz stream, with no stream padding, whose blocks each have the single filter LZMA2. The decoder rejects anything after that stream: a second stream, stream padding or other bytes |
+| 2026-11-13 | M1 stream A, PR 7, path depth: section 12 adds the path rule "at most 64 components", with its two reasons (time per component grows with depth on macOS and partly on Windows; a tree far deeper than shells handle is a nuisance payload), and says the encoder's refusal lists every path that breaks a rule with the rule it breaks. Section 13: `stream.json` gains a refused manifest at 65 components and a list of manifests that must be accepted, with one at exactly 64; the "path over 4096 bytes" vector now has 17 components so that it breaks only the length rule. The frozen streams did not change |
