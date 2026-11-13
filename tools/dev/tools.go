@@ -163,6 +163,10 @@ func hasVersion(t tool, p string) (bool, string) {
 	return strings.Contains(out, t.version), strings.TrimSpace(strings.SplitN(out, "\n", 2)[0])
 }
 
+func hasVersionToken(out, version string) bool { return false }
+
+func toolCandidates(name, dir string, lookPath func(string) (string, error)) []string { return nil }
+
 // find returns the path of a pinned tool at its pinned version, looking on PATH and then in GOBIN.
 func find(t tool) (string, error) {
 	var seen []string

@@ -142,3 +142,39 @@ func TestInstallDownloaded(t *testing.T) {
 		t.Fatalf("a platform without a checksum gave %v", err)
 	}
 }
+
+func TestVersionToken(t *testing.T) {
+	cases := []struct {
+		out, version string
+		want         bool
+	}{
+		{"golangci-lint has version 2.15.0 built with go1.27.4", "2.15.0", true},
+		{"GitVersion:    v2.20.2\nGitCommit: abc", "2.20.2", true},
+		{"Version:       1.55.0", "1.55.0", true},
+		{"v1.7.12\ninstalled by downloading", "1.7.12", true},
+		{"golangci-lint has version 2.15.01 built", "2.15.0", false},
+		{"version 12.15.0", "2.15.0", false},
+		{"version 2.15.0-rc.1", "2.15.0", false},
+		{"version 2.15.0.1", "2.15.0", false},
+		{"", "2.15.0", false},
+	}
+	for _, c := range cases {
+		if got := hasVersionToken(c.out, c.version); got != c.want {
+			t.Errorf("hasVersionToken(%q, %q) = %v, want %v", c.out, c.version, got, c.want)
+		}
+	}
+}
+
+func TestToolCandidatesPreferGOBIN(t *testing.T) {
+	inGOBIN := filepath.Join("/gobin", exe("x"))
+	got := toolCandidates("x", "/gobin", func(string) (string, error) { return "/path/on/PATH/x", nil })
+	if len(got) != 2 || got[0] != inGOBIN || got[1] != "/path/on/PATH/x" {
+		t.Fatalf("toolCandidates = %v, want the GOBIN copy first", got)
+	}
+	if got := toolCandidates("x", "/gobin", func(string) (string, error) { return inGOBIN, nil }); len(got) != 1 {
+		t.Fatalf("toolCandidates = %v, want no duplicate", got)
+	}
+	if got := toolCandidates("x", "/gobin", func(string) (string, error) { return "", os.ErrNotExist }); len(got) != 1 {
+		t.Fatalf("toolCandidates = %v, want only GOBIN", got)
+	}
+}
