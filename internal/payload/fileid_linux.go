@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build linux
 
 package payload
 
@@ -21,5 +21,5 @@ func statID(root *os.Root, name string) (fileID, error) {
 	if !ok {
 		return fileID{}, errors.New("payload: no file identity on this system")
 	}
-	return fileID{uint64(s.Dev), s.Ino}, nil //nolint:unconvert // Dev is int32 on darwin
+	return fileID{s.Dev, s.Ino}, nil
 }
