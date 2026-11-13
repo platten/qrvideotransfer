@@ -114,6 +114,9 @@ func defaultCacheDir() string {
 	return filepath.Join(d, "qrvt", "wazero")
 }
 
+// EngineInstances is how many engine instances may run at once.
+func EngineInstances() int { return 0 }
+
 // exec implements runner. The instance sees the input file read-only through inputFS at /in, the
 // output directory at /out, and nothing else; it has no network.
 func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
