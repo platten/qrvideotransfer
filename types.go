@@ -71,7 +71,8 @@ type DecodeOptions struct {
 	Report     string // optional path for a JSON report
 	Backend    string
 	// UnsandboxedHEVC opts in to decoding HEVC recordings in-process with the pure-Go decoder, outside
-	// the WebAssembly sandbox (flag --unsandboxed-hevc). Only for recordings the user made; see SECURITY.md.
+	// the WebAssembly sandbox (flag --unsandboxed-hevc). Only for recordings the user made: its memory is
+	// not bounded against a crafted stream (SECURITY.md).
 	UnsandboxedHEVC bool
 	Workers         int
 	Progress        func(Event)
@@ -91,7 +92,8 @@ type AnalyzeOptions struct {
 	Recordings []string
 	Backend    string
 	// UnsandboxedHEVC opts in to decoding HEVC recordings in-process with the pure-Go decoder, outside
-	// the WebAssembly sandbox (flag --unsandboxed-hevc). Only for recordings the user made; see SECURITY.md.
+	// the WebAssembly sandbox (flag --unsandboxed-hevc). Only for recordings the user made: its memory is
+	// not bounded against a crafted stream (SECURITY.md).
 	UnsandboxedHEVC bool
 	Workers         int
 	Progress        func(Event)
@@ -102,7 +104,8 @@ type InspectOptions struct {
 	Path    string // a code video or a recording of one
 	Backend string
 	// UnsandboxedHEVC opts in to decoding HEVC recordings in-process with the pure-Go decoder, outside
-	// the WebAssembly sandbox (flag --unsandboxed-hevc). Only for recordings the user made; see SECURITY.md.
+	// the WebAssembly sandbox (flag --unsandboxed-hevc). Only for recordings the user made: its memory is
+	// not bounded against a crafted stream (SECURITY.md).
 	UnsandboxedHEVC bool
 	Workers         int
 	Progress        func(Event)

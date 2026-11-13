@@ -559,7 +559,7 @@ qrvt profiles | version | completion | man
 | `--state-dir` | decode | none | Keep progress for resuming and merging |
 | `--report` | decode | none | Write a JSON report of the decode |
 | `--ffmpeg` | all | `embedded` | `embedded`, `system` or a path. `system` runs outside the sandbox: for recordings the user made themselves |
-| HEVC fast-path flag `--unsandboxed-hevc` | decode, inspect | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three |
+| HEVC fast-path flag `--unsandboxed-hevc` | decode, inspect, calibrate read | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three |
 | `--jobs` | all | CPU count | Worker count |
 | `--json`, `--plain`, `--quiet`, `--verbose` | all | | Output style |
 
