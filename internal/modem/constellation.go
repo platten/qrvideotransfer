@@ -50,14 +50,14 @@ var constellations = func() [4]*Constellation {
 		cs[3].levels = append(cs[3].levels, Sample{y, 512, 512, 10})
 	}
 	for i, c := range cs {
-		info, _ := frame.LookupModulation(uint8(i + 1)) //nolint:gosec // 1..4
+		info, _ := frame.LookupModulation(uint8(i + 1))
 		c.id, c.name, c.b = info.ID, info.Name, info.BitsPerCell
 		for l := range len(c.levels) {
-			s := uint8(l) //nolint:gosec // below 8
+			s := uint8(l)
 			if c.id == 2 || c.id == 4 {
 				s ^= s >> 1 // Gray code: level l shows l ^ (l >> 1)
 			}
-			c.toSym[l], c.toLvl[s] = s, uint8(l) //nolint:gosec // below 8
+			c.toSym[l], c.toLvl[s] = s, uint8(l)
 		}
 	}
 	return cs
@@ -154,7 +154,7 @@ func (c *Constellation) LLR(dst []int8, obs Obs, st *LocalStats, weight float32)
 			}
 		}
 	}
-	for k := range c.b {
+	for k := range dst {
 		dst[k] = clip(LLRScale * weight * (best[1][k] - best[0][k]))
 	}
 }
