@@ -50,8 +50,7 @@ func TestRepositoryReleaseTags(t *testing.T) {
 	}
 }
 
-// fakeDist builds a dist directory that satisfies checkDist; drop removes artifacts by name
-// prefix and mutate may edit the list before it is written.
+// fakeArtifact is an entry of a fake dist/artifacts.json.
 type fakeArtifact struct {
 	Name   string         `json:"name"`
 	Path   string         `json:"path"`
@@ -106,6 +105,8 @@ func writeZip(t *testing.T, path string, names []string) {
 	}
 }
 
+// fakeDist builds a dist directory that satisfies checkDist; mutate may edit the artefact list
+// before it is written.
 func fakeDist(t *testing.T, mutate func([]fakeArtifact) []fakeArtifact) string {
 	t.Helper()
 	root := t.TempDir()

@@ -1,0 +1,35 @@
+# release-please (DESIGN.md section 17): on each push to main it keeps a release pull request open
+# with the next version and CHANGELOG.md, derived from conventional commits. Merging that pull
+# request creates the `v*` tag and GitHub release, which starts release.yml.
+#
+# Disabled until the owner sets the repository variable RELEASE_PLEASE_ENABLED to `true`, so that
+# nothing is proposed or published before the first release candidate (milestone M8). The tag must
+# be created with RELEASE_PLEASE_TOKEN: a tag pushed with the default GITHUB_TOKEN does not start
+# other workflows.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    if: github.repository == 'platten/qrvideotransfer' && vars.RELEASE_PLEASE_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # release branch, tag and release
+      pull-requests: write # the release pull request
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json

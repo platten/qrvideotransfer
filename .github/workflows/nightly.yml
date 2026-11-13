@@ -1,0 +1,113 @@
+# Nightly checks (DESIGN.md section 17): long fuzzing of every Fuzz target, and placeholders for the
+# full simulator matrix (milestone M3), the 1 GB loopback with memory assertions (M6) and benchmarks
+# with regression alerts (M6). Scheduled, and startable by hand from the Actions tab.
+name: nightly
+
+on:
+  schedule:
+    - cron: "23 3 * * *" # 03:23 UTC daily
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: Fuzzing time per target (a Go duration)
+        default: 5m
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.27.4"
+
+jobs:
+  fuzz:
+    name: fuzz (long)
+    if: github.repository == 'platten/qrvideotransfer'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false # the fuzz cache below is kept separately
+
+      # The corpus that the fuzzer grows lives in GOCACHE/fuzz; keeping it between nights makes the
+      # fuzzing cumulative. The committed seeds are in each package's testdata/fuzz/.
+      - name: Locate the fuzz cache
+        id: gocache
+        run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.gocache.outputs.dir }}
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+
+      - name: Fuzz every target
+        timeout-minutes: 280
+        shell: bash
+        run: scripts/test.sh fuzz -time "$FUZZTIME"
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '5m' }}
+
+      # A failing input is written to testdata/fuzz/<target>/ of its package: commit it as a
+      # regression seed together with the fix.
+      - name: Keep failing inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-failures
+          path: "**/testdata/fuzz/**"
+          if-no-files-found: ignore
+          retention-days: 90
+
+  # PLACEHOLDERS. Each job runs its tools/dev task once that task exists and otherwise skips
+  # with a notice: simulator-matrix (milestone M3), loopback-1gb and bench (M6). The milestone that
+  # adds the task fills in its flags and thresholds here.
+  placeholder:
+    name: "placeholder (${{ matrix.milestone }}): ${{ matrix.what }}"
+    if: github.repository == 'platten/qrvideotransfer'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - task: simulator-matrix
+            milestone: M3
+            what: full simulator matrix
+          - task: loopback-1gb
+            milestone: M6
+            what: 1 GB loopback with memory assertions
+          - task: bench
+            milestone: M6
+            what: benchmarks with regression alerts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run the task, or skip until it exists
+        timeout-minutes: 230
+        shell: bash
+        run: |
+          if ! go run ./tools/dev "$TASK" -h >/dev/null 2>&1; then
+            echo "::notice title=placeholder::$WHAT arrives in milestone $MILESTONE; skipped"
+            exit 0
+          fi
+          go run ./tools/dev "$TASK"
+        env:
+          TASK: ${{ matrix.task }}
+          WHAT: ${{ matrix.what }}
+          MILESTONE: ${{ matrix.milestone }}

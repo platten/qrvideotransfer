@@ -1,5 +1,6 @@
 # Checks for every push to main and every pull request (DESIGN.md section 17). Every step calls the
-# same scripts a developer runs locally. Actions are pinned by commit; the comment gives the tag.
+# same scripts a developer runs locally. Actions are pinned by commit; the comment gives the tag
+# (enforced by `go run ./tools/dev check-workflows` and by the tools/dev tests).
 name: ci
 
 on:
@@ -31,40 +32,48 @@ jobs:
         with:
           persist-credentials: false
 
+      # Caches the module and build caches, keyed on go.sum.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      # Installs the pinned golangci-lint v2.15.0 and GoReleaser v2.20.2 into GOBIN, where the
-      # lint task finds them.
-      - name: Install pinned tools
-        run: go run ./tools/dev install-tools
+      # Downloads the pinned golangci-lint release archive and checks its SHA-256 (seconds; building
+      # it from source took minutes and once hung).
+      - name: Install pinned linter
+        timeout-minutes: 5
+        run: go run ./tools/dev install-tools -only golangci-lint
 
       - name: Lint (Unix)
         if: runner.os != 'Windows'
+        timeout-minutes: 15
         shell: bash
         run: scripts/test.sh lint
       - name: Lint (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 15
         shell: pwsh
         run: scripts/test.ps1 lint
 
       - name: Import rule (SECURITY.md section 9.6)
+        timeout-minutes: 5
         run: go test -count=1 -run "^TestImportRules" .
         env:
           CGO_ENABLED: "0"
 
       - name: Tests with coverage gate (Unix)
         if: runner.os != 'Windows'
+        timeout-minutes: 20
         shell: bash
         run: scripts/test.sh cover
       - name: Tests with coverage gate (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 20
         shell: pwsh
         run: scripts/test.ps1 cover
 
       - name: Coverage gate (go-test-coverage)
         if: matrix.os == 'ubuntu-24.04'
+        timeout-minutes: 5
         uses: vladopajic/go-test-coverage@6890500b00a7e5862e54662c04ea9fa7c799ce1e # v2.23.0
         with:
           config: ./.testcoverage.yml
@@ -72,26 +81,114 @@ jobs:
       # The race detector needs cgo and does not support windows/arm64.
       - name: Race tests (Unix)
         if: runner.os != 'Windows'
+        timeout-minutes: 20
         shell: bash
         run: scripts/test.sh -race
       - name: Race tests (Windows)
         if: matrix.os == 'windows-2025'
+        timeout-minutes: 20
         shell: pwsh
         run: scripts/test.ps1 -race
 
       - name: Static build, all six targets (Unix)
         if: runner.os != 'Windows'
+        timeout-minutes: 10
         shell: bash
         run: scripts/build.sh -all
       - name: Static build, all six targets (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 10
         shell: pwsh
         run: scripts/build.ps1 -all
 
       - name: Vulnerability scan
+        timeout-minutes: 10
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:
           go-version-input: ${{ env.GO_VERSION }}
           check-latest: false
           go-package: ./...
           repo-checkout: false # already checked out above
+
+  release-snapshot:
+    name: release snapshot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # GoReleaser reads the tags and commit history
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install GoReleaser and syft
+        timeout-minutes: 5
+        run: go run ./tools/dev install-tools -only goreleaser,syft
+
+      # Builds all six targets and every package format without publishing or signing anything,
+      # then checks that each was produced (archives with LICENSE and NOTICE, deb, rpm, apk,
+      # SBOMs, checksums, Homebrew cask, Scoop and winget manifests).
+      - name: Snapshot release
+        timeout-minutes: 20
+        run: go run ./tools/dev release-snapshot
+
+  repo-checks:
+    name: workflows and licences
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install actionlint and go-licenses
+        timeout-minutes: 5
+        run: go run ./tools/dev install-tools -only actionlint,go-licenses
+
+      # Every action pinned by a commit that its version comment's tag names, top-level
+      # permissions in every workflow, no pull_request_target; then actionlint.
+      - name: Workflow policy and actionlint
+        timeout-minutes: 5
+        run: go run ./tools/dev check-workflows -remote
+
+      - name: Licence compatibility (GPL-3.0-or-later)
+        timeout-minutes: 10
+        run: go run ./tools/dev licenses
+
+      # There is no docs build yet: the website and its tool arrive in milestone M7.
+
+  fuzz:
+    name: fuzz (short)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Each Fuzz target for 10 s, seeded from its committed corpus in testdata/fuzz/ (SECURITY.md
+      # section 9.1). The nightly workflow fuzzes for longer.
+      - name: Fuzz every target briefly
+        timeout-minutes: 25
+        shell: bash
+        run: scripts/test.sh fuzz -time 10s
+
+      - name: Keep failing inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-failures
+          path: "**/testdata/fuzz/**"
+          if-no-files-found: ignore
+          retention-days: 30

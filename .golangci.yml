@@ -23,6 +23,8 @@ linters:
         - color
         - colors
         - analyze
+        - artifact # the GitHub and GoReleaser term
+        - artifacts
     revive:
       rules:
         - name: exported
@@ -43,7 +45,7 @@ linters:
       # Developer tooling must launch other programs and read paths it is given.
       - path: tools/
         linters: [gosec]
-        text: "G204|G304|G301|G306|G302"
+        text: "G204|G304|G301|G306|G302|G703"
       # Tests use fixed-seed math/rand on purpose and read golden files by path.
       - path: _test\.go
         linters: [gosec]
