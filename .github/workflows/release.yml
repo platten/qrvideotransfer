@@ -36,6 +36,16 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      # Releases come only from commits already on main, whoever pushed the tag.
+      - name: Check that the tagged commit is on main
+        timeout-minutes: 5
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not an ancestor of origin/main; refusing to release"
+            exit 1
+          fi
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.4"
