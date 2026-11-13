@@ -156,6 +156,19 @@ func TestDashboardRenderer(t *testing.T) {
 	}
 }
 
+// TestDashboardPauseAtStart pauses before the program has finished starting; run with -race.
+func TestDashboardPauseAtStart(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	r := New(Options{Mode: Dashboard, Out: io.Discard, Err: io.Discard, In: pr}, DemoInfo())
+	if err := r.Pause(func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Finish(nil, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDashboardRendererFailure(t *testing.T) {
 	var out bytes.Buffer
 	r := New(Options{Mode: Dashboard, Out: &out, Err: io.Discard}, encodeInfo())

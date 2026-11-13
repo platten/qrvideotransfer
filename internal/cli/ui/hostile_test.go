@@ -55,7 +55,7 @@ func TestJSONStripsControls(t *testing.T) {
 		}
 		out, _ := play(t, Options{Mode: JSON}, info, events, s, f)
 		assertClean(t, "json raw", out)
-		if strings.Contains(out, `\u001b`) || strings.Contains(out, `‮`) || strings.Contains(out, `\u0000`) {
+		if strings.Contains(out, `\u001b`) || strings.Contains(out, `\u202e`) || strings.Contains(out, `\u0000`) {
 			t.Errorf("escaped control characters in JSON output:\n%s", out)
 		}
 		for _, l := range lines(t, out) {
