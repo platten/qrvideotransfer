@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -92,36 +93,117 @@ const (
 	maxDimension = 1 << 14 // largest camera or panel side accepted
 )
 
-var presets = []Config{}
-
-func ms(v float64) time.Duration {
-	var z0 time.Duration
-	return z0
+var presets = []Config{
+	{
+		Name:     "ideal",
+		Display:  DisplayParams{ScanOut: defaultScan, FlickerHz: defaultHz},
+		Timing:   TimingParams{FPS: 60, Exposure: ms(1)},
+		Geometry: GeometryParams{Width: 3840, Height: 2160, Fill: 0.90},
+		Optics:   OpticsParams{Blur: 0.5},
+		Sensor:   SensorParams{Bits: 8, Gain: 1},
+	},
+	{
+		Name:     "tripod",
+		Display:  DisplayParams{GammaError: 0.1, Black: 0.001, Response: ms(4), ScanOut: defaultScan, FlickerHz: defaultHz},
+		Timing:   TimingParams{FPS: 60, Jitter: ms(0.2), Exposure: ms(4), Readout: ms(8)},
+		Geometry: GeometryParams{Width: 3840, Height: 2160, Fill: 0.90, Tilt: 5, K1: 0.02},
+		Optics:   OpticsParams{Blur: 1.0, Vignette: 0.05},
+		Sensor:   SensorParams{Bits: 8, Gain: 0.9, Noise: 2, WhiteBalance: 0.02, Saturation: 0.1, Sharpen: 0.3, ChromaNR: 0.5},
+		Recorder: RecorderParams{Bitrate: 74},
+	},
+	{
+		Name:     "handheld",
+		Display:  DisplayParams{GammaError: 0.2, Black: 0.001, Response: ms(4), ScanOut: defaultScan, FlickerAmp: 0.02, FlickerHz: defaultHz},
+		Timing:   TimingParams{FPS: 60, Jitter: ms(0.5), Exposure: ms(8), Readout: ms(8), Drop: 0.005},
+		Geometry: GeometryParams{Width: 3840, Height: 2160, Fill: 0.80, Tilt: 15, Shake: 3, K1: 0.04},
+		Optics:   OpticsParams{Blur: 1.5, Vignette: 0.10, Veil: 0.01},
+		Sensor:   SensorParams{Bits: 8, Gain: 0.9, Noise: 4, WhiteBalance: 0.05, Saturation: 0.2, Sharpen: 0.5, ChromaNR: 0.5, Fringe: 2},
+		Recorder: RecorderParams{Bitrate: 74},
+	},
+	{
+		Name:     "budget-android",
+		Display:  DisplayParams{GammaError: 0.2, Black: 0.002, Response: ms(4), ScanOut: defaultScan, FlickerAmp: 0.02, FlickerHz: defaultHz},
+		Timing:   TimingParams{FPS: 30, Jitter: ms(0.5), Exposure: ms(16), Readout: ms(25), Drop: 0.01},
+		Geometry: GeometryParams{Width: 1920, Height: 1080, Fill: 0.80, Tilt: 15, Shake: 3, K1: 0.06},
+		Optics:   OpticsParams{Blur: 1.5, Vignette: 0.15, Veil: 0.02},
+		Sensor:   SensorParams{Bits: 8, Gain: 0.9, Noise: 6, WhiteBalance: 0.05, Saturation: 0.3, Sharpen: 0.8, ChromaNR: 1, Fringe: 2},
+		Recorder: RecorderParams{Bitrate: 17},
+	},
+	{
+		Name:     "iphone-hdr",
+		Display:  DisplayParams{GammaError: 0.2, Black: 0.001, Response: ms(4), ScanOut: defaultScan, FlickerAmp: 0.02, FlickerHz: defaultHz},
+		Timing:   TimingParams{FPS: 60, Jitter: ms(0.5), Exposure: ms(8), Readout: ms(8), Drop: 0.005},
+		Geometry: GeometryParams{Width: 3840, Height: 2160, Fill: 0.80, Tilt: 15, Shake: 3, K1: 0.04},
+		Optics:   OpticsParams{Blur: 1.5, Vignette: 0.10, Veil: 0.01},
+		Sensor:   SensorParams{Bits: 10, HLG: true, Gain: 0.265, Noise: 4, WhiteBalance: 0.05, Saturation: 0.2, Sharpen: 0.5, ChromaNR: 0.5, Fringe: 2},
+		Recorder: RecorderParams{Bitrate: 74},
+	},
+	{
+		Name:     "harsh",
+		Display:  DisplayParams{GammaError: 0.3, Black: 0.005, Response: ms(8), ScanOut: defaultScan, FlickerAmp: 0.06, FlickerHz: defaultHz},
+		Timing:   TimingParams{FPS: 30, Jitter: ms(1), Exposure: ms(16), Readout: ms(25), Drop: 0.03},
+		Geometry: GeometryParams{Width: 3840, Height: 2160, Fill: 0.70, Tilt: 25, Shake: 8, K1: 0.08},
+		Optics:   OpticsParams{Blur: 2.0, Vignette: 0.25, Veil: 0.03, Glare: 0.02},
+		Sensor:   SensorParams{Bits: 8, Gain: 0.9, Noise: 8, WhiteBalance: 0.10, Saturation: 0.3, Sharpen: 1.0, ChromaNR: 1, Fringe: 6},
+		Recorder: RecorderParams{Bitrate: 32},
+	},
 }
+
+func ms(v float64) time.Duration { return time.Duration(v * float64(time.Millisecond)) }
 
 // Presets returns the names of the presets of DESIGN.md section 15, in the table's order.
 func Presets() []string {
-	var z0 []string
-	return z0
+	names := make([]string, len(presets))
+	for i, p := range presets {
+		names[i] = p.Name
+	}
+	return names
 }
 
 // Preset returns the named preset of DESIGN.md section 15.
 func Preset(name string) (Config, error) {
-	var z0 Config
-	var z1 error
-	return z0, z1
+	for _, p := range presets {
+		if p.Name == name {
+			return p, nil
+		}
+	}
+	return Config{}, fmt.Errorf("channel: unknown preset %q", name)
 }
 
 // Resize returns c with the camera at w x h pixels and the recorder's bitrate scaled with the pixel
 // count, so the stand-in quantiser keeps its step. Quantities in camera pixels are kept, which is
 // what small, fast tests want.
 func (c Config) Resize(w, h int) Config {
-	var z0 Config
-	return z0
+	c.Recorder.Bitrate *= float64(w*h) / float64(c.Geometry.Width*c.Geometry.Height)
+	c.Geometry.Width, c.Geometry.Height = w, h
+	return c
 }
 
 // validate reports the first parameter out of range.
 func (c *Config) validate() error {
-	var z0 error
-	return z0
+	g, t, s := &c.Geometry, &c.Timing, &c.Sensor
+	switch {
+	case g.Width < 2 || g.Height < 2 || g.Width%2 != 0 || g.Height%2 != 0 || g.Width > maxDimension || g.Height > maxDimension:
+		return fmt.Errorf("channel: camera size %dx%d must be even, from 2 to %d", g.Width, g.Height, maxDimension)
+	case c.Display.PanelW < 0 || c.Display.PanelH < 0 || c.Display.PanelW > maxDimension || c.Display.PanelH > maxDimension:
+		return fmt.Errorf("channel: panel size %dx%d out of range", c.Display.PanelW, c.Display.PanelH)
+	case !(g.Fill > 0 && g.Fill <= 4):
+		return fmt.Errorf("channel: screen fill %v out of range", g.Fill)
+	case !(g.Tilt >= 0 && g.Tilt <= 60):
+		return fmt.Errorf("channel: tilt %v out of range", g.Tilt)
+	case !(g.K1 >= 0 && g.K1 <= 0.2):
+		return fmt.Errorf("channel: k1 %v out of range", g.K1)
+	case t.FPS <= 0 || t.FPS > 1000:
+		return fmt.Errorf("channel: camera rate %d out of range", t.FPS)
+	case t.Exposure <= 0 || t.Readout < 0 || t.Jitter < 0 || t.SeamFreeze < 0 || c.Display.Response < 0 || c.Display.ScanOut < 0:
+		return fmt.Errorf("channel: exposure must be positive and other durations not negative")
+	case !(t.Drop >= 0 && t.Drop < 1) || t.DropBurst < 0:
+		return fmt.Errorf("channel: drop probability %v out of range", t.Drop)
+	case s.Bits != 8 && s.Bits != 10:
+		return fmt.Errorf("channel: bit depth %d is not 8 or 10", s.Bits)
+	case !(s.Gain > 0) || !(s.Noise >= 0) || !(c.Optics.Blur >= 0) || !(c.Optics.Glare >= 0 && c.Optics.Glare < 1) ||
+		!(c.Recorder.Bitrate >= 0) || !(g.Shake >= 0) || !(s.ChromaNR >= 0 && s.ChromaNR <= 1):
+		return fmt.Errorf("channel: a parameter of preset %q is out of range", c.Name)
+	}
+	return nil
 }

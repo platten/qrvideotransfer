@@ -1,0 +1,11 @@
+{
+  "input": "4 frames of random 4-pixel cells, 64 x 36, 12 fps; preset resized to 128 x 72; start 40 ms, 8 slots, seed 1",
+  "presets": {
+    "budget-android": "d8ecc791a399e4b035f59a8fb15372d02242b0e8949532db871d6ed50ff6ccc6",
+    "handheld": "54f626b151cd85acc2d1f70fdc6f0c66dfc9007f001e8c87256c62fb94835c0b",
+    "harsh": "2a8daebe9700080e73fc0e541ece5c84c26d75f051e15bd49d994e6b044e5a8e",
+    "ideal": "a629ef46ae771115ddad63889b685e772ed0e3e220470d2d09b6114faf8a7fc3",
+    "iphone-hdr": "ff53ca0672593208b489c8edc3c4076e14bfec58de039d86281d9bbeb1c9b345",
+    "tripod": "1d8af7ffd14ff181e854c715bb5e43af8c19583cd08df7a60712875bcb3b53f7"
+  }
+}
