@@ -2,6 +2,7 @@ package payload
 
 import (
 	"cmp"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,6 +24,7 @@ import (
 // to an entry is visited once, whatever the depth: the pre-check and the commit cost one Lstat or
 // Mkdir per distinct folder, plus one placement per file, and no step repeats the walk of an ancestor.
 type extractor struct {
+	ctx       context.Context // checked before each entry; a cancelled commit is rolled back
 	root      *os.Root
 	stage     string
 	entries   []Entry
@@ -47,7 +49,7 @@ var (
 
 // newExtractor opens the output folder, checks that no entry would replace something it may not, and
 // creates the staging folder.
-func newExtractor(dir string, entries []Entry, overwrite bool) (*extractor, error) {
+func newExtractor(ctx context.Context, dir string, entries []Entry, overwrite bool) (*extractor, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
@@ -55,7 +57,7 @@ func newExtractor(dir string, entries []Entry, overwrite bool) (*extractor, erro
 	if err != nil {
 		return nil, err
 	}
-	x := &extractor{root: root, entries: entries, overwrite: overwrite, placed: map[fileID]bool{}}
+	x := &extractor{ctx: ctx, root: root, entries: entries, overwrite: overwrite, placed: map[fileID]bool{}}
 	x.order = make([]int, len(entries))
 	for i := range x.order {
 		x.order[i] = i
@@ -140,6 +142,9 @@ func (x *extractor) walk(visit visitFunc, leave func(parent *os.Root, name strin
 	}
 	prev := ""
 	for _, i := range x.order {
+		if err := x.ctx.Err(); err != nil {
+			return unwind(0, err)
+		}
 		p := x.entries[i].Path
 		c, k := commonPrefix(p, prev), 0
 		for k < len(stack) && stack[k].end <= c && stack[k].end < len(p) && p[stack[k].end] == '/' {

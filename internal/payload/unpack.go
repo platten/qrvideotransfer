@@ -176,7 +176,7 @@ func unpackArchive(ctx context.Context, r io.Reader, archiveLen int64, o UnpackO
 	if err := ValidateManifest(entries, maxSize(o)); err != nil {
 		return nil, err
 	}
-	x, err := newExtractor(o.OutputDir, entries, o.Overwrite)
+	x, err := newExtractor(ctx, o.OutputDir, entries, o.Overwrite)
 	if err != nil {
 		return nil, err
 	}

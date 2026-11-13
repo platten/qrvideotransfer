@@ -55,7 +55,8 @@ func decompressor(r io.Reader, m Method) (io.Reader, func(), error) {
 	}
 }
 
-// guarded reports the guard's error rather than the library's rendering of it.
+// guarded reports the guard's error rather than the library's rendering of it, and at the end of the
+// stream refuses anything that follows it.
 type guarded struct {
 	r io.Reader
 	g *xzGuard
@@ -63,8 +64,16 @@ type guarded struct {
 
 func (d guarded) Read(p []byte) (int, error) {
 	n, err := d.r.Read(p)
-	if err != nil && d.g.err != nil {
+	switch {
+	case err == nil:
+	case d.g.err != nil:
 		err = d.g.err
+	case errors.Is(err, io.EOF):
+		if ferr := d.g.finish(); ferr != nil {
+			err = ferr
+		}
+	default:
+		err = fmt.Errorf("%w: xz: %w", ErrFormat, err)
 	}
 	return n, err
 }

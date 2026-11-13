@@ -128,11 +128,24 @@ func TestXZGuardRefusals(t *testing.T) {
 			if !c.want(err) {
 				t.Fatalf("decode: %v", err)
 			}
-			if alloc > XZDictCap {
+			// A refusal after a valid block header comes after the decoder has allocated that
+			// block's dictionary, which is at most XZDictCap; a refusal of the first block header or
+			// the stream header comes before any dictionary.
+			bound := uint64(XZDictCap + 1<<20)
+			if headerRefusals[name] {
+				bound = XZDictCap / 2
+			}
+			if alloc > bound {
 				t.Fatalf("allocated %d MiB", alloc>>20)
 			}
 		})
 	}
+}
+
+// headerRefusals are the cases of TestXZGuardRefusals refused before the decoder sees a block header.
+var headerRefusals = map[string]bool{
+	"dictionary 4 GiB": true, "delta then LZMA2": true, "reserved flag bit": true, "reserved bit, 4 GiB": true,
+	"header checksum": true, "header padding not zero": true, "stream header checksum": true,
 }
 
 // indexRecords returns data with the record count of its index replaced by n (the index CRC is not
