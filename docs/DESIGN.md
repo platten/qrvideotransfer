@@ -593,11 +593,14 @@ Costs a user should expect:
       `golang.org/x/sys` and go-ffmpreg keep their `unsafe` and assembly whatever the tags, so the
       claim is only that those three libraries run no assembly or `unsafe` on decoded data. On the
       decode side zstd stays far above the bar (860 MB/s and more). Reed-Solomon reconstruction of a
-      full block is **marginally below the bar**: 45-49 MB/s per core when a block has lost all the M
-      data shards it can, 53-57 MB/s at a tenth of that. It is accepted on a quantified basis: at
-      45 MB/s one core reconstructs 30-50 times faster than one core decodes LDPC (10-14 Mbit/s of sent
-      bits, about 1 MB/s of shards at the `normal` rate), so Reed-Solomon stays a small part of decode
-      time. The cost is on the encode side: Reed-Solomon encoding falls from about 2 GB/s to about
+      full block with `noasm` measured **45-49 MB/s per core in the worst case** (a block that has lost
+      all the M data shards it can; 53-57 MB/s at a tenth of that), **below the stated bar of about
+      50 MB/s**. The tags are accepted anyway because Reed-Solomon is never the bottleneck: at 45 MB/s
+      one core reconstructs 30-50 times faster than one core decodes LDPC (10-14 Mbit/s of sent bits,
+      about 1 MB/s of shards at the `normal` rate), and reconstructing a 1 GB transfer (about 1.2 GB of
+      shards at 20% parity) takes about 27 s on one core, a few seconds over the workers, against the
+      hours of video decoding the same transfer needs (section 11: a 32-minute 4K60 recording decoded
+      at 2.8 to 3.6 times its duration). The cost is on the encode side: Reed-Solomon encoding falls from about 2 GB/s to about
       130 MB/s per core. `nounsafe` costs nothing measurable. Two numbers do not depend on the tags: reconstruction costs at least about 0.5-1 ms per block
       whatever its size (part of the work is a transform over the whole GF(2^16) field, so a block of
       100 shards runs at about 20 MB/s; a stream has blocks of fewer than 16,385 shards only when it is
@@ -1079,3 +1082,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream B: section 8 describes the encoder and the decoder as built (int16 bounds, pinned shortened bits, check before the first iteration), records the production decoder's speed beside the S3 decoder, and records the error-rate test: published FER 1e-2 points for the four 802.11n n = 1944 mother codes with their sources, our measured points (all within 0.2 dB), and the shortened codes' points; section 12 records the `noasm`/`nounsafe` measurement and the decision that the whole release can be built with `-tags noasm,nounsafe` |
 | 2026-11-13 | M1 stream B, review of PR #8: section 8 checks the four shipped inner codes against the binary-input AWGN capacity limit with the rate counted with the CRC (codes 1-3 within 2.5 dB; `robust` 2.60 dB away, missing that criterion by about 0.1 dB because of the frozen shortening), corrects the Es/N0 values for the CRC, and states the shard store's sparse file on Windows and its 64 GiB stream cap; section 12 limits the `noasm,nounsafe` claim to the three `klauspost` libraries and calls Reed-Solomon reconstruction marginally below the bar, accepted because it is 30-50 times faster than LDPC decoding |
 | 2026-11-13 | M1 stream B, designer's follow-up on PR #8: section 8 compares the shipped decoder with a test-only sum-product reference and min-sum variants on the four inner codes, and corrects the cause of `robust`'s capacity gap: the decoder (integer truncation about 0.3 dB, normalisation x0.75 about 0.6 dB), not the shortening; the shipped decoder is unchanged pending the designer's decision |
+| 2026-11-13 | M1 stream B, designer's note on PR #8: section 12 states that Reed-Solomon reconstruction with `noasm` measured 45-49 MB/s per core in the worst case, below the bar of about 50 MB/s, and why the tags are accepted anyway (seconds of Reed-Solomon against hours of video decoding; 30-50 times faster than one core of LDPC) |
