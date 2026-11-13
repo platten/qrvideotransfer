@@ -84,6 +84,7 @@ type UnpackResult struct {
 	Files int
 	Dirs  int
 	Bytes int64
+	Paths []string // every extracted entry, in manifest order, as the manifest names it
 }
 
 // Unpack verifies a stream, then asks for the passphrase if it is encrypted, decrypts, decompresses
