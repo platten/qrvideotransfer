@@ -33,7 +33,11 @@ func cover(args []string) error {
 	minimum := fs.Float64("min", 95, "minimum statement coverage per package, percent")
 	profile := fs.String("profile", "coverage.out", "coverage profile to write")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
-	if err := run([]string{"CGO_ENABLED=0"}, "go", "test", "-coverprofile="+*profile, "./..."); err != nil {
+	tags, err := releaseTags()
+	if err != nil {
+		return err
+	}
+	if err := run([]string{"CGO_ENABLED=0"}, "go", goTest(tags, "-coverprofile="+*profile, "./...")...); err != nil {
 		return err
 	}
 	pkgs, err := parseProfile(*profile)

@@ -273,18 +273,98 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
 | `normal` (default) | 128 bytes | 0.66 | 15% |
 | `robust` | 64 bytes | 0.34 | 50% |
 
-- Decoder: layered normalised min-sum, scaling 0.75 (computed as floor(3m/4)), 8-bit soft bits, at
-  most 25 iterations, stopping early when all checks pass, then the CRC. Block columns that are
-  entirely shortened are left out of the schedule.
+- Encoder (`internal/fec/ldpc`): systematic, through the dual-diagonal parity structure; the first
+  parity block is the sum of the per-row syndromes of the information part, each later one follows
+  from the row before.
+- Decoder: layered normalised min-sum, one layer per block row, scaling 0.75 (computed as
+  floor(3m/4)), 8-bit soft bits, int16 messages, at most 25 iterations (`ldpc.MaxIterations`). The
+  checks are tested before the first iteration (a clean codeword costs 0 iterations) and after each
+  one, stopping when all pass; then the CRC. Block columns that are entirely shortened are left out of
+  the schedule; the known-zero bits of the one partly shortened column always send the largest
+  magnitude with sign 0, so the checks can never flip them. Posteriors are clamped to +-8,191, which
+  keeps every message within int16 without saturation (|R| <= 24,573, |L - R| <= 32,764), so no input
+  can overflow; a fuzz target checks that arbitrary soft bits never panic and stop within the cap.
+  A `Code` holds its working memory and belongs to one worker.
 - Speed (spike S3, `normal` code, one core, sent bits): 7.6 Mbit/s at a fixed 10 iterations in portable
   Go, against a threshold of 20 Mbit/s, which is **not met**; 18.6 Mbit/s with the experimental
   `simd/archsimd` package; 19.4 Mbit/s with early stopping at Eb/N0 3.0 dB (0.5 dB above the
   waterfall, mean 3.5 iterations). Decoding is parallel across codewords.
+- Speed of the production decoder (M1, `BenchmarkDecode`: `normal` code, one goroutine pinned to one
+  core, early stopping, 64 noisy codewords, sent bits; median of 6 runs with range): 9.8 Mbit/s
+  (9.3-11.6) at Eb/N0 2.5 dB, mean 6.0 iterations; 14.2 Mbit/s (13.1-16.1) at 3.0 dB, 3.7 iterations;
+  22.7 Mbit/s (19.5-23.7) at 4.0 dB, 2.25 iterations. The S3 spike decoder, rebuilt from history and
+  run alternately with it on the same core, gave 8.8-10.4 and 13.8-14.1 Mbit/s at 2.5 and 3.0 dB
+  against 8.2-10.8 and 13.0-16.0 for the production decoder in the same session: the same speed within
+  the noise. Both are below S3's own figures (13.4 and 19.4) because the machine was shared with other
+  jobs during M1; the S3 verdict (threshold not met per core) stands. No SIMD path was written.
 - Release builds must not depend on a Go experiment or an amd64-only package. The portable decoder is
   the default on all six targets; a SIMD path may exist only as an optional build behind a build tag,
   tested to give output identical to the portable decoder.
 - The matrices must come from the standard, not from memory. A wrong table still gives a
-  self-consistent code, so the guard is a bit-error-rate test against published thresholds.
+  self-consistent code, so the guard is an error-rate test against published curves (`TestErrorRate`):
+  the unshortened mother code of each rate, BPSK over AWGN, soft bits 4 per unit of LLR, must reach
+  frame error rate 1e-2 within 0.5 dB of the published Eb/N0, shown with 95% confidence (at most 4
+  frame errors in 1,000 frames per rate; 20,000 frames with `QRVT_LONG_TESTS=1`). Measured
+  (`TestErrorRateCurves`, 4,000 frames per 0.1 dB step), Eb/N0 at FER 1e-2:
+
+  | Rate | Published | Source | Measured |
+  | --- | --- | --- | --- |
+  | 1/2 | 1.81 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 1.82 dB |
+  | 2/3 | 2.32 dB | [B], flooding sum-product, 20 iterations | 2.23 dB |
+  | 3/4 | 2.84 dB | [B], flooding sum-product, 20 iterations | 2.77 dB |
+  | 5/6 | 3.70 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 3.53 dB |
+
+  [A] Balatsoukas-Stimming, Giard, Burg, "Comparison of Polar Decoders with Existing Low-Density
+  Parity-Check and Turbo Decoders", arXiv:1702.04707v2, 2017, curve "IEEE 802.11n (I = 12)", BPSK,
+  Eb/N0. [B] S. Tavildar, github.com/tavildar/LDPC, `results/wifi_ldpc_qpsk.png`, curves N = 1944, one
+  bit per real dimension, Eb/N0; the only source found for rates 2/3 and 3/4, and not peer-reviewed.
+  Each published value is a log-linear interpolation between the two bracketing points of the curve.
+  Our decoder is within 0.2 dB of every reference (better than [A] and [B] where it runs more
+  iterations). A cross-check from Roth et al., IEEE ASSCC 2010, Fig. 5 (Z = 81, 10 iterations of a
+  5-bit offset min-sum) gives 2.16 dB and 3.71 dB for rates 1/2 and 5/6.
+- The shortened inner codes that ship (ids 1-4) have no published curves, so they are checked against
+  the binary-input AWGN capacity limit for their rate, counted with the CRC: R = (8S + 32) / N sent
+  bits (`TestShortenedErrorRate`, the weaker check). Measured (BPSK, AWGN, same channel as above):
+
+  | Code | R | Capacity limit | FER 1e-2 at Eb/N0 | Gap | Es/N0 at FER 1e-2 |
+  | --- | --- | --- | --- | --- | --- |
+  | 1 `fast` | 0.829 | 2.32 dB | 3.46 dB | 1.14 dB | 2.64 dB |
+  | 2 `normal` | 0.685 | 1.17 dB | 2.48 dB | 1.31 dB | 0.84 dB |
+  | 3 | 0.620 | 0.79 dB | 2.07 dB | 1.28 dB | -0.01 dB |
+  | 4 `robust` | 0.359 | -0.40 dB | 2.20 dB | 2.60 dB | -2.25 dB |
+
+  Es/N0 = Eb/N0 + 10 log10(R) is per sent bit, which is what the noise of a cell sets. The test
+  asserts FER below 1e-2 at the limit plus 2.5 dB for codes 1-3. **With the shipped decoder, `robust`
+  misses that fallback criterion by about 0.1 dB, and the cause is the decoder, not the code.** For
+  `robust` the test is a regression check at the limit plus 2.8 dB, on 10,000 frames because its
+  waterfall is shallow.
+- Decoder comparison (`TestMinSumVariants`, `QRVT_LONG_TESTS=1`; a test-only floating-point reference
+  with the same layered schedule; 4,000 frames per 0.1 dB step, the same frames for every decoder; Eb/N0
+  at FER 1e-2, each code's capacity gap in brackets):
+
+  | Decoder | `robust` (4) | code 3 | `normal` (2) | `fast` (1) |
+  | --- | --- | --- | --- | --- |
+  | Shipped: int16, x0.75 as floor(3m/4), 25 iterations | 2.26 (2.66) | 2.07 (1.29) | 2.49 (1.32) | 3.48 (1.16) |
+  | Sum-product, 50 iterations, float LLRs | 1.13 (1.53) | 1.97 (1.18) | 2.43 (1.25) | 3.41 (1.10) |
+  | Sum-product, 50 iterations, the shipped 8-bit soft bits | 1.14 | 1.98 | 2.42 | 3.42 |
+  | Min-sum x0.75, float, 25 iterations | 1.96 | 2.07 | 2.49 | 3.46 |
+  | Min-sum x0.75, float, 50 iterations | 1.93 | 2.04 | 2.46 | 3.45 |
+  | Min-sum x0.8125, float, 25 iterations | 1.36 | 2.12 | 2.51 | 3.45 |
+  | Min-sum x0.875, float, 25 iterations | 1.35 | 2.21 | 2.60 | 3.48 |
+  | Offset min-sum, 0.25 LLR, float, 25 iterations | 1.33 | 2.20 | 2.62 | 3.50 |
+  | Offset min-sum, 0.5 LLR, float, 25 iterations | 1.33 | 2.07 | 2.51 | 3.47 |
+
+  For codes 1-3 the shipped decoder is within 0.1 dB of sum-product, and x0.75 is the best of the
+  min-sum variants. For `robust` it is 1.13 dB behind sum-product. About 0.3 dB of that is integer
+  truncation: floor(3m/4) of small messages at the low Es/N0 where `robust` works (the float model of
+  the same algorithm is at 1.96 dB, and soft bits at 8 or 16 per unit of LLR instead of 4 bring the
+  shipped decoder to 2.09 and 2.02 dB). About 0.6 dB is the normalisation: after shortening, `robust`'s
+  checks keep only 5 to 7 unshortened variables, and min-sum over few inputs needs less damping than
+  x0.75. Offset min-sum with 0.5 LLR, the most uniform variant, is within 0.03 dB of x0.75 on codes 1-3
+  and 0.6 dB better on `robust`. The 8-bit soft bits cost nothing (sum-product on them equals
+  sum-product on float LLRs). Not changed in M1: changing the decoder changes no format bit, and the
+  choice is the designer's. `robust` buys its 2.24 dB of Es/N0 over code 3 with 56% of the payload per
+  sent bit.
 - Codeword bits are spread over the whole frame by a pseudo-random permutation with a per-frame rotation,
   so glare in one corner costs every codeword a little instead of a few codewords everything.
 - No mature Go library does soft-decision LDPC, so this is written in the repository. The DVB-S2
@@ -306,7 +386,11 @@ through soft-bit summing, which a fountain code would not give.
 
 **Memory.** One Reed-Solomon worker holds one block: at most about 13 MB plus scratch, bounded at 32 MB.
 Shards live in a temporary file of (1 + parity) times the stream size, on both the encode and the decode
-side. qrvt's own memory, not counting engine instances, is targeted at 600 MB at 1080p and 1.5 GB at 4K.
+side. The file (`rs.Store`) adds 8 bytes per shard (a marker and a CRC-32C, so a write torn by a crash
+reads back as absent), is created sparse (on Windows marked sparse with `FSCTL_SET_SPARSE` first, since
+NTFS would otherwise allocate the whole size; on FAT32 it occupies its full size at once), and is
+refused for a plan that holds a stream longer than 64 GiB (`rs.MaxStreamSize`, SECURITY.md section 5).
+`rs.StoreSize` gives its size for the caller's free-space check. qrvt's own memory, not counting engine instances, is targeted at 600 MB at 1080p and 1.5 GB at 4K.
 Each engine instance adds its linear memory, which spike S1 measured at 155 MB (8-bit) and 252 MB
 (10-bit) when decoding 4K HEVC and 140-240 MB when encoding 4K, within a reserved limit of 512 MiB per
 instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of the 21 runs where it
@@ -508,10 +592,51 @@ Costs a user should expect:
       on a single decoder goroutine; at the limit that goroutine is abandoned and the decode fails.
     - The decoder's assembly is excluded, and the flag does not ship until it can be. Its `noasm` build
       tag is global: `klauspost/reedsolomon` and
-      `klauspost/compress` also honour it. M1 measures the whole release built with `-tags noasm` and
-      accepts it only if Reed-Solomon and zstd each stay above about 50 MB/s per core; otherwise the
-      fast path needs a package-specific tag upstream. This concerns the fast path and those
-      libraries only, not the default path's safety.
+      `klauspost/compress` also honour it (and `klauspost/cpuid`, which then reports no CPU features).
+      M1 measures the whole release built with `-tags noasm` and accepts it only if Reed-Solomon and
+      zstd each stay above about 50 MB/s per core; otherwise the fast path needs a package-specific
+      tag upstream. This concerns the fast path and those libraries only, not the default path's
+      safety.
+    - Measured in M1 (stream B; one goroutine pinned to one core of a Core Ultra 9 285H under WSL2,
+      shared with other jobs, so single runs varied by up to 4x; median of 5 runs interleaved across
+      tag sets, MB/s of uncompressed data or of data shards; Reed-Solomon over GF(2^16), 128-byte
+      shards; zstd from `klauspost/compress` v1.20.4 on 16 MiB of Go source and 16 MiB of random
+      bytes):
+
+      | Operation | Default | `noasm` | `nounsafe` | `noasm,nounsafe` |
+      | --- | --- | --- | --- | --- |
+      | RS encode, K 32,768, M 6,554 | 2,138 | 129 | 2,204 | 138 |
+      | RS encode, K 100, M 20 | 5,943 | 610 | 6,148 | 663 |
+      | RS reconstruct, K 32,768, M data shards lost | 300 | 45 | 354 | 49 |
+      | RS reconstruct, K 32,768, M/10 data shards lost | 340 | 57 | 372 | 53 |
+      | RS reconstruct, K 100, M 20 lost | 20 | 20 | 26 | 20 |
+      | zstd decompress, text (default level) | 1,504 | 858 | 1,744 | 861 |
+      | zstd decompress, text (`SpeedBestCompression`) | 1,742 | 1,002 | 1,995 | 1,122 |
+      | zstd decompress, random | 4,217 | 4,301 | 5,232 | 4,947 |
+      | zstd compress, text, default level | 341 | 355 | 374 | 301 |
+      | zstd compress, text, `SpeedBestCompression` | 34 | 35 | 38 | 37 |
+      | zstd compress, random, default / best | 1,931 / 338 | 2,117 / 291 | 1,966 / 310 | 1,994 / 293 |
+
+      Decision: **the whole release can be built with `-tags noasm,nounsafe`**. That removes the
+      assembly and `unsafe` of `klauspost/reedsolomon`, `klauspost/compress` (which comes in through
+      `internal/payload`) and `klauspost/cpuid`, and nothing else: wazero (the sandbox itself),
+      `golang.org/x/sys` and go-ffmpreg keep their `unsafe` and assembly whatever the tags, so the
+      claim is only that those three libraries run no assembly or `unsafe` on decoded data. On the
+      decode side zstd stays far above the bar (860 MB/s and more). Reed-Solomon reconstruction of a
+      full block with `noasm` measured **45-49 MB/s per core in the worst case** (a block that has lost
+      all the M data shards it can; 53-57 MB/s at a tenth of that), **below the stated bar of about
+      50 MB/s**. The tags are accepted anyway because Reed-Solomon is never the bottleneck: at 45 MB/s
+      one core reconstructs 30-50 times faster than one core decodes LDPC (10-14 Mbit/s of sent bits,
+      about 1 MB/s of shards at the `normal` rate), and reconstructing a 1 GB transfer (about 1.2 GB of
+      shards at 20% parity) takes about 27 s on one core, a few seconds over the workers, against the
+      hours of video decoding the same transfer needs (section 11: a 32-minute 4K60 recording decoded
+      at 2.8 to 3.6 times its duration). The cost is on the encode side: Reed-Solomon encoding falls from about 2 GB/s to about
+      130 MB/s per core. `nounsafe` costs nothing measurable. Two numbers do not depend on the tags: reconstruction costs at least about 0.5-1 ms per block
+      whatever its size (part of the work is a transform over the whole GF(2^16) field, so a block of
+      100 shards runs at about 20 MB/s; a stream has blocks of fewer than 16,385 shards only when it is
+      a single block of under 2-6 MB, so this is about a millisecond per stream), and zstd at `SpeedBestCompression` compresses text at about 35 MB/s per core with or
+      without assembly, which is the encoder's own input and outside this question. Stream G sets the
+      release build's tags; until it does, the default path keeps the libraries' assembly.
 - **Backends.** One interface with three implementations: embedded (default), an external `ffmpeg`
   process for `--ffmpeg system`, and a raw-frame file backend for tests (`video.New`,
   `NewEmbedded`, `NewSystem`, `NewRaw`). The native backend runs the same arguments, with paths given
@@ -955,7 +1080,7 @@ note in this document.
 
 | | macOS and Linux | Windows | Does |
 | --- | --- | --- | --- |
-| Setup | `scripts/setup.sh` | `scripts/setup.ps1` | Installs or verifies pinned Go from the official go.dev archive (SHA-256 pinned in the script), git through Homebrew, apt, dnf, pacman or winget, and the linter and release tool through `go install`. Native ffmpeg and wasmtime are optional |
+| Setup | `scripts/setup.sh` | `scripts/setup.ps1` | Installs or verifies pinned Go from the official go.dev archive (SHA-256 pinned in the script), git through Homebrew, apt, dnf, pacman or winget, and the pinned development tools through `tools/dev install-tools`. Native ffmpeg and wasmtime are optional |
 | Build | `scripts/build.sh` | `scripts/build.ps1` | Static build for the host, or all six targets |
 | Test | `scripts/test.sh` | `scripts/test.ps1` | Unit and integration tests with the coverage gate; options for fuzzing, the simulator matrix and real recordings |
 
@@ -969,22 +1094,49 @@ archive, SHA-256 pinned). They print what they are about to install, and ask, be
 anything. The build and test scripts are thin wrappers around
 `go run ./tools/dev <task>`, so that logic exists once. CI calls the same scripts on all three systems.
 
+`install-tools` downloads golangci-lint, GoReleaser, syft (the SBOM generator) and actionlint as
+release archives whose SHA-256 is pinned in `tools/dev/tools.go`, and builds go-licenses, which
+publishes no binaries, with `go install`; `-only` installs a subset. Building golangci-lint and
+GoReleaser from source took 2-5 minutes per CI runner and once hung for 55 minutes; a checked download
+takes seconds. Other `tools/dev` tasks: `licenses` (licence compatibility), `check-workflows` (the
+action-pinning and permissions policy, then actionlint), `release-snapshot` (the whole release without
+publishing, then a check that every target and package format was produced) and `sign-windows` (called
+by GoReleaser).
+
 ## 17. CI and release
 
-- **Each pull request**: lint; tests on Linux, macOS and Windows for amd64 and arm64; race detector;
-  coverage gate; vulnerability scan; static-build check for all six targets; release snapshot;
-  licence-compatibility check; short fuzz runs; docs build. Builds and ordinary tests run with
-  `CGO_ENABLED=0`. The race detector needs cgo on most systems and does not support windows/arm64, so
-  race tests run with cgo on the other five runners.
-- **Nightly**: long fuzzing, the full simulator matrix, a 1 GB loopback with memory assertions, and
-  benchmarks with regression alerts.
-- **Security**: CodeQL, dependency updates, actions pinned by commit, least-privilege tokens.
-- **Release**: release-please keeps the changelog and version from conventional commits. A `v*` tag runs
-  GoReleaser: archives, checksums, keyless cosign signature, SBOM, build provenance, Homebrew cask, Scoop
-  manifest, winget pull request, deb, rpm and apk packages, macOS notarisation and Windows signing.
-  Steps whose secrets are absent are skipped.
-- **Docs**: a website built from `docs/` and published to GitHub Pages on each release, containing the
-  user guide, this design, the format specification and an architecture guide.
+- **Each pull request** (`ci.yml`): lint; tests on Linux, macOS and Windows for amd64 and arm64; race
+  detector; coverage gate; vulnerability scan; static-build check for all six targets; release snapshot;
+  licence-compatibility check; workflow policy and actionlint; short fuzz runs (10 s per target); docs
+  build once the website exists (M7). Builds and ordinary tests run with `CGO_ENABLED=0`. The race
+  detector needs cgo on most systems and does not support windows/arm64, so race tests run with cgo on
+  the other five runners. Tests, the coverage gate, race tests and fuzzing are built with the release
+  build tags (`RELEASE_TAGS`), so CI tests what ships; one amd64 runner also tests the untagged build.
+  Every job and every long step has a timeout.
+- **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
+  keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
+  simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
+  alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice until then.
+- **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
+  Dependabot for Go modules and actions; govulncheck. Every action is pinned by a full commit SHA with a
+  version comment, every workflow declares top-level permissions (jobs widen them only where needed),
+  and nothing runs on `pull_request_target`; a `tools/dev` test enforces this and CI also checks each
+  comment's tag against the pinned commit. The licence check (go-licenses) allows only licences whose
+  code may be distributed under GPL-3.0-or-later; GPL-2.0 is not on the list, because the tool cannot
+  tell GPL-2.0-only from GPL-2.0-or-later. Vulnerabilities are reported privately (SECURITY.md section
+  11).
+- **Release**: release-please (`release-please.yml`) keeps the changelog and version from conventional
+  commits; merging its pull request creates the `v*` tag and the GitHub release. It stays off until the
+  owner enables it. A `v*` tag runs GoReleaser (`release.yml`, `.goreleaser.yaml`): tar.gz archives (zip
+  on Windows) holding the binary, LICENSE, NOTICE and README; checksums; a keyless cosign signature of
+  the checksum file; an SPDX SBOM per archive; build provenance (`actions/attest`) for every file in
+  the checksum file; Homebrew cask, Scoop manifest and winget pull request; deb, rpm and apk packages;
+  macOS notarisation and Windows signing. Steps whose secrets are absent are skipped. The release
+  build's Go build tags are defined once, as `RELEASE_TAGS` in `.goreleaser.yaml` (`noasm,nounsafe`),
+  and `tools/dev build` uses the same set.
+- **Docs**: a website built from `docs/` and published to GitHub Pages on each release
+  (`pages.yml`, a skeleton until M7), containing the user guide, this design, the format specification
+  and an architecture guide.
 
 GoReleaser was chosen because it covers every channel above in one configuration; the alternative is
 writing each package format by hand.
@@ -1060,4 +1212,9 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc`; section 14's `DecodeOptions` (and the root package's `AnalyzeOptions` and `InspectOptions`) gain `UnsandboxedHEVC` |
 | 2026-11-13 | M1 stream E: section 15 moves interference fringes from the optics stage to the sensor stage (their amplitude is in code values), completes the presets with a second table (panel black and response, capture jitter, exposure gain, colour matrix, colour noise reduction, veiling glare), and states how each parameter is read and the values every preset shares (panel scan-out, flicker frequency, field of view, shake walk, distortion convention, glare patch, recorder stand-in step) |
 | 2026-11-13 | M1 stream E review: section 15 adds the panel scan rotation (0 in every preset) and says player tearing is not modelled; noise is exact Gaussian and jitter is clipped at 4 times its RMS; HLG output applies the BT.2087 primaries matrix first; noise and fringe amplitudes are stated as per-channel full-range units (about 0.64 and 0.86 times in brightness codes); the field of view is 70.0 degrees; the readout wording and the quantiser-step figures are corrected |
+| 2026-11-13 | M1 stream B: section 8 describes the encoder and the decoder as built (int16 bounds, pinned shortened bits, check before the first iteration), records the production decoder's speed beside the S3 decoder, and records the error-rate test: published FER 1e-2 points for the four 802.11n n = 1944 mother codes with their sources, our measured points (all within 0.2 dB), and the shortened codes' points; section 12 records the `noasm`/`nounsafe` measurement and the decision that the whole release can be built with `-tags noasm,nounsafe` |
+| 2026-11-13 | M1 stream B, review of PR #8: section 8 checks the four shipped inner codes against the binary-input AWGN capacity limit with the rate counted with the CRC (codes 1-3 within 2.5 dB; `robust` 2.60 dB away, missing that criterion by about 0.1 dB because of the frozen shortening), corrects the Es/N0 values for the CRC, and states the shard store's sparse file on Windows and its 64 GiB stream cap; section 12 limits the `noasm,nounsafe` claim to the three `klauspost` libraries and calls Reed-Solomon reconstruction marginally below the bar, accepted because it is 30-50 times faster than LDPC decoding |
+| 2026-11-13 | M1 stream B, designer's follow-up on PR #8: section 8 compares the shipped decoder with a test-only sum-product reference and min-sum variants on the four inner codes, and corrects the cause of `robust`'s capacity gap: the decoder (integer truncation about 0.3 dB, normalisation x0.75 about 0.6 dB), not the shortening; the shipped decoder is unchanged pending the designer's decision |
+| 2026-11-13 | M1 stream B, designer's note on PR #8: section 12 states that Reed-Solomon reconstruction with `noasm` measured 45-49 MB/s per core in the worst case, below the bar of about 50 MB/s, and why the tags are accepted anyway (seconds of Reed-Solomon against hours of video decoding; 30-50 times faster than one core of LDPC) |
+| 2026-11-13 | M1 stream G: section 16 says `install-tools` downloads the pinned tools as release archives with pinned SHA-256 (go-licenses through `go install`) and lists the new `tools/dev` tasks; section 17 names the workflows, the nightly placeholders, the workflow policy and its test, the licence allow-list (GPL-2.0 excluded), release-please being off until the owner enables it, provenance for every checksummed file, and `RELEASE_TAGS` in `.goreleaser.yaml` as the one definition of the release build tags, set to `noasm,nounsafe`, with which CI tests, measures coverage and fuzzes (one runner also tests untagged) |
 | 2026-11-13 | M1 stream D: section 8 caps the worker count at `video.EngineInstances()` (GOMAXPROCS - 1), because compiled Wasm cannot be preempted and instances on every P starved the watchdog on the 4-vCPU CI runners. Section 12 records the engine as built: the embedded copy of the module and its hash check, the encoder's MP4 and even-length `.h264` runs with `Concat`, how slices are read (1 s preroll with `-noaccurate_seek`, `-copyts`, `showinfo` timestamps, `-fps_mode passthrough`, source pixel format, size changes refused), the instance cap, and the measured cost of `WithCloseOnContextDone` (75-91% on decoding, reported to the owner; kept on); the HEVC fast path is compiled only with the `unsandboxedhevc` tag, sends parameter sets that differ from the probe to the engine, takes timestamps from `framemd5`, and times each picture from its first slice. Section 13: the `--ffmpeg` row says where `ffprobe` comes from and that a path also runs outside the sandbox; the `--unsandboxed-hevc` row says the flag exists only in tagged builds |

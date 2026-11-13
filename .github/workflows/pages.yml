@@ -1,0 +1,64 @@
+# Website (DESIGN.md section 17): publishes docs/ to GitHub Pages on each published release.
+#
+# SKELETON, disabled until milestone M7: while PAGES_ENABLED below is "false" the workflow uploads
+# and deploys nothing. M7 adds the site generator (building the user guide, design, format
+# specification and architecture guide into a site), replaces the upload path, and sets
+# PAGES_ENABLED to "true". Publishing also needs the owner to set Settings > Pages > Source to
+# "GitHub Actions".
+name: pages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  PAGES_ENABLED: "false"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - id: gate
+        name: Check whether the site is enabled
+        run: |
+          echo "enabled=$PAGES_ENABLED" >> "$GITHUB_OUTPUT"
+          if [ "$PAGES_ENABLED" != true ]; then
+            echo "::notice title=pages::the website is published from milestone M7 on; skipped"
+          fi
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      # M7 builds the site here; until then the Markdown documents would be published as they are.
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write # publish
+      id-token: write # prove the deployment's origin to Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
