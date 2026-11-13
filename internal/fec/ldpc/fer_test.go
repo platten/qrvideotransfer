@@ -149,6 +149,88 @@ func TestErrorRate(t *testing.T) {
 	}
 }
 
+// biawgnCapacity returns the capacity in bits per channel use of BPSK over AWGN with noise standard
+// deviation sigma: 1 - E[log2(1 + exp(-2y/sigma^2))] for y ~ N(1, sigma^2), by Simpson's rule over
+// +-10 standard deviations.
+func biawgnCapacity(sigma float64) float64 {
+	const steps = 4000
+	h := 20.0 / steps
+	sum := 0.0
+	for i := 0; i <= steps; i++ {
+		z := -10 + float64(i)*h
+		l := 2 * (1 + sigma*z) / (sigma * sigma)
+		f := (max(-l, 0) + math.Log1p(math.Exp(-math.Abs(l)))) / math.Ln2 * math.Exp(-z*z/2)
+		w := 2.0
+		switch {
+		case i == 0 || i == steps:
+			w = 1
+		case i%2 == 1:
+			w = 4
+		}
+		sum += w * f
+	}
+	return 1 - sum*h/3/math.Sqrt(2*math.Pi)
+}
+
+// capacityLimit returns the Eb/N0 in dB at which the capacity of BPSK over AWGN equals rate.
+func capacityLimit(rate float64) float64 {
+	lo, hi := -2.0, 10.0
+	for range 60 {
+		mid := (lo + hi) / 2
+		if biawgnCapacity(math.Sqrt(1/(2*rate*math.Pow(10, mid/10)))) < rate {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return (lo + hi) / 2
+}
+
+func TestCapacityLimit(t *testing.T) {
+	// Known binary-input AWGN limits: 0.187 dB at rate 1/2, -0.495 dB at rate 1/3.
+	for _, c := range []struct{ rate, want float64 }{{0.5, 0.187}, {1.0 / 3, -0.495}} {
+		if got := capacityLimit(c.rate); math.Abs(got-c.want) > 0.005 {
+			t.Errorf("capacityLimit(%.3f) = %.4f dB, want %.3f", c.rate, got, c.want)
+		}
+	}
+}
+
+// capacityGap is the fallback criterion of IMPLEMENTATION_PROMPT.md M1: FER 1e-2 within 2.5 dB of
+// the binary-input AWGN capacity limit for the code's rate.
+const capacityGap = 2.5
+
+// robustGap is the regression bound for code 4 (`robust`), which misses capacityGap: it reaches FER
+// 1e-2 about 2.6 dB from its limit (DESIGN.md section 8). The cause is FORMAT.md's frozen shortening of
+// 428 of the mother code's 972 information bits, not the decoder: the mother rate-1/2 code is at
+// 1.82 dB, 1.63 dB from its own limit. Its waterfall is shallow (FER about 5e-3 at 2.8 dB from the
+// limit), so the regression check uses 10,000 frames to keep 0.2 dB of margin over the measured gap.
+const robustGap = 2.8
+
+// TestShortenedErrorRate checks the four inner codes as they ship (rate including the CRC: info bits
+// over sent bits) against the binary-input AWGN capacity limit: FER below 1e-2, with 95% confidence,
+// at the limit plus capacityGap (robustGap for code 4). This is a weaker check than TestErrorRate; no
+// published curve exists for these shortened codes.
+func TestShortenedErrorRate(t *testing.T) {
+	for _, id := range ids {
+		c := mustNew(t, id)
+		rate := float64(c.info) / float64(c.N())
+		gap, frames := capacityGap, 1000
+		if id == 4 {
+			gap, frames = robustGap, 10000
+		}
+		if long() {
+			frames = 20000
+		}
+		limit := maxErrors(frames, 1e-2, 0.05)
+		ebn0 := capacityLimit(rate) + gap
+		n := frameErrors(func() *Code { return mustNew(t, id) }, ebn0, frames, 3)
+		t.Logf("code %d: rate %.4f, capacity limit %.2f dB; %d frame errors in %d at %.2f dB", id, rate, capacityLimit(rate), n, frames, ebn0)
+		if n > limit {
+			t.Errorf("code %d: %d frame errors in %d at Eb/N0 %.2f dB (%.1f dB above the capacity limit), more than %d", id, n, frames, ebn0, gap, limit)
+		}
+	}
+}
+
 // TestErrorRateCurves logs where each mother code and each shortened inner code crosses FER 1e-2,
 // for DESIGN.md section 8. Long tests only.
 func TestErrorRateCurves(t *testing.T) {

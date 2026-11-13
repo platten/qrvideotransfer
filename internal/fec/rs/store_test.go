@@ -64,6 +64,39 @@ func TestStoreSize(t *testing.T) {
 	}
 }
 
+// The store accepts the plan of a MaxStreamSize stream, at every shard size and at full parity, and
+// refuses one a shard longer, and any longer stream.
+func TestStoreSizeStreamLimit(t *testing.T) {
+	for _, s := range []int{64, 128, 192} {
+		for _, parity := range []int{5, 20, 100} {
+			k := int((MaxStreamSize + int64(s) - 1) / int64(s))
+			_, kk, _ := fec.Shape(MaxStreamSize, s)
+			p, err := fec.NewPlan(MaxStreamSize, s, fec.DefaultM(kk, parity), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			size, err := StoreSize(p)
+			if err != nil {
+				t.Fatalf("S=%d parity %d: the %d-shard limit stream refused: %v", s, parity, k, err)
+			}
+			if limit := int64(float64(MaxStreamSize) * (1 + float64(p.M)/float64(p.K)) * (1 + 8/float64(s)) * 1.001); size > limit {
+				t.Errorf("S=%d parity %d: store size %d above %d", s, parity, size, limit)
+			}
+			// A stream one shard longer may share the limit stream's B and K; then the plans are the
+			// same and nothing can tell them apart.
+			for _, l := range []int64{MaxStreamSize + int64(s), MaxStreamSize + 1<<30, fec.MaxStreamLen} {
+				q, err := fec.NewPlan(l, s, fec.DefaultM(kk, parity), 1)
+				if err != nil || q.Blocks == p.Blocks && q.K == p.K {
+					continue
+				}
+				if _, err := StoreSize(q); err == nil {
+					t.Errorf("S=%d: a stream of %d bytes accepted (B %d, K %d)", s, l, q.Blocks, q.K)
+				}
+			}
+		}
+	}
+}
+
 func TestStorePutGetHave(t *testing.T) {
 	s, path := newStore(t, smallPlan)
 	if fi, err := os.Stat(path); err != nil || fi.Size() != 3*7*(64+slotTrailer) {
