@@ -6,7 +6,7 @@ require (
 	codeberg.org/gruf/go-ffmpreg v0.6.22
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/tetratelabs/wazero v1.12.0
-	golang.org/x/sys v0.44.0
+	golang.org/x/sys v0.50.0
 )
 
 require github.com/klauspost/cpuid/v2 v2.3.0 // indirect
