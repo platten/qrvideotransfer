@@ -39,11 +39,11 @@ func (t tree) write(tb testing.TB, dir string) []string {
 	for _, p := range paths {
 		full := filepath.Join(dir, filepath.FromSlash(strings.TrimSuffix(p, "/")))
 		if strings.HasSuffix(p, "/") {
-			must(tb, os.MkdirAll(full, 0o755))
+			must(tb, os.MkdirAll(full, 0o750))
 			continue
 		}
-		must(tb, os.MkdirAll(filepath.Dir(full), 0o755))
-		must(tb, os.WriteFile(full, []byte(t[p]), 0o644))
+		must(tb, os.MkdirAll(filepath.Dir(full), 0o750))
+		must(tb, os.WriteFile(full, []byte(t[p]), 0o600))
 	}
 	slices.Reverse(paths) // children before parents, so that directory times stick
 	tops := map[string]bool{}
@@ -73,7 +73,7 @@ func read(tb testing.TB, dir string) tree {
 			t[rel+"/"] = ""
 			return nil
 		}
-		b, err := os.ReadFile(p)
+		b, err := os.ReadFile(p) //nolint:gosec // test helper reading its own temporary folder
 		t[rel] = string(b)
 		return err
 	}))

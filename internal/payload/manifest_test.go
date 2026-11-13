@@ -50,16 +50,16 @@ func TestValidateManifest(t *testing.T) {
 		t.Fatalf("ValidateManifest: %v", err)
 	}
 	cases := map[string][]Entry{
-		"bad path":            {entry("a/../b", false)},
-		"duplicate":           {entry("a", false), entry("a", false)},
-		"file and dir":        {entry("a", true), entry("a", false)},
-		"case":                {entry("README", false), entry("readme", false)},
-		"full case folding":   {entry("STRASSE", false), entry("straße", false)},
-		"kelvin sign":         {entry("K", false), entry("k", false)},
-		"case in parent":      {entry("A/x", false), entry("a/x", false)},
-		"file under file":     {entry("a", false), entry("a/b", false)},
+		"bad path":             {entry("a/../b", false)},
+		"duplicate":            {entry("a", false), entry("a", false)},
+		"file and dir":         {entry("a", true), entry("a", false)},
+		"case":                 {entry("README", false), entry("readme", false)},
+		"full case folding":    {entry("STRASSE", false), entry("straße", false)},
+		"kelvin sign":          {entry("K", false), entry("k", false)},
+		"case in parent":       {entry("A/x", false), entry("a/x", false)},
+		"file under file":      {entry("a", false), entry("a/b", false)},
 		"deep file under file": {entry("a", false), entry("a/b/c", false)},
-		"under file, folded":  {entry("A", false), entry("a/b", false)},
+		"under file, folded":   {entry("A", false), entry("a/b", false)},
 	}
 	for name, es := range cases {
 		t.Run(name, func(t *testing.T) {

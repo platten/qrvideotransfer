@@ -117,15 +117,15 @@ func TestModes(t *testing.T) {
 	}
 	src := t.TempDir()
 	in := tree{"m/": "", "m/x": "x", "m/ro/": "", "m/ro/y": "y"}.write(t, src)
-	must(t, os.Chmod(filepath.Join(src, "m", "x"), 0o751))
+	must(t, os.Chmod(filepath.Join(src, "m", "x"), 0o751)) //nolint:gosec // permission bits under test
 	must(t, os.Chmod(filepath.Join(src, "m", "ro", "y"), 0o400))
-	must(t, os.Chmod(filepath.Join(src, "m", "ro"), 0o500))
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(src, "m", "ro"), 0o755) })
+	must(t, os.Chmod(filepath.Join(src, "m", "ro"), 0o500))                  //nolint:gosec // permission bits under test
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(src, "m", "ro"), 0o755) }) //nolint:gosec // permission bits under test
 	stream, _ := pack(t, PackOptions{Inputs: in})
 	out := t.TempDir()
 	_, err := unpack(stream, UnpackOptions{OutputDir: out})
 	must(t, err)
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(out, "m", "ro"), 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(out, "m", "ro"), 0o755) }) //nolint:gosec // permission bits under test
 	for p, want := range map[string]os.FileMode{"m/x": 0o751, "m/ro/y": 0o400, "m/ro": 0o500} {
 		st, err := os.Stat(filepath.Join(out, p))
 		must(t, err)
@@ -192,8 +192,8 @@ func TestInputs(t *testing.T) {
 	if !isWindows() {
 		for _, name := range []string{"back\\slash", "colon:", "dot.", "CON", "ctl\x1b"} {
 			bad := filepath.Join(src, "bad")
-			must(t, os.MkdirAll(bad, 0o755))
-			must(t, os.WriteFile(filepath.Join(bad, name), nil, 0o644))
+			must(t, os.MkdirAll(bad, 0o750))
+			must(t, os.WriteFile(filepath.Join(bad, name), nil, 0o600))
 			var ie *InputError
 			if _, _, err := collect([]string{bad}); !errors.As(err, &ie) {
 				t.Errorf("name %q: %v, want an InputError", name, err)
@@ -205,9 +205,9 @@ func TestInputs(t *testing.T) {
 
 func TestInputsCaseCollision(t *testing.T) {
 	src := t.TempDir()
-	must(t, os.WriteFile(filepath.Join(src, "README"), nil, 0o644))
-	must(t, os.Mkdir(filepath.Join(src, "d"), 0o755))
-	must(t, os.WriteFile(filepath.Join(src, "d", "readme"), nil, 0o644))
+	must(t, os.WriteFile(filepath.Join(src, "README"), nil, 0o600))
+	must(t, os.Mkdir(filepath.Join(src, "d"), 0o750))
+	must(t, os.WriteFile(filepath.Join(src, "d", "readme"), nil, 0o600))
 	var ie *InputError
 	if _, _, err := collect([]string{filepath.Join(src, "README"), filepath.Join(src, "d", "readme")}); !errors.As(err, &ie) {
 		t.Fatalf("case collision: %v", err)
@@ -316,17 +316,17 @@ func signedStream(t *testing.T, encrypt bool) []byte {
 func TestSignatureBitFlips(t *testing.T) {
 	stream := signedStream(t, false)
 	pub := testKey().Public().(ed25519.PublicKey)
-	v, err := Verify(bytes.NewReader(stream), int64(len(stream)), nil)
+	v, err := Verify(context.Background(), bytes.NewReader(stream), int64(len(stream)), nil)
 	if err != nil || !v.Signer.Equal(pub) || v.Trusted {
 		t.Fatalf("Verify: %+v %v", v, err)
 	}
-	if v, err = Verify(bytes.NewReader(stream), int64(len(stream)), []ed25519.PublicKey{pub}); err != nil || !v.Trusted {
+	if v, err = Verify(context.Background(), bytes.NewReader(stream), int64(len(stream)), []ed25519.PublicKey{pub}); err != nil || !v.Trusted {
 		t.Fatalf("Verify with the key: %+v %v", v, err)
 	}
 	for bit := range len(stream) * 8 {
 		s := bytes.Clone(stream)
 		s[bit/8] ^= 1 << (bit % 8)
-		if _, err := Verify(bytes.NewReader(s), int64(len(s)), nil); err == nil {
+		if _, err := Verify(context.Background(), bytes.NewReader(s), int64(len(s)), nil); err == nil {
 			t.Fatalf("bit %d flipped: verified", bit)
 		}
 	}
@@ -414,7 +414,7 @@ func flip(b []byte, off int, mask byte) []byte {
 
 func TestLimits(t *testing.T) {
 	t.Run("stream length", func(t *testing.T) {
-		_, err := Verify(bytes.NewReader(nil), MaxStreamLen+1, nil)
+		_, err := Verify(context.Background(), bytes.NewReader(nil), MaxStreamLen+1, nil)
 		var l *LimitError
 		if !errors.As(err, &l) || l.Limit != "stream length" || l.Max != MaxStreamLen {
 			t.Fatalf("Verify: %v", err)
@@ -590,9 +590,9 @@ func TestExistingFiles(t *testing.T) {
 	src := t.TempDir()
 	stream, _ := pack(t, PackOptions{Inputs: tree{"d/": "", "d/f": "new", "g": "new g"}.write(t, src)})
 	out := t.TempDir()
-	must(t, os.Mkdir(filepath.Join(out, "d"), 0o755))
-	must(t, os.WriteFile(filepath.Join(out, "d", "f"), []byte("old"), 0o644))
-	must(t, os.WriteFile(filepath.Join(out, "keep"), []byte("keep"), 0o644))
+	must(t, os.Mkdir(filepath.Join(out, "d"), 0o750))
+	must(t, os.WriteFile(filepath.Join(out, "d", "f"), []byte("old"), 0o600))
+	must(t, os.WriteFile(filepath.Join(out, "keep"), []byte("keep"), 0o600))
 	var ee *ExistsError
 	if _, err := unpack(stream, UnpackOptions{OutputDir: out}); !errors.As(err, &ee) || ee.Path != "d/f" {
 		t.Fatalf("no overwrite: %v", err)
@@ -610,12 +610,12 @@ func TestExistingFiles(t *testing.T) {
 	}
 	// A directory where a file goes, and a file where a directory goes, are refused even with Overwrite.
 	out2 := t.TempDir()
-	must(t, os.Mkdir(filepath.Join(out2, "g"), 0o755))
+	must(t, os.Mkdir(filepath.Join(out2, "g"), 0o750))
 	if _, err := unpack(stream, UnpackOptions{OutputDir: out2, Overwrite: true}); !errors.As(err, &ee) {
 		t.Fatalf("dir in the way: %v", err)
 	}
 	out3 := t.TempDir()
-	must(t, os.WriteFile(filepath.Join(out3, "d"), nil, 0o644))
+	must(t, os.WriteFile(filepath.Join(out3, "d"), nil, 0o600))
 	if _, err := unpack(stream, UnpackOptions{OutputDir: out3, Overwrite: true}); !errors.As(err, &ee) {
 		t.Fatalf("file in the way: %v", err)
 	}
@@ -664,12 +664,12 @@ func TestInputChanged(t *testing.T) {
 	in := tree{"f": "original"}.write(t, src)
 	got, _, err := collect(in)
 	must(t, err)
-	must(t, os.WriteFile(filepath.Join(src, "f"), []byte("changed!"), 0o644))
+	must(t, os.WriteFile(filepath.Join(src, "f"), []byte("changed!"), 0o600))
 	var s spool
 	if _, err := writeStream(context.Background(), &s, got, PackOptions{}); !errors.Is(err, ErrInputChanged) {
 		t.Fatalf("same size, new content: %v", err)
 	}
-	must(t, os.WriteFile(filepath.Join(src, "f"), []byte("short"), 0o644))
+	must(t, os.WriteFile(filepath.Join(src, "f"), []byte("short"), 0o600))
 	if _, err := writeStream(context.Background(), &(spool{}), got, PackOptions{}); !errors.Is(err, ErrInputChanged) {
 		t.Fatalf("shrunk: %v", err)
 	}
@@ -689,7 +689,7 @@ func TestAutoCompression(t *testing.T) {
 		x ^= x << 17
 		random[i] = byte(x)
 	}
-	must(t, os.WriteFile(filepath.Join(src, "random.bin"), random, 0o644))
+	must(t, os.WriteFile(filepath.Join(src, "random.bin"), random, 0o600))
 	_, res := pack(t, PackOptions{Inputs: []string{filepath.Join(src, "random.bin")}})
 	if res.Header.Method != MethodNone {
 		t.Fatalf("random data: method %d", res.Header.Method)

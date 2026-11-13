@@ -222,8 +222,8 @@ func writeGolden(t *testing.T, srcs []source, unsigned, signed []byte) {
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	must(t, enc.Encode(g))
-	must(t, os.MkdirAll(filepath.Dir(goldenFile), 0o755))
-	must(t, os.WriteFile(goldenFile, b.Bytes(), 0o644))
+	must(t, os.MkdirAll(filepath.Dir(goldenFile), 0o750))
+	must(t, os.WriteFile(goldenFile, b.Bytes(), 0o600))
 }
 
 func FuzzUnpackArchive(f *testing.F) {
@@ -234,7 +234,7 @@ func FuzzUnpackArchive(f *testing.F) {
 	f.Fuzz(func(t *testing.T, a []byte) {
 		parent := t.TempDir()
 		out := filepath.Join(parent, "out")
-		must(t, os.Mkdir(out, 0o755))
+		must(t, os.Mkdir(out, 0o750))
 		_, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)),
 			UnpackOptions{OutputDir: out, MaxSize: 1 << 20})
 		es, rerr := os.ReadDir(parent)

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	testPriv = "qrvt-private-key-v1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+	testPriv = "qrvt-private-key-v1:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=" //nolint:gosec // the fixed, published test key of the golden vectors
 	testPub  = "qrvt-public-key-v1:A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg="
 	testFP   = "56475aa75463474c"
 )
