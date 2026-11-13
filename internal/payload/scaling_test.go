@@ -11,49 +11,59 @@ import (
 	"time"
 )
 
-// reportTimingsOnCI makes TestExtractionScaling fail on GitHub Actions with its measurements, so
-// that the figures of each runner appear in the job log (passing tests print nothing there).
-const reportTimingsOnCI = true
+// extractDeep extracts files beneath a folder chain of the given depth into a new folder, and then
+// again once for each overwrite given (with every folder existing and every file replaced).
+func extractDeep(tb testing.TB, files, depth int, overwrites ...bool) {
+	tes := deepManifest(files, depth)
+	a := archive(tb, MarshalManifest(manifestFor(tes...)), tes...)
+	out := tb.TempDir()
+	for _, overwrite := range append([]bool{false}, overwrites...) {
+		_, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out, Overwrite: overwrite})
+		must(tb, err)
+	}
+}
 
-// TestExtractionScaling extracts the same files beneath folder chains of depth 500 and 2000, each
-// twice into the same folder (the second time every folder exists and every file is replaced). Work
-// that grows linearly with the depth takes about 4 times as long at 2000; quadratic work takes 16
-// times as long. More than 8 fails.
-func TestExtractionScaling(t *testing.T) {
-	if testing.Short() {
-		t.Skip("extracts deep trees; skipped with -short")
-	}
-	if raceEnabled {
-		t.Skip("timing ratios do not hold under the race detector; it runs in the ordinary test task")
-	}
-	const files = 50
-	measure := func(depth int) time.Duration {
-		tes := deepManifest(files, depth)
-		a := archive(t, MarshalManifest(manifestFor(tes...)), tes...)
-		out := t.TempDir()
-		start := time.Now()
-		for _, overwrite := range []bool{false, true} {
-			_, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out, Overwrite: overwrite})
-			must(t, err)
+// TestExtractionWorkIsLinear counts what extraction asks of the operating system: the number of
+// calls that take a path, and the total number of path components in them. Each folder must cost a
+// fixed number of calls of one component (they go through the parent's handle), and each file a
+// fixed number of calls of at most its depth. Work quadratic in the depth, such as resolving every
+// folder from the root, fails the bound at depth 1000 by more than a factor of 10. The counts do not
+// depend on the speed of the machine.
+func TestExtractionWorkIsLinear(t *testing.T) {
+	t.Cleanup(func() { testHookOS = nil })
+	for _, c := range []struct{ files, depth int }{{5, 1000}, {20, 1000}, {20, 250}, {200, 10}} {
+		var calls, components int
+		testHookOS = func(p string) { calls, components = calls+1, components+strings.Count(p, "/")+1 }
+		extractDeep(t, c.files, c.depth, true)
+		testHookOS = nil
+		folders, units := c.depth, c.files+c.depth
+		t.Logf("%d files at depth %d: %d calls, %d path components", c.files, c.depth, calls, components)
+		// Two extractions; per folder at most 10 calls each, per file at most 12.
+		if calls > 2*12*units {
+			t.Errorf("%d files at depth %d: %d calls for %d folders and files", c.files, c.depth, calls, units)
 		}
-		return time.Since(start)
+		if limit := 2 * (10*folders + 12*c.files*(c.depth+2)); components > limit {
+			t.Errorf("%d files at depth %d: %d path components, more than %d", c.files, c.depth, components, limit)
+		}
 	}
-	short := min(measure(500), measure(500))
-	long := measure(2000)
-	ratio := float64(long) / float64(short)
-	// Each file's path is resolved a few times; the folders cost the same at any depth. The worst
-	// manifest within the limits has about 14,500 files at depth 2000 (TestDeepManifestResources).
-	perComponent := long / time.Duration(2*files*2000)
-	worst := perComponent * 14500 * 2000
-	msg := fmt.Sprintf("depth 500: %v, depth 2000: %v, ratio %.1f; %v per file per path component; "+
-		"estimated full extraction of the worst manifest within the limits: %v",
-		short, long, ratio, perComponent, worst.Round(time.Second))
-	t.Log(msg)
-	if ratio > 8 {
-		t.Fatalf("extraction grows faster than linearly with depth: %s", msg)
-	}
-	if reportTimingsOnCI && os.Getenv("GITHUB_ACTIONS") == "true" {
-		t.Errorf("timings (reported on purpose): %s", msg)
+}
+
+// BenchmarkExtractDeep measures extraction beneath deep folder chains, for fitting
+// time = a * folders + b * files * depth for one extraction into a new folder (SECURITY.md section 5).
+func BenchmarkExtractDeep(b *testing.B) {
+	for _, c := range []struct{ files, depth int }{{50, 500}, {50, 2000}, {500, 2000}, {14500, 2000}} {
+		b.Run(fmt.Sprintf("files=%d/depth=%d", c.files, c.depth), func(b *testing.B) {
+			tes := deepManifest(c.files, c.depth)
+			a := archive(b, MarshalManifest(manifestFor(tes...)), tes...)
+			b.StopTimer() // only the extraction is timed
+			for range b.N {
+				out := b.TempDir()
+				b.StartTimer()
+				_, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out})
+				b.StopTimer()
+				must(b, err)
+			}
+		})
 	}
 }
 

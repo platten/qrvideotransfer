@@ -40,8 +40,10 @@ type extractor struct {
 // predict the suffix, so an entry of the same name is left to chance (2^-64), not checked.
 const stagePrefix = ".qrvt-staging-"
 
-// Test hooks: testHookPlace runs before each file is placed; linkFile places a staged file.
+// Test hooks: testHookPlace runs before each file is placed; linkFile places a staged file;
+// testHookOS receives every path the extractor passes to the operating system.
 var (
+	testHookOS      func(path string)
 	testHookPlace   func(root *os.Root, path string) error
 	defaultLinkFile = func(r *os.Root, oldname, newname string) error { return r.Link(oldname, newname) }
 	linkFile        = defaultLinkFile
@@ -68,7 +70,7 @@ func newExtractor(ctx context.Context, dir string, entries []Entry, overwrite bo
 	x.stage = stagePrefix + hex.EncodeToString(r[:])
 	err = x.walk(x.check, nil)
 	if err == nil {
-		err = root.Mkdir(x.stage, 0o700)
+		err = root.Mkdir(at(x.stage), 0o700)
 	}
 	if err != nil {
 		_ = root.Close()
@@ -182,7 +184,7 @@ func (x *extractor) check(parent *os.Root, name, p string, i int) (*os.Root, err
 	if parent == nil {
 		return nil, nil
 	}
-	st, err := parent.Lstat(name)
+	st, err := parent.Lstat(at(name))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil
@@ -191,12 +193,12 @@ func (x *extractor) check(parent *os.Root, name, p string, i int) (*os.Root, err
 	case i < 0 && !st.IsDir():
 		return nil, &ExistsError{p, "exists and is not a folder"}
 	case i < 0:
-		return parent.OpenRoot(name)
+		return parent.OpenRoot(at(name))
 	}
 	e := x.entries[i]
 	switch {
 	case e.Dir && st.IsDir():
-		return parent.OpenRoot(name)
+		return parent.OpenRoot(at(name))
 	case e.Dir:
 		return nil, &ExistsError{e.Path, "exists and is not a folder"}
 	case !st.Mode().IsRegular():
@@ -212,7 +214,7 @@ func (x *extractor) staged(i int) string { return x.stage + "/" + strconv.Itoa(i
 
 // write stores entry i in the staging folder, leaving holes for runs of zeros, and checks its hash.
 func (x *extractor) write(i int, e Entry, r io.Reader, pw *progressWriter) error {
-	f, err := x.root.OpenFile(x.staged(i), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := x.root.OpenFile(at(x.staged(i)), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
@@ -255,20 +257,20 @@ func (x *extractor) commit() error {
 		return err
 	}
 	x.committed = true
-	err := x.root.RemoveAll(x.stage) // with it go the files that overwriting replaced
+	err := x.root.RemoveAll(at(x.stage)) // with it go the files that overwriting replaced
 	// A second walk sets the modes and times of the folders it created, after their contents.
 	open := func(parent *os.Root, name, _ string, i int) (*os.Root, error) {
 		if i >= 0 && !x.entries[i].Dir {
 			return nil, nil
 		}
-		return parent.OpenRoot(name)
+		return parent.OpenRoot(at(name))
 	}
 	return errors.Join(err, x.walk(open, func(parent *os.Root, name string, i int) error {
 		if i < 0 || !x.created[i] {
 			return nil
 		}
 		e := x.entries[i]
-		return errors.Join(parent.Chmod(name, os.FileMode(e.perm())), parent.Chtimes(name, e.MTime, e.MTime))
+		return errors.Join(parent.Chmod(at(name), os.FileMode(e.perm())), parent.Chtimes(at(name), e.MTime, e.MTime))
 	}))
 }
 
@@ -281,22 +283,22 @@ func (x *extractor) commitOne(parent *os.Root, name, p string, i int) (*os.Root,
 	if i >= 0 {
 		mode = 0o700 // the entry's mode is set at the end, when nothing more goes into it
 	}
-	err := parent.Mkdir(name, mode)
+	err := parent.Mkdir(at(name), mode)
 	switch {
 	case err == nil:
-		x.undo = append(x.undo, func() error { return x.root.Remove(p) })
+		x.undo = append(x.undo, func() error { return x.root.Remove(at(p)) })
 		if i >= 0 {
 			x.created[i] = true
 		}
 	case errors.Is(err, fs.ErrExist):
-		if st, err := parent.Lstat(name); err != nil || !st.IsDir() {
+		if st, err := parent.Lstat(at(name)); err != nil || !st.IsDir() {
 			return nil, &ExistsError{p, "exists and is not a folder"}
 		}
 		// an existing folder is merged into, and left as it was
 	default:
 		return nil, err
 	}
-	return parent.OpenRoot(name)
+	return parent.OpenRoot(at(name))
 }
 
 // place moves staged file i to its path. Without overwrite it hard-links the staged file there, which
@@ -315,13 +317,13 @@ func (x *extractor) place(i int, e Entry) error {
 	// shares them, and a rename keeps them. A read-only mode is set after placing on Windows, because a
 	// read-only staged name could not be removed there.
 	s := x.staged(i)
-	err := x.root.Chtimes(s, e.MTime, e.MTime)
+	err := x.root.Chtimes(at(s), e.MTime, e.MTime)
 	if err == nil && !x.modeLater(e) {
-		err = x.root.Chmod(s, os.FileMode(e.perm()))
+		err = x.root.Chmod(at(s), os.FileMode(e.perm()))
 	}
 	if err == nil && x.overwrite {
 		var id fileID
-		if id, err = statID(x.root, s); err == nil {
+		if id, err = statID(x.root, at(s)); err == nil {
 			err = x.setAside(i, e.Path)
 			x.placed[id] = true
 		}
@@ -329,30 +331,30 @@ func (x *extractor) place(i int, e Entry) error {
 	if err != nil {
 		return err
 	}
-	err = linkFile(x.root, s, e.Path)
+	err = linkFile(x.root, at(s), at(e.Path))
 	switch {
 	case err == nil:
-		x.undo = append(x.undo, func() error { return x.root.Remove(e.Path) })
-		err = x.root.Remove(s)
+		x.undo = append(x.undo, func() error { return x.root.Remove(at(e.Path)) })
+		err = x.root.Remove(at(s))
 	case errors.Is(err, fs.ErrExist):
 		return &ExistsError{e.Path, "appeared while the transfer was being extracted"}
 	default:
-		if _, err := x.root.Lstat(e.Path); !errors.Is(err, fs.ErrNotExist) {
+		if _, err := x.root.Lstat(at(e.Path)); !errors.Is(err, fs.ErrNotExist) {
 			return &ExistsError{e.Path, "appeared while the transfer was being extracted"}
 		}
-		if err = x.root.Rename(s, e.Path); err == nil {
-			x.undo = append(x.undo, func() error { return x.root.Remove(e.Path) })
+		if err = x.root.Rename(at(s), at(e.Path)); err == nil {
+			x.undo = append(x.undo, func() error { return x.root.Remove(at(e.Path)) })
 		}
 	}
 	if err == nil && x.modeLater(e) {
-		err = x.root.Chmod(e.Path, os.FileMode(e.perm()))
+		err = x.root.Chmod(at(e.Path), os.FileMode(e.perm()))
 	}
 	return err
 }
 
 // setAside moves an existing regular file at p into the staging folder, so that it can be restored.
 func (x *extractor) setAside(i int, p string) error {
-	st, err := x.root.Lstat(p)
+	st, err := x.root.Lstat(at(p))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil
@@ -361,7 +363,7 @@ func (x *extractor) setAside(i int, p string) error {
 	case !st.Mode().IsRegular():
 		return &ExistsError{p, "exists and is not a regular file"}
 	}
-	id, err := statID(x.root, p)
+	id, err := statID(x.root, at(p))
 	if err != nil {
 		return err
 	}
@@ -369,10 +371,10 @@ func (x *extractor) setAside(i int, p string) error {
 		return &ExistsError{p, "is another name for a file this transfer has already written"}
 	}
 	backup := x.stage + "/old-" + strconv.Itoa(i)
-	if err := x.root.Rename(p, backup); err != nil {
+	if err := x.root.Rename(at(p), at(backup)); err != nil {
 		return err
 	}
-	x.undo = append(x.undo, func() error { return x.root.Rename(backup, p) })
+	x.undo = append(x.undo, func() error { return x.root.Rename(at(backup), at(p)) })
 	return nil
 }
 
@@ -385,7 +387,16 @@ func (x *extractor) modeLater(e Entry) bool {
 // close removes the staging folder unless commit got past placing the files.
 func (x *extractor) close() {
 	if !x.committed {
-		_ = x.root.RemoveAll(x.stage)
+		_ = x.root.RemoveAll(at(x.stage))
 	}
 	_ = x.root.Close()
+}
+
+// at returns a path the extractor is about to pass to the operating system, after reporting it to
+// the counting seam of the tests.
+func at(path string) string {
+	if testHookOS != nil {
+		testHookOS(path)
+	}
+	return path
 }
