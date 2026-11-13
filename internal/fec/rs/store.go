@@ -47,9 +47,15 @@ type Store struct {
 	buf  []byte
 }
 
+// MaxStreamSize is the longest stream a Store holds, 64 GiB (docs/SECURITY.md section 5, stream
+// length). The store file of the longest stream is about MaxStreamSize x (1 + M/K) x
+// (1 + 8/ShardSize) bytes.
+const MaxStreamSize = 64 << 30
+
 // StoreSize returns the size in bytes of the store file for plan p, (K + M) x Blocks x
-// (ShardSize + 8), or an error when the plan is not valid. A caller checks the free space with it
-// before Create. With the default parity of 20% it is about 1.2 x (1 + 8/ShardSize) x the stream.
+// (ShardSize + 8), or an error when the plan is not valid or holds more than a MaxStreamSize stream.
+// A caller checks the free space with it before Create. With the default parity of 20% it is about
+// 1.2 x (1 + 8/ShardSize) x the stream.
 func StoreSize(p fec.Plan) (int64, error) {
 	switch {
 	case p.Blocks < 1 || p.Blocks > fec.MaxBlocks:
@@ -58,6 +64,11 @@ func StoreSize(p fec.Plan) (int64, error) {
 		return 0, fmt.Errorf("rs: %d data and %d parity shards out of range", p.K, p.M)
 	case p.ShardSize < 64 || p.ShardSize > MaxShardSize || p.ShardSize%64 != 0:
 		return 0, fmt.Errorf("rs: shard size %d is not a multiple of 64 from 64 to %d", p.ShardSize, MaxShardSize)
+	// A stream of Nd data shards has B = ceil(Nd / MaxShards) and K = ceil(Nd / B), so the fewest
+	// data shards that give this B and K are max(B(K-1), MaxShards(B-1)) + 1. The plan is refused
+	// when that exceeds the data shards of a MaxStreamSize stream.
+	case max(int64(p.Blocks)*int64(p.K-1), fec.MaxShards*int64(p.Blocks-1))+1 > (MaxStreamSize+int64(p.ShardSize)-1)/int64(p.ShardSize):
+		return 0, fmt.Errorf("rs: the plan holds a stream longer than the %d GiB limit", MaxStreamSize>>30)
 	}
 	// At most 2^24 x 2^16 x (2^16 + 8) bytes: no overflow.
 	return int64(p.Blocks) * int64(p.K+p.M) * int64(p.ShardSize+slotTrailer), nil
@@ -68,7 +79,9 @@ func openedStore(f *os.File, p fec.Plan) *Store {
 }
 
 // Create creates the store file for plan p at path, which must not exist. The file is created
-// sparse at its full size (StoreSize).
+// sparse at its full size (StoreSize): on Windows it is marked sparse first, since NTFS would
+// otherwise allocate and zero the whole size; on a file system without sparse files (FAT32) it
+// occupies its full size at once.
 func Create(path string, p fec.Plan) (*Store, error) {
 	size, err := StoreSize(p)
 	if err != nil {
@@ -78,6 +91,7 @@ func Create(path string, p fec.Plan) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rs: %w", err)
 	}
+	setSparse(f)
 	if err := f.Truncate(size); err != nil {
 		_ = f.Close()
 		_ = os.Remove(path)
