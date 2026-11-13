@@ -850,7 +850,7 @@ note in this document.
 
 | | macOS and Linux | Windows | Does |
 | --- | --- | --- | --- |
-| Setup | `scripts/setup.sh` | `scripts/setup.ps1` | Installs or verifies pinned Go from the official go.dev archive (SHA-256 pinned in the script), git through Homebrew, apt, dnf, pacman or winget, and the linter and release tool through `go install`. Native ffmpeg and wasmtime are optional |
+| Setup | `scripts/setup.sh` | `scripts/setup.ps1` | Installs or verifies pinned Go from the official go.dev archive (SHA-256 pinned in the script), git through Homebrew, apt, dnf, pacman or winget, and the pinned development tools through `tools/dev install-tools`. Native ffmpeg and wasmtime are optional |
 | Build | `scripts/build.sh` | `scripts/build.ps1` | Static build for the host, or all six targets |
 | Test | `scripts/test.sh` | `scripts/test.ps1` | Unit and integration tests with the coverage gate; options for fuzzing, the simulator matrix and real recordings |
 
@@ -864,22 +864,47 @@ archive, SHA-256 pinned). They print what they are about to install, and ask, be
 anything. The build and test scripts are thin wrappers around
 `go run ./tools/dev <task>`, so that logic exists once. CI calls the same scripts on all three systems.
 
+`install-tools` downloads golangci-lint, GoReleaser, syft (the SBOM generator) and actionlint as
+release archives whose SHA-256 is pinned in `tools/dev/tools.go`, and builds go-licenses, which
+publishes no binaries, with `go install`; `-only` installs a subset. Building golangci-lint and
+GoReleaser from source took 2-5 minutes per CI runner and once hung for 55 minutes; a checked download
+takes seconds. Other `tools/dev` tasks: `licenses` (licence compatibility), `check-workflows` (the
+action-pinning and permissions policy, then actionlint), `release-snapshot` (the whole release without
+publishing, then a check that every target and package format was produced) and `sign-windows` (called
+by GoReleaser).
+
 ## 17. CI and release
 
-- **Each pull request**: lint; tests on Linux, macOS and Windows for amd64 and arm64; race detector;
-  coverage gate; vulnerability scan; static-build check for all six targets; release snapshot;
-  licence-compatibility check; short fuzz runs; docs build. Builds and ordinary tests run with
-  `CGO_ENABLED=0`. The race detector needs cgo on most systems and does not support windows/arm64, so
-  race tests run with cgo on the other five runners.
-- **Nightly**: long fuzzing, the full simulator matrix, a 1 GB loopback with memory assertions, and
-  benchmarks with regression alerts.
-- **Security**: CodeQL, dependency updates, actions pinned by commit, least-privilege tokens.
-- **Release**: release-please keeps the changelog and version from conventional commits. A `v*` tag runs
-  GoReleaser: archives, checksums, keyless cosign signature, SBOM, build provenance, Homebrew cask, Scoop
-  manifest, winget pull request, deb, rpm and apk packages, macOS notarisation and Windows signing.
-  Steps whose secrets are absent are skipped.
-- **Docs**: a website built from `docs/` and published to GitHub Pages on each release, containing the
-  user guide, this design, the format specification and an architecture guide.
+- **Each pull request** (`ci.yml`): lint; tests on Linux, macOS and Windows for amd64 and arm64; race
+  detector; coverage gate; vulnerability scan; static-build check for all six targets; release snapshot;
+  licence-compatibility check; workflow policy and actionlint; short fuzz runs (10 s per target); docs
+  build once the website exists (M7). Builds and ordinary tests run with `CGO_ENABLED=0`. The race
+  detector needs cgo on most systems and does not support windows/arm64, so race tests run with cgo on
+  the other five runners. Every job and every long step has a timeout.
+- **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
+  keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
+  simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
+  alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice until then.
+- **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
+  Dependabot for Go modules and actions; govulncheck. Every action is pinned by a full commit SHA with a
+  version comment, every workflow declares top-level permissions (jobs widen them only where needed),
+  and nothing runs on `pull_request_target`; a `tools/dev` test enforces this and CI also checks each
+  comment's tag against the pinned commit. The licence check (go-licenses) allows only licences whose
+  code may be distributed under GPL-3.0-or-later; GPL-2.0 is not on the list, because the tool cannot
+  tell GPL-2.0-only from GPL-2.0-or-later. Vulnerabilities are reported privately (SECURITY.md section
+  11).
+- **Release**: release-please (`release-please.yml`) keeps the changelog and version from conventional
+  commits; merging its pull request creates the `v*` tag and the GitHub release. It stays off until the
+  owner enables it. A `v*` tag runs GoReleaser (`release.yml`, `.goreleaser.yaml`): tar.gz archives (zip
+  on Windows) holding the binary, LICENSE, NOTICE and README; checksums; a keyless cosign signature of
+  the checksum file; an SPDX SBOM per archive; build provenance (`actions/attest`) for every file in
+  the checksum file; Homebrew cask, Scoop manifest and winget pull request; deb, rpm and apk packages;
+  macOS notarisation and Windows signing. Steps whose secrets are absent are skipped. The release
+  build's Go build tags are defined once, as `RELEASE_TAGS` in `.goreleaser.yaml` (none by default),
+  and `tools/dev build` uses the same set.
+- **Docs**: a website built from `docs/` and published to GitHub Pages on each release
+  (`pages.yml`, a skeleton until M7), containing the user guide, this design, the format specification
+  and an architecture guide.
 
 GoReleaser was chosen because it covers every channel above in one configuration; the alternative is
 writing each package format by hand.
@@ -952,3 +977,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 review round 2 and the owner's decision for version 1: every codec, HEVC included, is decoded by the sandboxed engine; the pure-Go `gen2brain/h265` is only an opt-in HEVC fast path, because it allocates a full picture for every missing reference a slice names (about 6.5 GB at 8K), so the 720 MB bound is withdrawn. Section 3 records this; section 8 does not count the fast path; section 11 gives the default decode time (about 2.8-3.6 times the duration for 4K60 on 8 cores, 25-40% slower per core than the fast path) and the two speed-ups; section 12 gives the engine's 4K HEVC figures, keeps skipping the loop filter off, and lists the fast path's protections (exactly `Threads(1)`, the per-sub-layer `sps_max_dec_pic_buffering_minus1 + 1 <= 6` check, `-c copy` before decoding, a stop at the first abandoned decode) as reducing risk, not bounding it; section 13 adds the fast-path flag |
 | 2026-11-13 | M0 review round 3: section 12 requires `WithCloseOnContextDone(true)` on the runtime qrvt creates, adds the 30 s no-progress watchdog with the M1 stream D cost measurement, gives the stream-copy instance's mounts, and states that the HEVC fast-path flag does not ship until the decoder's assembly can be excluded |
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
+| 2026-11-13 | M1 stream G: section 16 says `install-tools` downloads the pinned tools as release archives with pinned SHA-256 (go-licenses through `go install`) and lists the new `tools/dev` tasks; section 17 names the workflows, the nightly placeholders, the workflow policy and its test, the licence allow-list (GPL-2.0 excluded), release-please being off until the owner enables it, provenance for every checksummed file, and `RELEASE_TAGS` in `.goreleaser.yaml` as the one definition of the release build tags |
