@@ -32,7 +32,7 @@ func main() {
 	cache := fs.String("cache", filepath.Join(ucd, "qrvt-spike-s1", "wazero"), "compilation cache dir (empty: none)")
 	interp := fs.Bool("interp", false, "use the wazero interpreter")
 	native := fs.Bool("native", false, "use the system ffmpeg instead of the engine")
-	pages := fs.Uint("pages", 0, "wasm memory limit in 64 KiB pages (0: wazero default)")
+	pages := fs.Uint("pages", 0, "wasm memory limit in 64 KiB pages, reserved up front (0: wazero default growth)")
 	var err error
 	ctx := context.Background()
 	newEng := func() *engine {
@@ -76,6 +76,7 @@ func main() {
 		qp := fs.Int("qp", 32, "quantiser (x264) or crf (aom)")
 		preset := fs.String("preset", "medium", "x264 preset or aom cpu-used")
 		extra := fs.String("extra", "", "extra encoder args, space separated")
+		fs.StringVar(&x264Extra, "x264", "", "extra x264-params, appended (e.g. :no-deblock=1)")
 		out := fs.String("out", "out/enc.mp4", "output file")
 		par := fs.Int("n", 1, "parallel instances")
 		check := fs.Bool("check", false, "decode the output and count cell errors")
@@ -113,6 +114,8 @@ func main() {
 		fatal(err)
 	}
 }
+
+var x264Extra string // appended to -x264-params; set by the encode command
 
 var threadsFlag = new(int) // decoder threads; set by the decode command
 
@@ -440,7 +443,10 @@ func cmdEncode(ctx context.Context, e *engine, o encOpts) error {
 			prof = "high10"
 		}
 		args = append(args, "-c:v", "libx264", "-preset", o.preset, "-profile:v", prof, "-qp", strconv.Itoa(o.qp),
-			"-x264-params", "keyint=1:scenecut=0:bframes=0:cabac=1")
+			"-x264-params", "keyint=1:scenecut=0:bframes=0:cabac=1"+x264Extra)
+	case "vp9-10":
+		args = append(args, "-c:v", "libvpx-vp9", "-profile:v", "2", "-deadline", "realtime", "-cpu-used", o.preset,
+			"-crf", strconv.Itoa(o.qp), "-b:v", "0", "-g", "1")
 	case "aom10":
 		args = append(args, "-c:v", "libaom-av1", "-cpu-used", o.preset, "-crf", strconv.Itoa(o.qp), "-b:v", "0", "-g", "1")
 	default:

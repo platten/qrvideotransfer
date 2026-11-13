@@ -45,7 +45,10 @@ func newEngine(ctx context.Context, cacheDir string, interp bool, limitPages uin
 		cfg = cfg.WithCompilationCache(c)
 	}
 	if limitPages > 0 {
-		cfg = cfg.WithMemoryLimitPages(limitPages)
+		// Reserve the whole limit up front: the backing slice is never
+		// reallocated, so growth leaves no garbage for the Go GC, and
+		// untouched pages are not resident.
+		cfg = cfg.WithMemoryLimitPages(limitPages).WithMemoryCapacityFromMax(true)
 	}
 	rt, err := wasm.NewRuntime(ctx, cfg)
 	if err != nil {
