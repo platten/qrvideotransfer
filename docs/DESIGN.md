@@ -273,18 +273,60 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
 | `normal` (default) | 128 bytes | 0.66 | 15% |
 | `robust` | 64 bytes | 0.34 | 50% |
 
-- Decoder: layered normalised min-sum, scaling 0.75 (computed as floor(3m/4)), 8-bit soft bits, at
-  most 25 iterations, stopping early when all checks pass, then the CRC. Block columns that are
-  entirely shortened are left out of the schedule.
+- Encoder (`internal/fec/ldpc`): systematic, through the dual-diagonal parity structure; the first
+  parity block is the sum of the per-row syndromes of the information part, each later one follows
+  from the row before.
+- Decoder: layered normalised min-sum, one layer per block row, scaling 0.75 (computed as
+  floor(3m/4)), 8-bit soft bits, int16 messages, at most 25 iterations (`ldpc.MaxIterations`). The
+  checks are tested before the first iteration (a clean codeword costs 0 iterations) and after each
+  one, stopping when all pass; then the CRC. Block columns that are entirely shortened are left out of
+  the schedule; the known-zero bits of the one partly shortened column always send the largest
+  magnitude with sign 0, so the checks can never flip them. Posteriors are clamped to +-8,191, which
+  keeps every message within int16 without saturation (|R| <= 24,573, |L - R| <= 32,764), so no input
+  can overflow; a fuzz target checks that arbitrary soft bits never panic and stop within the cap.
+  A `Code` holds its working memory and belongs to one worker.
 - Speed (spike S3, `normal` code, one core, sent bits): 7.6 Mbit/s at a fixed 10 iterations in portable
   Go, against a threshold of 20 Mbit/s, which is **not met**; 18.6 Mbit/s with the experimental
   `simd/archsimd` package; 19.4 Mbit/s with early stopping at Eb/N0 3.0 dB (0.5 dB above the
   waterfall, mean 3.5 iterations). Decoding is parallel across codewords.
+- Speed of the production decoder (M1, `BenchmarkDecode`: `normal` code, one goroutine pinned to one
+  core, early stopping, 64 noisy codewords, sent bits; median of 6 runs with range): 9.8 Mbit/s
+  (9.3-11.6) at Eb/N0 2.5 dB, mean 6.0 iterations; 14.2 Mbit/s (13.1-16.1) at 3.0 dB, 3.7 iterations;
+  22.7 Mbit/s (19.5-23.7) at 4.0 dB, 2.25 iterations. The S3 spike decoder, rebuilt from history and
+  run alternately with it on the same core, gave 8.8-10.4 and 13.8-14.1 Mbit/s at 2.5 and 3.0 dB
+  against 8.2-10.8 and 13.0-16.0 for the production decoder in the same session: the same speed within
+  the noise. Both are below S3's own figures (13.4 and 19.4) because the machine was shared with other
+  jobs during M1; the S3 verdict (threshold not met per core) stands. No SIMD path was written.
 - Release builds must not depend on a Go experiment or an amd64-only package. The portable decoder is
   the default on all six targets; a SIMD path may exist only as an optional build behind a build tag,
   tested to give output identical to the portable decoder.
 - The matrices must come from the standard, not from memory. A wrong table still gives a
-  self-consistent code, so the guard is a bit-error-rate test against published thresholds.
+  self-consistent code, so the guard is an error-rate test against published curves (`TestErrorRate`):
+  the unshortened mother code of each rate, BPSK over AWGN, soft bits 4 per unit of LLR, must reach
+  frame error rate 1e-2 within 0.5 dB of the published Eb/N0, shown with 95% confidence (at most 4
+  frame errors in 1,000 frames per rate; 20,000 frames with `QRVT_LONG_TESTS=1`). Measured
+  (`TestErrorRateCurves`, 4,000 frames per 0.1 dB step), Eb/N0 at FER 1e-2:
+
+  | Rate | Published | Source | Measured |
+  | --- | --- | --- | --- |
+  | 1/2 | 1.81 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 1.82 dB |
+  | 2/3 | 2.32 dB | [B], flooding sum-product, 20 iterations | 2.23 dB |
+  | 3/4 | 2.84 dB | [B], flooding sum-product, 20 iterations | 2.77 dB |
+  | 5/6 | 3.70 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 3.53 dB |
+
+  [A] Balatsoukas-Stimming, Giard, Burg, "Comparison of Polar Decoders with Existing Low-Density
+  Parity-Check and Turbo Decoders", arXiv:1702.04707v2, 2017, curve "IEEE 802.11n (I = 12)", BPSK,
+  Eb/N0. [B] S. Tavildar, github.com/tavildar/LDPC, `results/wifi_ldpc_qpsk.png`, curves N = 1944, one
+  bit per real dimension, Eb/N0; the only source found for rates 2/3 and 3/4, and not peer-reviewed.
+  Each published value is a log-linear interpolation between the two bracketing points of the curve.
+  Our decoder is within 0.2 dB of every reference (better than [A] and [B] where it runs more
+  iterations). A cross-check from Roth et al., IEEE ASSCC 2010, Fig. 5 (Z = 81, 10 iterations of a
+  5-bit offset min-sum) gives 2.16 dB and 3.71 dB for rates 1/2 and 5/6.
+- The shortened inner codes reach FER 1e-2 (BPSK, AWGN, same test) at Eb/N0 per information bit
+  (CRC included) of `fast` 3.46 dB, `normal` 2.48 dB, code 3 2.07 dB and `robust` 2.20 dB; per sent
+  bit (Es/N0 = Eb/N0 + 10 log10(net rate)), which is what the noise of a cell sets, that is 2.55,
+  0.70, -0.14 and -2.51 dB. `robust` buys its 2.4 dB over code 3 with 56% of the payload per sent bit: shortening
+  by 428 of 972 bits spends much of the rate-1/2 code's redundancy.
 - Codeword bits are spread over the whole frame by a pseudo-random permutation with a per-frame rotation,
   so glare in one corner costs every codeword a little instead of a few codewords everything.
 - No mature Go library does soft-decision LDPC, so this is written in the repository. The DVB-S2
@@ -478,10 +520,44 @@ Costs a user should expect:
       clips with both and requires identical output.
     - The decoder's assembly is excluded, and the flag does not ship until it can be. Its `noasm` build
       tag is global: `klauspost/reedsolomon` and
-      `klauspost/compress` also honour it. M1 measures the whole release built with `-tags noasm` and
-      accepts it only if Reed-Solomon and zstd each stay above about 50 MB/s per core; otherwise the
-      fast path needs a package-specific tag upstream. This concerns the fast path and those
-      libraries only, not the default path's safety.
+      `klauspost/compress` also honour it (and `klauspost/cpuid`, which then reports no CPU features).
+      M1 measures the whole release built with `-tags noasm` and accepts it only if Reed-Solomon and
+      zstd each stay above about 50 MB/s per core; otherwise the fast path needs a package-specific
+      tag upstream. This concerns the fast path and those libraries only, not the default path's
+      safety.
+    - Measured in M1 (stream B; one goroutine pinned to one core of a Core Ultra 9 285H under WSL2,
+      shared with other jobs, so single runs varied by up to 4x; median of 5 runs interleaved across
+      tag sets, MB/s of uncompressed data or of data shards; Reed-Solomon over GF(2^16), 128-byte
+      shards; zstd from `klauspost/compress` v1.20.4 on 16 MiB of Go source and 16 MiB of random
+      bytes):
+
+      | Operation | Default | `noasm` | `nounsafe` | `noasm,nounsafe` |
+      | --- | --- | --- | --- | --- |
+      | RS encode, K 32,768, M 6,554 | 2,138 | 129 | 2,204 | 138 |
+      | RS encode, K 100, M 20 | 5,943 | 610 | 6,148 | 663 |
+      | RS reconstruct, K 32,768, M data shards lost | 300 | 45 | 354 | 49 |
+      | RS reconstruct, K 32,768, M/10 data shards lost | 340 | 57 | 372 | 53 |
+      | RS reconstruct, K 100, M 20 lost | 20 | 20 | 26 | 20 |
+      | zstd decompress, text (default level) | 1,504 | 858 | 1,744 | 861 |
+      | zstd decompress, text (`SpeedBestCompression`) | 1,742 | 1,002 | 1,995 | 1,122 |
+      | zstd decompress, random | 4,217 | 4,301 | 5,232 | 4,947 |
+      | zstd compress, text, default level | 341 | 355 | 374 | 301 |
+      | zstd compress, text, `SpeedBestCompression` | 34 | 35 | 38 | 37 |
+      | zstd compress, random, default / best | 1,931 / 338 | 2,117 / 291 | 1,966 / 310 | 1,994 / 293 |
+
+      Decision: **the whole release can be built with `-tags noasm,nounsafe`**, so that no third-party
+      assembly and no third-party `unsafe` runs on decoded data. On the decode side, zstd stays far
+      above the bar (860 MB/s and more), and Reed-Solomon reconstruction of a full block reaches the
+      bar at its edge: 45-49 MB/s per core when a block has lost all M data shards it can, 53-57 MB/s
+      at a tenth of that. That is about 50, and blocks are reconstructed in parallel, one per worker,
+      far faster than a recording delivers shards. The cost is on the encode side: Reed-Solomon
+      encoding falls from about 2 GB/s to about 130 MB/s per core. `nounsafe` costs nothing
+      measurable. Two numbers do not depend on the tags: reconstruction costs at least about 0.5-1 ms per block
+      whatever its size (part of the work is a transform over the whole GF(2^16) field, so a block of
+      100 shards runs at about 20 MB/s; a stream has blocks of fewer than 16,385 shards only when it is
+      a single block of under 2-6 MB, so this is about a millisecond per stream), and zstd at `SpeedBestCompression` compresses text at about 35 MB/s per core with or
+      without assembly, which is the encoder's own input and outside this question. Stream G sets the
+      release build's tags; until it does, the default path keeps the libraries' assembly.
 - **Backends.** One interface with three implementations: embedded (default), an external `ffmpeg`
   process for `--ffmpeg system`, and a raw-frame file backend for tests.
 - **Start-up.** The compiled module is cached on disk, so only the first run pays for compilation
@@ -952,3 +1028,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 review round 2 and the owner's decision for version 1: every codec, HEVC included, is decoded by the sandboxed engine; the pure-Go `gen2brain/h265` is only an opt-in HEVC fast path, because it allocates a full picture for every missing reference a slice names (about 6.5 GB at 8K), so the 720 MB bound is withdrawn. Section 3 records this; section 8 does not count the fast path; section 11 gives the default decode time (about 2.8-3.6 times the duration for 4K60 on 8 cores, 25-40% slower per core than the fast path) and the two speed-ups; section 12 gives the engine's 4K HEVC figures, keeps skipping the loop filter off, and lists the fast path's protections (exactly `Threads(1)`, the per-sub-layer `sps_max_dec_pic_buffering_minus1 + 1 <= 6` check, `-c copy` before decoding, a stop at the first abandoned decode) as reducing risk, not bounding it; section 13 adds the fast-path flag |
 | 2026-11-13 | M0 review round 3: section 12 requires `WithCloseOnContextDone(true)` on the runtime qrvt creates, adds the 30 s no-progress watchdog with the M1 stream D cost measurement, gives the stream-copy instance's mounts, and states that the HEVC fast-path flag does not ship until the decoder's assembly can be excluded |
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
+| 2026-11-13 | M1 stream B: section 8 describes the encoder and the decoder as built (int16 bounds, pinned shortened bits, check before the first iteration), records the production decoder's speed beside the S3 decoder, and records the error-rate test: published FER 1e-2 points for the four 802.11n n = 1944 mother codes with their sources, our measured points (all within 0.2 dB), and the shortened codes' points; section 12 records the `noasm`/`nounsafe` measurement and the decision that the whole release can be built with `-tags noasm,nounsafe` |

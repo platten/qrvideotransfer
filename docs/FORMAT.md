@@ -286,6 +286,16 @@ the four standard rates, shortened so that one codeword carries exactly one shar
   They must be taken from the standard or from two independent published implementations that agree,
   never reproduced from memory. A transcription slip still yields a working code that cannot
   interoperate, so the matrices in the repository are covered by a test vector (section 13).
+- The data file `internal/fec/ldpc/ieee80211n_1944.txt` holds the four base matrices: 24 x (1 - R)
+  block rows (12, 8, 6 and 4) of 24 shifts each, -1 for an all-zero 81 x 81 block, otherwise the right
+  cyclic shift of the identity. Its SHA-256 is
+  `c51a02dd2b4916fb182df0e7d02d9d5824eb6b6c0f6dd7a6895a220cc7a3514e`.
+- The parity bits are unique: the parity part of each base matrix (a first column of weight 3 with
+  shifts 1, 0, 1, then a dual diagonal of unshifted identities) is invertible, so any encoder that
+  satisfies `H c = 0` with the bits above produces the same sent bits.
+- The vectors of section 13 are frozen (M1). Worked values: for the all-zero 128-byte shard (codes 2
+  and 3) the CRC-32C is `082764db`; for the all-zero 64-byte shard (code 4) `03c8eb67`; for the
+  all-zero 192-byte shard (code 1) `74357830`.
 
 ## 9. Bits to cells
 
@@ -437,7 +447,7 @@ and reviewed by hand against this document:
 | Layout counts for the five preset grids | Section 5.3 table |
 | Header: fixed field values to 236 slot bits | Section 6 |
 | Shuffle(10, 1) and the first 4 SplitMix64 outputs for state 0 | Section 1 |
-| LDPC: for each inner code, an all-zero shard and a fixed pseudo-random shard to sent bits; and `H c = 0` for both | Section 8 |
+| LDPC (`ldpc.json`, frozen in M1): for each inner code, an all-zero shard and a fixed pseudo-random shard (big-endian SplitMix64 outputs from state = inner-code id) to sent bits, packed most significant bit first with zero padding; and `H c = 0` for both | Section 8 |
 | Frame: fixed stream, session and seed to the SHA-256 of the luma plane of frames 0 and 1, for Gray2, Gray4 and RGB8 at 480p | Sections 4 to 11 |
 | Stream: fixed inputs to stream bytes, unsigned and signed with a fixed key; one manifest per path rule that must be refused | Section 12 |
 | Reference video: a small encoded MP4 that every later release must decode | Whole format |
@@ -486,3 +496,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-13 | First draft |
 | 2026-11-13 | M0: section 3 states the grid limits a decoder enforces (GridY at least 30, 15 GridX > GridY); section 11 states the limits on B and F; section 13 writes the example session as `0x1234`. All numbers of sections 5.3 and 13 reproduced by the implementation and by an independent script; no value changed |
 | 2026-11-13 | M0 spikes: section 3 allows H.264 Main as well as High profile (the encoder's fastest settings turn off the 8x8 transform, so x264 signals Main, a subset of High); section 14 records the S1 result for the modulation 4 codec. No value a decoder relies on changed |
+| 2026-11-13 | M1 stream B: section 8 names the matrices' data file and its SHA-256, states that the parity bits are unique, and gives the CRC-32C of the all-zero shards; section 13 freezes the LDPC vectors in `testdata/golden/ldpc.json` and says how the pseudo-random shard is made and how sent bits are packed in the file. No value changed |
