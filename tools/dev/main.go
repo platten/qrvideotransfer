@@ -166,28 +166,49 @@ func checkStatic(bin, goos string) error {
 	return nil
 }
 
-func goTest(tags string, args ...string) []string { return nil }
+// goTest returns the arguments of `go test` built with the given tags (none when tags is empty).
+// The test, cover and fuzz tasks pass the release build's tags, so that CI tests what ships.
+func goTest(tags string, args ...string) []string {
+	out := []string{"test"}
+	if tags != "" {
+		out = append(out, "-tags="+tags)
+	}
+	return append(out, args...)
+}
 
-func testCommand(args []string, tags string) (env, goArgs []string) { return nil, nil }
-
-func test(args []string) error {
+// testCommand returns the environment and `go test` arguments of the test task.
+func testCommand(args []string, tags string) (env, goArgs []string) {
 	fs := newFlags("test")
 	race := fs.Bool("race", false, "run with the race detector (enables cgo)")
 	long := fs.Bool("long", false, "include long tests (QRVT_LONG_TESTS=1)")
 	short := fs.Bool("short", false, "pass -short to go test")
+	untagged := fs.Bool("untagged", false, "test the default build, without the release build tags")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
-	env := []string{"CGO_ENABLED=0"}
-	goArgs := []string{"test"}
+	if *untagged {
+		tags = ""
+	}
+	env = []string{"CGO_ENABLED=0"}
+	var extra []string
 	if *race {
-		env, goArgs = []string{"CGO_ENABLED=1"}, append(goArgs, "-race")
+		env, extra = []string{"CGO_ENABLED=1"}, append(extra, "-race")
 	}
 	if *long {
 		env = append(env, "QRVT_LONG_TESTS=1")
 	}
 	if *short {
-		goArgs = append(goArgs, "-short")
+		extra = append(extra, "-short")
 	}
-	return run(env, "go", append(append(goArgs, fs.Args()...), "./...")...)
+	extra = append(append(extra, fs.Args()...), "./...")
+	return env, goTest(tags, extra...)
+}
+
+func test(args []string) error {
+	tags, err := releaseTags()
+	if err != nil {
+		return err
+	}
+	env, goArgs := testCommand(args, tags)
+	return run(env, "go", goArgs...)
 }
 
 func lint(args []string) error {
@@ -242,7 +263,11 @@ func fuzz(args []string) error {
 	fs := newFlags("fuzz")
 	d := fs.Duration("time", 10*time.Second, "fuzzing time per target")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
-	out, err := exec.Command("go", "test", "-list", "^Fuzz", "./...").Output()
+	tags, err := releaseTags()
+	if err != nil {
+		return err
+	}
+	out, err := exec.Command("go", goTest(tags, "-list", "^Fuzz", "./...")...).Output()
 	if err != nil {
 		return fmt.Errorf("listing fuzz targets: %w", err)
 	}
@@ -260,7 +285,7 @@ func fuzz(args []string) error {
 				}
 				n++
 				env := []string{"CGO_ENABLED=0"}
-				if err := run(env, "go", "test", "-run", "^$", "-fuzz", "^"+name+"$", "-fuzztime", d.String(), f[1]); err != nil {
+				if err := run(env, "go", goTest(tags, "-run", "^$", "-fuzz", "^"+name+"$", "-fuzztime", d.String(), f[1])...); err != nil {
 					return err
 				}
 			}
