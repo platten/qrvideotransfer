@@ -68,14 +68,32 @@ func Verify(ctx context.Context, stream io.ReaderAt, streamLen int64, trusted []
 	return v, nil
 }
 
+// Phase is a step of extraction that reports [Progress].
+type Phase uint8
+
+// Phases of extraction, in the order they run.
+const (
+	PhaseCheck  Phase = iota + 1 // checking what exists at each entry's path; counts entries
+	PhaseWrite                   // writing and verifying file data in staging; counts file bytes
+	PhaseCommit                  // creating folders and placing files; counts entries
+	PhaseFinish                  // setting the modes and times of the folders created; counts entries
+)
+
+// Progress is one progress report of [Unpack]: Done of Total in the unit of its phase. Each phase
+// reports 0 of Total when it starts and Total of Total when it ends.
+type Progress struct {
+	Phase       Phase
+	Done, Total int64
+}
+
 // UnpackOptions are the inputs of [Unpack].
 type UnpackOptions struct {
-	OutputDir  string                  // created if missing
-	Passphrase func() (string, error)  // asked only after the signature checks, and only if encrypted
-	VerifyKeys []ed25519.PublicKey     // non-empty: the stream must be signed by one of these
-	MaxSize    int64                   // largest archive and total file size; 0: DefaultMaxSize
-	Overwrite  bool                    // replace existing regular files
-	Progress   func(done, total int64) // file bytes unpacked; nil allowed
+	OutputDir  string                 // created if missing
+	Passphrase func() (string, error) // asked only after the signature checks, and only if encrypted
+	VerifyKeys []ed25519.PublicKey    // non-empty: the stream must be signed by one of these
+	MaxSize    int64                  // largest archive and total file size; 0: DefaultMaxSize
+	Overwrite  bool                   // replace existing regular files
+	Progress   func(Progress)         // called from Unpack's goroutine; nil allowed
 }
 
 // UnpackResult describes an unpacked stream.
@@ -176,7 +194,7 @@ func unpackArchive(ctx context.Context, r io.Reader, archiveLen int64, o UnpackO
 	if err := ValidateManifest(entries, maxSize(o)); err != nil {
 		return nil, err
 	}
-	x, err := newExtractor(ctx, o.OutputDir, entries, o.Overwrite)
+	x, err := newExtractor(ctx, o.OutputDir, entries, o.Overwrite, o.Progress)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +203,10 @@ func unpackArchive(ctx context.Context, r io.Reader, archiveLen int64, o UnpackO
 	for i, e := range entries {
 		res.Paths[i] = e.Path
 	}
-	pw := &progressWriter{fn: o.Progress}
+	pw := &progressWriter{}
+	if o.Progress != nil {
+		pw.fn = func(done, total int64) { o.Progress(Progress{PhaseWrite, done, total}) }
+	}
 	for _, e := range entries {
 		pw.total += e.Size
 	}

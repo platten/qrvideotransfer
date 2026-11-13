@@ -83,7 +83,11 @@ func TestRoundTrip(t *testing.T) {
 			out := t.TempDir()
 			uo := UnpackOptions{OutputDir: out, Passphrase: passphrase("correct horse", nil)}
 			var ulast int64
-			uo.Progress = func(done, total int64) { ulast = done }
+			uo.Progress = func(p Progress) {
+				if p.Phase == PhaseWrite {
+					ulast = p.Done
+				}
+			}
 			ur, err := unpack(stream, uo)
 			if err != nil {
 				t.Fatal(err)
@@ -211,6 +215,68 @@ func TestInputsCaseCollision(t *testing.T) {
 	var ie *InputError
 	if _, _, err := collect([]string{filepath.Join(src, "README"), filepath.Join(src, "d", "readme")}); !errors.As(err, &ie) {
 		t.Fatalf("case collision: %v", err)
+	}
+}
+
+// TestInputsListsEveryProblem checks that the encoder refuses with every path that breaks a rule, each
+// with the rule it breaks, and not only the first. The entries are made directly, because most of
+// these names cannot be created on Windows.
+func TestInputsListsEveryProblem(t *testing.T) {
+	es := []Entry{entry("x", true), entry("x/CON.txt", false), entry("x/a:b", false), entry("x/c?d", false)}
+	deep := "x"
+	for range 64 {
+		deep += "/d"
+		es = append(es, entry(deep, true))
+	}
+	es = append(es, entry("x/fine", false), entry("x/trailing.", false), entry("x/z", false), entry("x/Z", false))
+	want := map[string]string{ // path to a word of the rule it breaks
+		"x/CON.txt":   "device",
+		"x/a:b":       "colon",
+		"x/c?d":       "Windows",
+		deep:          "64 components",
+		"x/trailing.": "dot",
+		"x/Z":         "case folding",
+	}
+	err := validateInputs(es)
+	var ie *InputsError
+	if !errors.As(err, &ie) {
+		t.Fatalf("validateInputs = %v, want an InputsError", err)
+	}
+	got := map[string]string{}
+	for _, p := range ie.Inputs {
+		got[p.Path] = p.Reason
+	}
+	if len(got) != len(want) || len(ie.Inputs) != len(want) {
+		t.Errorf("refused %v, want the paths of %v", got, want)
+	}
+	for p, word := range want {
+		if !strings.Contains(got[p], word) {
+			t.Errorf("%q: reason %q, want one mentioning %q", p, got[p], word)
+		}
+		if !strings.Contains(err.Error(), p) {
+			t.Errorf("message does not name %q:\n%v", p, err)
+		}
+	}
+	var one *InputError
+	if !errors.As(err, &one) || one.Path != ie.Inputs[0].Path {
+		t.Errorf("errors.As(InputError) = %v", one)
+	}
+	if err := validateInputs(es[:2]); !errors.As(err, &ie) || len(ie.Inputs) != 1 {
+		t.Errorf("one problem: %v", err)
+	}
+	if err := validateInputs([]Entry{entry("x", true), entry("x/fine", false)}); err != nil {
+		t.Errorf("good entries: %v", err)
+	}
+
+	// The same through Pack, with real files, where the file system can hold the names.
+	if isWindows() {
+		return
+	}
+	src := t.TempDir()
+	in := tree{"in/": "", "in/a:b": "", "in/c|d": "", "in/ok": "", "in/e*f": ""}.write(t, src)
+	_, err = Pack(context.Background(), &spool{}, PackOptions{Inputs: in})
+	if !errors.As(err, &ie) || len(ie.Inputs) != 3 {
+		t.Fatalf("Pack = %v, want an InputsError with three paths", err)
 	}
 }
 

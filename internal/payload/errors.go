@@ -3,6 +3,7 @@ package payload
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Built-in limits (SECURITY.md section 5). Each is enforced with a [LimitError] naming it.
@@ -48,6 +49,31 @@ type InputError struct {
 // Error implements the error interface.
 func (e *InputError) Error() string {
 	return fmt.Sprintf("payload: cannot pack %q: %s", e.Path, e.Reason)
+}
+
+// InputsError lists every input path that cannot be packed, each with the rule of FORMAT.md section
+// 12 it breaks, so that all of them can be renamed at once. errors.As finds each [InputError] in it.
+type InputsError struct {
+	Inputs []*InputError
+}
+
+// Error implements the error interface: one line per path.
+func (e *InputsError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "payload: cannot pack %d paths that break the path rules:", len(e.Inputs))
+	for _, ie := range e.Inputs {
+		fmt.Fprintf(&b, "\n\t%q: %s", ie.Path, ie.Reason)
+	}
+	return b.String()
+}
+
+// Unwrap returns the errors for errors.Is and errors.As.
+func (e *InputsError) Unwrap() []error {
+	errs := make([]error, len(e.Inputs))
+	for i, ie := range e.Inputs {
+		errs[i] = ie
+	}
+	return errs
 }
 
 // ExistsError reports an output path that already exists and may not be replaced.

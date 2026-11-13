@@ -10,8 +10,9 @@ import (
 
 // Path limits of FORMAT.md section 12.
 const (
-	maxComponent = 255
-	maxPath      = 4096
+	maxComponent  = 255
+	maxPath       = 4096
+	maxComponents = 64 // components in a path
 )
 
 // devices are the Windows device names a component may not take, compared with its part from the first

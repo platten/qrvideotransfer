@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -37,14 +38,15 @@ type goldenDecode struct {
 	Stream     string `json:"stream"`
 }
 
-type goldenRefused struct {
+// goldenManifest is a manifest a decoder must refuse, or one at the edge of a rule that it must accept.
+type goldenManifest struct {
 	Rule        string `json:"rule"`
 	Manifest    string `json:"manifest,omitempty"`
 	ManifestHex string `json:"manifest_hex,omitempty"` // a manifest that is not valid UTF-8
 }
 
-// bytes returns the refused manifest's bytes.
-func (r goldenRefused) bytes(t *testing.T) []byte {
+// bytes returns the manifest's bytes.
+func (r goldenManifest) bytes(t *testing.T) []byte {
 	if r.ManifestHex == "" {
 		return []byte(r.Manifest)
 	}
@@ -54,15 +56,16 @@ func (r goldenRefused) bytes(t *testing.T) []byte {
 }
 
 type golden struct {
-	Note        string          `json:"note"`
-	MTime       string          `json:"mtime"`
-	Inputs      []goldenInput   `json:"inputs"`
-	KeySeed     string          `json:"key_seed"`
-	Fingerprint string          `json:"fingerprint"`
-	Unsigned    goldenStream    `json:"unsigned"`
-	Signed      goldenStream    `json:"signed"`
-	Decode      []goldenDecode  `json:"decode"`
-	Refused     []goldenRefused `json:"refused"`
+	Note        string           `json:"note"`
+	MTime       string           `json:"mtime"`
+	Inputs      []goldenInput    `json:"inputs"`
+	KeySeed     string           `json:"key_seed"`
+	Fingerprint string           `json:"fingerprint"`
+	Unsigned    goldenStream     `json:"unsigned"`
+	Signed      goldenStream     `json:"signed"`
+	Decode      []goldenDecode   `json:"decode"`
+	Refused     []goldenManifest `json:"refused"`
+	Accepted    []goldenManifest `json:"accepted"`
 }
 
 var goldenInputs = []goldenInput{
@@ -75,40 +78,74 @@ var goldenInputs = []goldenInput{
 	{"notes.txt", 0o640, "line one\nline two\n"},
 }
 
+// goldenRule is the manifest of a golden vector: the entry path and, if not empty, second; or, when
+// depth is not zero, a chain of folders d, d/d, ... ending in a file f at that many components.
+type goldenRule struct {
+	rule, path, second string
+	depth              int
+}
+
+// entries returns the vector's manifest entries.
+func (r goldenRule) entries() []Entry {
+	file := func(p string) Entry { return Entry{Path: p, Mode: 0o644, MTime: testTime, SHA256: sha256.Sum256(nil)} }
+	if r.depth > 0 {
+		var es []Entry
+		p := ""
+		for range r.depth - 1 {
+			p += "d"
+			es = append(es, Entry{Path: p, Dir: true, Mode: 0o755, MTime: testTime})
+			p += "/"
+		}
+		return append(es, file(p+"f"))
+	}
+	es := []Entry{file(r.path)}
+	if r.second != "" {
+		es = append(es, file(r.second))
+	}
+	return es
+}
+
+// acceptedRules are manifests at the edge of a path rule of FORMAT.md section 12 that a decoder must
+// accept.
+var acceptedRules = []goldenRule{
+	{rule: "exactly 64 components", depth: 64},
+}
+
 // refusedRules is one manifest per path rule of FORMAT.md section 12 that a decoder must refuse.
-var refusedRules = []struct{ rule, path, second string }{
-	{"absolute", "/etc/passwd", ""},
-	{"empty component", "a//b", ""},
-	{"trailing separator", "a/", ""},
-	{"dot component", "a/./b", ""},
-	{"dot-dot component", "../b", ""},
-	{"invalid UTF-8", "a\xffb", ""},
-	{"not NFC", "é", ""},
-	{"NUL", "a\x00b", ""},
-	{"control character", "a\x1b[2Jb", ""},
-	{"DEL", "a\x7fb", ""},
-	{"backslash", "a\\b", ""},
-	{"colon", "c:b", ""},
-	{"trailing space", "a /b", ""},
-	{"trailing dot", "a.", ""},
-	{"device name", "con", ""},
-	{"device name with extension", "LPT3.txt.gz", ""},
-	{"component over 255 bytes", strings.Repeat("c", 256), ""},
-	{"path over 4096 bytes", strings.Repeat("p/", 2048) + "p", ""},
-	{"equal after case folding", "Straße", "STRASSE"},
-	{"file under a file", "a", "a/b"},
-	{"equal after case folding (Cherokee)", "Ꭰ", "ꭰ"},
-	{"less-than", "a<b", ""},
-	{"greater-than", "a>b", ""},
-	{"double quote", "a\"b", ""},
-	{"vertical bar", "a|b", ""},
-	{"question mark", "a?b", ""},
-	{"asterisk", "a*b", ""},
-	{"device name with superscript digit", "COM¹", ""},
-	{"console device name", "CONIN$.txt", ""},
-	{"device name with spaces before the dot", "NUL  .txt", ""},
-	{"file under a file at depth", "a", "a/b/c"},
-	{"folder not an entry", "a/b", ""},
+var refusedRules = []goldenRule{
+	{"absolute", "/etc/passwd", "", 0},
+	{"empty component", "a//b", "", 0},
+	{"trailing separator", "a/", "", 0},
+	{"dot component", "a/./b", "", 0},
+	{"dot-dot component", "../b", "", 0},
+	{"invalid UTF-8", "a\xffb", "", 0},
+	{"not NFC", "é", "", 0},
+	{"NUL", "a\x00b", "", 0},
+	{"control character", "a\x1b[2Jb", "", 0},
+	{"DEL", "a\x7fb", "", 0},
+	{"backslash", "a\\b", "", 0},
+	{"colon", "c:b", "", 0},
+	{"trailing space", "a /b", "", 0},
+	{"trailing dot", "a.", "", 0},
+	{"device name", "con", "", 0},
+	{"device name with extension", "LPT3.txt.gz", "", 0},
+	{"component over 255 bytes", strings.Repeat("c", 256), "", 0},
+	{"path over 4096 bytes", strings.Repeat(strings.Repeat("p", 250)+"/", 16) + strings.Repeat("p", 81), "", 0},
+	{"equal after case folding", "Straße", "STRASSE", 0},
+	{"file under a file", "a", "a/b", 0},
+	{"equal after case folding (Cherokee)", "Ꭰ", "ꭰ", 0},
+	{"less-than", "a<b", "", 0},
+	{"greater-than", "a>b", "", 0},
+	{"double quote", "a\"b", "", 0},
+	{"vertical bar", "a|b", "", 0},
+	{"question mark", "a?b", "", 0},
+	{"asterisk", "a*b", "", 0},
+	{"device name with superscript digit", "COM¹", "", 0},
+	{"console device name", "CONIN$.txt", "", 0},
+	{"device name with spaces before the dot", "NUL  .txt", "", 0},
+	{"file under a file at depth", "a", "a/b/c", 0},
+	{"folder not an entry", "a/b", "", 0},
+	{rule: "more than 64 components", depth: 65},
 }
 
 func goldenTree() (tree, map[string]uint32) {
@@ -219,6 +256,36 @@ func TestGoldenStream(t *testing.T) {
 			expectEmpty(t, out)
 		})
 	}
+
+	if len(g.Accepted) != len(acceptedRules) {
+		t.Fatalf("golden file has %d accepted manifests, test has %d rules", len(g.Accepted), len(acceptedRules))
+	}
+	for _, r := range g.Accepted {
+		t.Run("accept "+r.Rule, func(t *testing.T) {
+			m := r.bytes(t)
+			es, err := ParseManifest(m)
+			must(t, err)
+			must(t, ValidateManifest(es, DefaultMaxSize))
+			var (
+				tes  []tarEntry
+				want []string
+			)
+			for _, e := range es {
+				te := fileHdr(e.Path, "")
+				if e.Dir {
+					te = dirHdr(e.Path)
+				}
+				tes, want = append(tes, te), append(want, e.Path)
+			}
+			a := archive(t, m, tes...)
+			out := t.TempDir()
+			res, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out})
+			must(t, err)
+			if !slices.Equal(res.Paths, want) {
+				t.Fatalf("extracted %q", res.Paths)
+			}
+		})
+	}
 }
 
 func writeGolden(t *testing.T, srcs []source, unsigned, signed []byte) {
@@ -227,7 +294,8 @@ func writeGolden(t *testing.T, srcs []source, unsigned, signed []byte) {
 		Note: "FORMAT.md section 12 stream vectors, checked by internal/payload TestGoldenStream. Inputs are " +
 			"created with the given modes and every mtime set to the value below; the key's seed is the bytes " +
 			"0 to 31. unsigned and signed use compression 0 and must be reproduced byte for byte; the decode " +
-			"streams (zstd, xz, age) must still decode to the inputs. Each refused manifest must be refused.",
+			"streams (zstd, xz, age) must still decode to the inputs. Each refused manifest must be refused, and each " +
+			"accepted manifest accepted.",
 		MTime:       testTime.Format("2006-01-02T15:04:05Z"),
 		Inputs:      goldenInputs,
 		KeySeed:     hex.EncodeToString(testKey().Seed()),
@@ -254,20 +322,20 @@ func writeGolden(t *testing.T, srcs []source, unsigned, signed []byte) {
 			g.Decode = append(g.Decode, goldenDecode{d.name, d.pw, hex.EncodeToString(goldenPack(t, srcs, d.o))})
 		}
 	}
+	for _, r := range acceptedRules {
+		g.Accepted = append(g.Accepted, goldenManifest{Rule: r.rule, Manifest: string(MarshalManifest(r.entries()))})
+	}
 	for _, r := range refusedRules {
-		es := []Entry{{Path: r.path, Size: 0, Mode: 0o644, MTime: testTime, SHA256: sha256.Sum256(nil)}}
-		if r.second != "" {
-			es = append(es, Entry{Path: r.second, Size: 0, Mode: 0o644, MTime: testTime, SHA256: sha256.Sum256(nil)})
-		}
+		es := r.entries()
 		m := MarshalManifest(es)
 		if !utf8.ValidString(r.path) { // JSON encoding would replace the invalid bytes: splice them in
 			es[0].Path = "PLACEHOLDER"
 			m = bytes.Replace(MarshalManifest(es), []byte("PLACEHOLDER"), []byte(r.path), 1)
 		}
 		if utf8.Valid(m) {
-			g.Refused = append(g.Refused, goldenRefused{Rule: r.rule, Manifest: string(m)})
+			g.Refused = append(g.Refused, goldenManifest{Rule: r.rule, Manifest: string(m)})
 		} else {
-			g.Refused = append(g.Refused, goldenRefused{Rule: r.rule, ManifestHex: hex.EncodeToString(m)})
+			g.Refused = append(g.Refused, goldenManifest{Rule: r.rule, ManifestHex: hex.EncodeToString(m)})
 		}
 	}
 	var b bytes.Buffer

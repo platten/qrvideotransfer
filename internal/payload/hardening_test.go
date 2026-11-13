@@ -230,9 +230,10 @@ func deepManifest(n, depth int) []tarEntry {
 	return es
 }
 
-// TestDeepManifestResources decodes a manifest near the limits of depth and size (validation and
-// pre-check; the tar is empty) within 1 GiB, and on Linux within 60 s (SECURITY.md section 9.5). How
-// extraction scales with depth is checked on every system by TestExtractionScaling.
+// TestDeepManifestResources decodes the manifest within the limits that maximises files times depth
+// (validation and pre-check; the tar is empty) within 1 GiB, and on Linux within 60 s (SECURITY.md
+// section 9.5). How extraction work grows with depth is counted on every system by
+// TestExtractionWorkIsLinear; BenchmarkExtractWorstCase times extracting this manifest.
 func TestDeepManifestResources(t *testing.T) {
 	if testing.Short() {
 		t.Skip("manifests near the limits; skipped with -short")
@@ -241,8 +242,8 @@ func TestDeepManifestResources(t *testing.T) {
 		t.Skip("the time bound does not apply under the race detector; it runs in the ordinary test task")
 	}
 	start := time.Now()
-	m := MarshalManifest(manifestFor(deepManifest(14500, 2000)...)) // about 64 MB of manifest
-	if len(m) < 59<<20 || len(m) > MaxManifestBytes {
+	m := MarshalManifest(worstCase(false))
+	if len(m) < MaxManifestBytes-1024 || len(m) > MaxManifestBytes {
 		t.Fatalf("manifest is %d bytes", len(m))
 	}
 	var b bytes.Buffer

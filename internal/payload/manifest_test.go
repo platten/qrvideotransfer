@@ -12,7 +12,9 @@ import (
 func TestValidatePath(t *testing.T) {
 	ok := []string{
 		"a", "a/b.txt", "docs/ünïcode.txt", "a b/c", ".hidden", "a.b.c", "CONSOLE", "com0", "lpt10",
-		"COM1x", "auxiliary.txt", "x/nulx", strings.Repeat("a", 255), strings.Repeat("a/", 2047) + "aa",
+		"COM1x", "auxiliary.txt", "x/nulx", strings.Repeat("a", 255),
+		strings.Repeat(strings.Repeat("a", 250)+"/", 16) + strings.Repeat("a", 80), // 4,096 bytes
+		strings.Repeat("a/", 63) + "a",                                             // 64 components
 		"日本語/ファイル", "semi;colon", "a~b",
 	}
 	for _, p := range ok {
@@ -26,7 +28,8 @@ func TestValidatePath(t *testing.T) {
 		"a\xffb", "\xc3", "é", // invalid UTF-8; NFD
 		"a ", "a /b", "a.", "a./b", "...", "x/b.",
 		"CON", "con", "Con.txt", "prn", "AUX", "nul", "NUL.tar.gz", "x/com1", "COM9.x", "lpt1", "LPT9",
-		strings.Repeat("a", 256), strings.Repeat("a/", 2048) + "a",
+		strings.Repeat("a", 256), strings.Repeat(strings.Repeat("a", 250)+"/", 16) + strings.Repeat("a", 81),
+		strings.Repeat("a/", 64) + "a", strings.Repeat("a/", 2048) + "a", // 65 and 2,049 components
 	}
 	for _, p := range bad {
 		err := ValidatePath(p)

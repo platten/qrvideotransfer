@@ -34,6 +34,7 @@ type extractor struct {
 	placed    map[fileID]bool // files this transfer placed, kept with overwrite
 	created   []bool          // by entry index: folders commit created
 	committed bool
+	progress  func(Progress) // nil allowed
 }
 
 // stagePrefix starts the name of the staging folder; a random suffix follows. A manifest cannot
@@ -51,7 +52,7 @@ var (
 
 // newExtractor opens the output folder, checks that no entry would replace something it may not, and
 // creates the staging folder.
-func newExtractor(ctx context.Context, dir string, entries []Entry, overwrite bool) (*extractor, error) {
+func newExtractor(ctx context.Context, dir string, entries []Entry, overwrite bool, progress func(Progress)) (*extractor, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
@@ -59,7 +60,7 @@ func newExtractor(ctx context.Context, dir string, entries []Entry, overwrite bo
 	if err != nil {
 		return nil, err
 	}
-	x := &extractor{ctx: ctx, root: root, entries: entries, overwrite: overwrite, placed: map[fileID]bool{}}
+	x := &extractor{ctx: ctx, root: root, entries: entries, overwrite: overwrite, placed: map[fileID]bool{}, progress: progress}
 	x.order = make([]int, len(entries))
 	for i := range x.order {
 		x.order[i] = i
