@@ -136,7 +136,7 @@ func TestFER(t *testing.T) {
 					fe++
 				}
 			}
-			t.Logf("iters=%d Eb/N0=%.1f dB: FER=%.4f (%d/%d) BER=%.2e", iters, ebn0, float64(fe)/float64(frames), fe, frames, float64(be)/float64(frames*c.Info))
+			t.Logf("iters=%d Eb/N0=%.2f dB: FER=%.4f (%d/%d) BER=%.2e", iters, ebn0, float64(fe)/float64(frames), fe, frames, float64(be)/float64(frames*c.Info))
 		}
 	}
 }
@@ -186,4 +186,54 @@ func BenchmarkDecodeParallel(b *testing.B) {
 	})
 	el := time.Since(start).Seconds()
 	b.ReportMetric(float64(b.N)*float64(c.Sent)/el/1e6, "Mbit/s")
+}
+
+// TestEarlyStop logs the mean iteration count with early stopping (at most
+// 25, as DESIGN.md section 8) and the frame error rate; run with -v.
+func TestEarlyStop(t *testing.T) {
+	c := normal()
+	d := NewDecoder(c)
+	rate := float64(c.Info) / float64(c.Sent)
+	rng := rand.New(rand.NewPCG(13, 14))
+	out := make([]uint8, c.Info)
+	frames := 300
+	if testing.Short() {
+		frames = 30
+	}
+	for _, ebn0 := range []float64{2.25, 2.5, 3.0, 3.5, 4.0} {
+		its, fe := 0, 0
+		for f := 0; f < frames; f++ {
+			u := randomInfo(rng, c.Info)
+			its += d.DecodeEarly(channel(rng, c.SentBits(c.Encode(u)), ebn0, rate), 25, out)
+			for i := range u {
+				if out[i] != u[i] {
+					fe++
+					break
+				}
+			}
+		}
+		t.Logf("early stop, max 25: Eb/N0=%.2f dB mean iterations %.2f FER %d/%d", ebn0, float64(its)/float64(frames), fe, frames)
+	}
+}
+
+// BenchmarkDecodeEarly measures throughput with early stopping (max 25).
+func BenchmarkDecodeEarly(b *testing.B) {
+	for _, ebn0 := range []float64{2.5, 3.0} {
+		b.Run(fmt.Sprintf("ebn0=%.1f", ebn0), func(b *testing.B) {
+			c := normal()
+			d := NewDecoder(c)
+			rng := rand.New(rand.NewPCG(7, 8))
+			rate := float64(c.Info) / float64(c.Sent)
+			var llrs [][]int8
+			for k := 0; k < 64; k++ {
+				llrs = append(llrs, channel(rng, c.SentBits(c.Encode(randomInfo(rng, c.Info))), ebn0, rate))
+			}
+			out := make([]uint8, c.Info)
+			start := time.Now()
+			for i := 0; b.Loop(); i++ {
+				d.DecodeEarly(llrs[i%len(llrs)], 25, out)
+			}
+			b.ReportMetric(float64(b.N)*float64(c.Sent)/time.Since(start).Seconds()/1e6, "Mbit/s")
+		})
+	}
 }

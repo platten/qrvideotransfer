@@ -160,19 +160,70 @@ func (d *Decoder) Decode(llr []int8, iters int, out []uint8) {
 	for li := range d.R {
 		clear(d.R[li])
 	}
-	for it := 0; it < iters; it++ {
-		for li, layer := range d.layers {
-			d.layer(layer, d.R[li])
-		}
-	}
+	d.run(iters, false)
 	for i := 0; i < c.Info; i++ {
 		out[i] = uint8(uint16(d.L[i]) >> 15)
 	}
 }
 
+// DecodeEarly is Decode with at most iters iterations, stopping as soon as
+// the hard decisions satisfy every check. It returns the iterations run.
+func (d *Decoder) DecodeEarly(llr []int8, iters int, out []uint8) int {
+	c := d.c
+	for i := 0; i < c.Info; i++ {
+		d.L[i] = int16(llr[i])
+	}
+	for i := c.Info; i < c.K; i++ {
+		d.L[i] = lMax
+	}
+	for i := c.K; i < ldpc.N; i++ {
+		d.L[i] = int16(llr[c.Info+i-c.K])
+	}
+	for li := range d.R {
+		clear(d.R[li])
+	}
+	n := d.run(iters, true)
+	for i := 0; i < c.Info; i++ {
+		out[i] = uint8(uint16(d.L[i]) >> 15)
+	}
+	return n
+}
+
+func (d *Decoder) run(iters int, early bool) int {
+	for it := 0; it < iters; it++ {
+		for li, layer := range d.layers {
+			d.layer(layer, d.R[li])
+		}
+		if early && d.checksPass() {
+			return it + 1
+		}
+	}
+	return iters
+}
+
+// checksPass reports whether the hard decisions of L satisfy every check.
+func (d *Decoder) checksPass() bool {
+	var p [Z]int16
+	for _, layer := range d.layers {
+		clear(p[:])
+		for _, b := range layer {
+			blk := d.L[b.col*Z : (b.col+1)*Z]
+			for r := 0; r < Z; r++ {
+				p[r] ^= blk[(r+b.shift)%Z]
+			}
+		}
+		for r := 0; r < Z; r++ {
+			if p[r] < 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (d *Decoder) layer(layer []edge, R [][Z]int16) {
 	var m1, m2 [Z]int16
-	var idx [Z]uint8
+	var idx [Z]int16
 	var sgn [Z]int16
 	for r := range m1 {
 		m1[r], m2[r] = 1<<15-1, 1<<15-1
@@ -196,28 +247,26 @@ func (d *Decoder) layer(layer []edge, R [][Z]int16) {
 			sv := v >> 15
 			a := (v ^ sv) - sv
 			sgn[r] ^= sv
-			if a < m1[r] {
-				m2[r] = m1[r]
-				m1[r] = a
-				idx[r] = uint8(e)
-			} else if a < m2[r] {
-				m2[r] = a
-			}
+			// Branch-free: the comparisons are unpredictable on noisy input.
+			o1 := m1[r]
+			m2[r] = min(m2[r], max(a, o1))
+			m1[r] = min(o1, a)
+			lt := (a - o1) >> 15 // -1 when a < o1
+			idx[r] = idx[r]&^lt | int16(e)&lt
 		}
 	}
 	// Pass 2: new check-to-variable messages and posteriors.
 	for r := 0; r < Z; r++ {
-		m1[r] = int16(int32(m1[r]) * 3 >> 2)
-		m2[r] = int16(int32(m2[r]) * 3 >> 2)
+		m1[r] -= (m1[r] + 3) >> 2 // floor(0.75 m)
+		m2[r] -= (m2[r] + 3) >> 2
 	}
 	for e, b := range layer {
 		base, s := b.col*Z, b.shift
 		Q, Re := &q[e], &R[e]
 		for r := 0; r < Z; r++ {
-			mag := m1[r]
-			if idx[r] == uint8(e) {
-				mag = m2[r]
-			}
+			d := idx[r] ^ int16(e)
+			eq := ^((d | -d) >> 15) // -1 when idx == e
+			mag := m1[r] ^ (m1[r]^m2[r])&eq
 			sg := sgn[r] ^ (Q[r] >> 15)
 			Re[r] = (mag ^ sg) - sg
 		}
