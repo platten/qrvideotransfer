@@ -11,8 +11,8 @@ type InnerCode interface {
 	ShardSize() int
 	// N returns the number of sent bits per codeword.
 	N() int
-	// Encode appends the CRC to shard, encodes, drops the shortened bits and writes the N sent bits
-	// to dst, one bit per byte (0 or 1).
+	// Encode appends the CRC-32C to shard, encodes, drops the shortened bits and packs the N sent
+	// bits into dst, eight per byte, most significant bit first.
 	Encode(dst []byte, shard []byte)
 	// Decode decodes N soft bits (positive means 0) into shard and reports the iterations used and
 	// whether the codeword and its CRC were valid.
