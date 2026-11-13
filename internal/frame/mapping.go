@@ -24,10 +24,7 @@ func NewMapping(h Header) (*Mapping, error) {
 	}
 	mod, _ := LookupModulation(h.Modulation) // known after Validate
 	inner, _ := LookupInner(h.InnerCode)
-	l, err := NewLayout(int(h.GridX), int(h.GridY))
-	if err != nil {
-		return nil, err
-	}
+	l, _ := NewLayout(int(h.GridX), int(h.GridY)) // the grid was checked by Validate
 	m := &Mapping{h: h, cells: len(l.DataCells()), b: mod.BitsPerCell, sent: inner.Sent}
 	m.nbits = m.cells * m.b
 	m.cpf = m.nbits / m.sent
