@@ -1,5 +1,7 @@
 codeberg.org/gruf/go-ffmpreg v0.6.22 h1:BzcAJFwUXxc1cWNTFbhHyGfzmzM1/gY+AO5zYhBJyKI=
 codeberg.org/gruf/go-ffmpreg v0.6.22/go.mod h1:XM6eW8CSgAuZRKRynm5nDiSNedm0rav30IychqygOHE=
+github.com/gen2brain/h265 v0.2.5 h1:D3qCPx5GU+gHpinvLJtYMLSmQy64RGOm4fzMNGQcA1g=
+github.com/gen2brain/h265 v0.2.5/go.mod h1:kefpLxLhGpNCUG/q/aabJcD6GqB9Nhet3fNi9xX9Wzw=
 github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
 github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
 github.com/klauspost/reedsolomon v1.14.2 h1:SafJYwpBBQBI6amHUygcjxZjXeN2HpiENHQDwuPWCCQ=
