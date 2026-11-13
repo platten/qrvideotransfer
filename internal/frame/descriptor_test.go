@@ -110,6 +110,8 @@ func TestParseDescriptorRejects(t *testing.T) {
 		{"M zero", fieldsWith(func(d *Descriptor) { d.M = 0 }), h, c},
 		{"M too large", fieldsWith(func(d *Descriptor) { d.M = 32769 }), h, c},
 		{"F vs plan", fieldsWith(func(d *Descriptor) { d.M = 9000 }), h, c},
+		{"invalid header", good[:], func() Header { x := h; x.Reserved = 1; return x }(), c},
+		{"C below 2", fieldsWith(func(d *Descriptor) { d.CodewordsPerFrame = 1 }), h, 1},
 		{"empty stream", fieldsWith(func(d *Descriptor) { d.StreamLen = 0 }), h, c},
 	}
 	for _, tc := range cases {

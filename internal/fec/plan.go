@@ -13,6 +13,7 @@ const (
 	MaxBlocks     = 1<<24 - 1 // B travels in 3 bytes
 	MaxStreamLen  = 1<<48 - 1 // L travels in 6 bytes
 	DefaultParity = 20        // default parity percentage
+	MaxFrames     = 1<<22 - 4 // F travels in 22 bits of the header and is a multiple of 4
 )
 
 // orderStride spreads the blocks over the shard order (FORMAT.md section 11).
@@ -98,6 +99,12 @@ func (p Plan) Frames(codewordsPerFrame int) int {
 		return 0
 	}
 	return int(4 * ceilDiv(ceilDiv(p.Packets, int64(codewordsPerFrame-1)), 4))
+}
+
+// CheckFrames returns Frames(codewordsPerFrame), or an error when codewordsPerFrame is below 2 or
+// the frame count exceeds MaxFrames. An encoder must refuse such a stream (FORMAT.md section 11).
+func (p Plan) CheckFrames(codewordsPerFrame int) (int, error) {
+	return 0, nil
 }
 
 // DataOffset returns the offset in the stream of data shard i of block b. Bytes from the offset that

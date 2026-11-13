@@ -257,6 +257,31 @@ func TestReedSolomonRoundTrip(t *testing.T) {
 	}
 }
 
+// FORMAT.md section 11: F travels in 22 bits, so an encoder refuses a plan that needs more frames.
+func TestCheckFrames(t *testing.T) {
+	p, _ := NewPlan(10<<20, 128, 5462, 1)
+	if f, err := p.CheckFrames(151); err != nil || f != 656 {
+		t.Errorf("CheckFrames(151) = %d, %v", f, err)
+	}
+	if _, err := p.CheckFrames(1); err == nil {
+		t.Error("CheckFrames(1) succeeded")
+	}
+	// 1 GiB in 64-byte shards over 3 codewords per frame needs about 8.4 million frames.
+	big, _ := NewPlan(1<<30, 64, 1, 1)
+	if _, err := big.CheckFrames(3); err == nil {
+		t.Errorf("CheckFrames(3) for %d packets succeeded", big.Packets)
+	}
+	// Exactly MaxFrames is allowed; one frame's worth of packets more is not.
+	edge := Plan{Blocks: 1, K: 2, M: 2, Packets: MaxFrames}
+	if f, err := edge.CheckFrames(2); err != nil || f != MaxFrames {
+		t.Errorf("CheckFrames at the limit = %d, %v", f, err)
+	}
+	edge.Packets++
+	if _, err := edge.CheckFrames(2); err == nil {
+		t.Error("CheckFrames above the limit succeeded")
+	}
+}
+
 func BenchmarkNewPlan1GiB(b *testing.B) {
 	for b.Loop() {
 		if _, err := NewPlan(1<<30, 128, 6554, 1); err != nil {
