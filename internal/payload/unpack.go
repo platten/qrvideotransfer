@@ -181,7 +181,10 @@ func unpackArchive(ctx context.Context, r io.Reader, archiveLen int64, o UnpackO
 		return nil, err
 	}
 	defer x.close()
-	res := &UnpackResult{}
+	res := &UnpackResult{Paths: make([]string, len(entries))}
+	for i, e := range entries {
+		res.Paths[i] = e.Path
+	}
 	pw := &progressWriter{fn: o.Progress}
 	for _, e := range entries {
 		pw.total += e.Size
