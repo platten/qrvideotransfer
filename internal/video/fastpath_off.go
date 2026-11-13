@@ -10,5 +10,5 @@ import "context"
 const FastPathBuilt = false
 
 func newFastDecoder(context.Context, *ff, string, probeInfo, DecodeConfig) (Decoder, error) {
-	panic("not implemented")
+	panic("video: HEVC fast path not built") // unreachable: NewEmbedded refuses the option
 }
