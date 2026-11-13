@@ -149,14 +149,15 @@ func collect(inputs []string) ([]source, []Warning, error) {
 // validateInputs applies the rules of FORMAT.md section 12 to the entries collected from the inputs
 // and returns an [InputsError] listing every path that breaks one.
 func validateInputs(entries []Entry) error {
-	if err := ValidateManifest(entries, math.MaxInt64); err != nil {
-		var u *UnsafeArchiveError
-		if errors.As(err, &u) {
-			err = &InputError{u.Path, u.Reason}
-		}
-		return err // or a total size beyond int64
+	probs, err := manifestProblems(entries, math.MaxInt64, true)
+	if err != nil || len(probs) == 0 {
+		return err // a total size beyond int64, or nil
 	}
-	return nil
+	ie := &InputsError{Inputs: make([]*InputError, len(probs))}
+	for i, u := range probs {
+		ie.Inputs[i] = &InputError{u.Path, u.Reason}
+	}
+	return ie
 }
 
 // hashFile returns the SHA-256 of a file that must be size bytes long.

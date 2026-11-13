@@ -42,6 +42,8 @@ func pathRule(p string) string {
 		return "empty path"
 	case len(p) > maxPath:
 		return "path longer than 4096 bytes"
+	case strings.Count(p, "/") >= maxComponents:
+		return "more than 64 components"
 	case !utf8.ValidString(p):
 		return "not valid UTF-8"
 	case !norm.NFC.IsNormalString(p):

@@ -69,7 +69,7 @@ func newExtractor(ctx context.Context, dir string, entries []Entry, overwrite bo
 	var r [8]byte
 	_, _ = rand.Read(r[:]) // never fails
 	x.stage = stagePrefix + hex.EncodeToString(r[:])
-	err = x.walk(x.check, nil)
+	err = x.walk(PhaseCheck, x.check, nil)
 	if err == nil {
 		err = root.Mkdir(at(x.stage), 0o700)
 	}
@@ -114,8 +114,9 @@ type visitFunc func(parent *os.Root, name, p string, i int) (*os.Root, error)
 // walk visits, in tree order, each folder on the way to an entry once and then the entry itself.
 // Every operation goes through the handle of the parent folder, so it costs the same at any depth;
 // at most one handle per level of depth is open. leave, if not nil, is called for each component
-// after everything beneath it, again through its parent's handle.
-func (x *extractor) walk(visit visitFunc, leave func(parent *os.Root, name string, i int) error) (err error) {
+// after everything beneath it, again through its parent's handle. Progress is reported for phase in
+// entries: none done at the start, then after each entry, and all of them at the end.
+func (x *extractor) walk(phase Phase, visit visitFunc, leave func(parent *os.Root, name string, i int) error) (err error) {
 	type level struct {
 		end  int // the component ends at this byte of the path
 		name string
@@ -143,8 +144,12 @@ func (x *extractor) walk(visit visitFunc, leave func(parent *os.Root, name strin
 		}
 		return err
 	}
-	prev := ""
-	for _, i := range x.order {
+	prev, total := "", int64(len(x.order))
+	x.report(phase, 0, total)
+	for n, i := range x.order {
+		if n > 0 {
+			x.report(phase, int64(n), total)
+		}
 		if err := x.ctx.Err(); err != nil {
 			return unwind(0, err)
 		}
@@ -176,7 +181,18 @@ func (x *extractor) walk(visit visitFunc, leave func(parent *os.Root, name strin
 		}
 		prev = p
 	}
-	return unwind(0, nil)
+	if err := unwind(0, nil); err != nil {
+		return err
+	}
+	x.report(phase, total, total)
+	return nil
+}
+
+// report passes progress to the caller's callback, if there is one.
+func (x *extractor) report(phase Phase, done, total int64) {
+	if x.progress != nil {
+		x.progress(Progress{phase, done, total})
+	}
 }
 
 // check refuses a path that exists in a form it may not replace. Below a missing folder nothing is
@@ -251,7 +267,7 @@ func (s sparseWriter) Write(b []byte) (int, error) {
 // first. If any step fails, every change made so far is reversed.
 func (x *extractor) commit() error {
 	x.created = make([]bool, len(x.entries))
-	if err := x.walk(x.commitOne, nil); err != nil {
+	if err := x.walk(PhaseCommit, x.commitOne, nil); err != nil {
 		for _, undo := range slices.Backward(x.undo) {
 			_ = undo() // best effort: a folder something else was put into stays
 		}
@@ -266,7 +282,7 @@ func (x *extractor) commit() error {
 		}
 		return parent.OpenRoot(at(name))
 	}
-	return errors.Join(err, x.walk(open, func(parent *os.Root, name string, i int) error {
+	return errors.Join(err, x.walk(PhaseFinish, open, func(parent *os.Root, name string, i int) error {
 		if i < 0 || !x.created[i] {
 			return nil
 		}

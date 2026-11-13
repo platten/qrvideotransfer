@@ -286,35 +286,61 @@ func parseHash(dst *[32]byte, s string) error {
 // beneath a file at any depth, and it bounds the folders an extraction creates by the entry limit and
 // the length of their paths by the manifest size. The cost is linear in the manifest's size.
 func ValidateManifest(entries []Entry, maxSize int64) error {
+	probs, err := manifestProblems(entries, maxSize, false)
+	if err == nil && len(probs) > 0 {
+		err = probs[0]
+	}
+	return err
+}
+
+// manifestProblems applies the rules of ValidateManifest. It stops at the first problem unless all
+// is set, in which case it returns every entry that breaks a rule, each with the first rule it
+// breaks. A total size beyond maxSize is returned as the error.
+func manifestProblems(entries []Entry, maxSize int64, all bool) ([]*UnsafeArchiveError, error) {
 	keys := make(map[string]int, len(entries)) // folded path to entry index
 	folded := make([]string, len(entries))
-	var total int64
+	bad := make(map[int]bool)
+	var (
+		probs []*UnsafeArchiveError
+		total int64
+	)
+	// refuse records a problem with entry i and reports whether to stop.
+	refuse := func(i int, reason string) bool {
+		probs, bad[i] = append(probs, &UnsafeArchiveError{entries[i].Path, reason}), true
+		return !all
+	}
 	for i, e := range entries {
-		if err := ValidatePath(e.Path); err != nil {
-			return err
+		if reason := pathRule(e.Path); reason != "" && refuse(i, reason) {
+			return probs, nil
 		}
 		if e.Size < 0 {
-			return &UnsafeArchiveError{e.Path, "negative size"}
+			if refuse(i, "negative size") {
+				return probs, nil
+			}
+			continue
 		}
 		if e.Size > maxSize-total {
-			return &LimitError{"unpacked size", satAdd(total, e.Size), maxSize}
+			return probs, &LimitError{"unpacked size", satAdd(total, e.Size), maxSize}
 		}
 		total += e.Size
 		k := foldKey(e.Path)
 		if j, ok := keys[k]; ok {
-			return &UnsafeArchiveError{e.Path, fmt.Sprintf("equal to %q after case folding", entries[j].Path)}
+			if !bad[i] && refuse(i, fmt.Sprintf("equal to %q after case folding", entries[j].Path)) {
+				return probs, nil
+			}
+			continue
 		}
 		keys[k], folded[i] = i, k
 	}
 	for i, k := range folded {
 		// '/' folds to itself and is a starter, so the key of the parent is a prefix of the key.
-		if s := strings.LastIndexByte(k, '/'); s >= 0 {
-			if j, ok := keys[k[:s]]; !ok || !entries[j].Dir {
-				return &UnsafeArchiveError{entries[i].Path, "its folder is not an entry of type dir"}
+		if s := strings.LastIndexByte(k, '/'); s >= 0 && !bad[i] {
+			if j, ok := keys[k[:s]]; (!ok || !entries[j].Dir) && refuse(i, "its folder is not an entry of type dir") {
+				return probs, nil
 			}
 		}
 	}
-	return nil
+	return probs, nil
 }
 
 func satAdd(a, b int64) int64 {

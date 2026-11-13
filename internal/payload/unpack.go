@@ -210,6 +210,7 @@ func unpackArchive(ctx context.Context, r io.Reader, archiveLen int64, o UnpackO
 	for _, e := range entries {
 		pw.total += e.Size
 	}
+	_, _ = pw.Write(nil) // the write phase starts; the last byte written ends it
 	tr := tar.NewReader(ar)
 	for i, e := range entries {
 		hdr, err := tr.Next()
