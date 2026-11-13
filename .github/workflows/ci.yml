@@ -151,7 +151,8 @@ jobs:
         run: |
           export PATH="$HOME/.local/go1.27.4/bin:$HOME/.local/bin:$PATH"
           test "$(go env GOVERSION)" = go1.27.4
-          export PATH="$(go env GOPATH)/bin:$PATH"
+          gopath=$(go env GOPATH)
+          export PATH="$gopath/bin:$PATH"
           go run ./tools/dev check-tools # Go, git and every tool pinned in tools/dev, by version
           ffmpeg -hide_banner -encoders | grep -q libx265
           wasmtime --version | grep -q ' 50\.0\.1'
