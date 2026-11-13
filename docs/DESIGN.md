@@ -541,10 +541,10 @@ qrvt profiles | version | completion | man
 
 | Flag | Command | Default | Meaning |
 | --- | --- | --- | --- |
-| `--resolution` | encode | `1080p` | Preset or `WxH` |
-| `--fps` | encode | `12` | Display frame rate |
+| `--resolution` | encode, calibrate make | `1080p` | Preset (`480p`, `720p`, `1080p`, `1440p`, `4k` or `2160p`) or `WxH`. For `calibrate make`, the monitor's resolution |
+| `--fps` | encode | `12` | Display frame rate, 1-240 |
 | `--mode` | encode | `gray4` | `gray4`, `bw` or `color` |
-| `--hdr` | encode | off | Experimental 10-bit output |
+| `--hdr` | encode | off | Experimental 10-bit output; replaces `--mode`, and giving both is an error |
 | `--protection` | encode | `normal` | `fast`, `normal` or `robust` |
 | `--parity` | encode | `20` | Parity shards as a percentage of data shards, 5-100 |
 | `--cell` | encode | `4` | Cell size in pixels: 4, 8, 12 or 16. The video size is reduced to a multiple of it, and the size used is reported |
@@ -552,20 +552,30 @@ qrvt profiles | version | completion | man
 | `--encrypt` | encode | off | Encrypt with a passphrase, prompted for unless `--passphrase-file` is given |
 | `--sign-key` | encode | none | Sign with this private key |
 | `--dry-run` | encode | off | Print video length, file size and expected filming time, then stop |
-| `--passphrase-file` | encode, decode | none | Read the passphrase from a file instead of prompting |
-| `--verify-key` | decode | none | Trusted public key; may be repeated. When given, the transfer must be signed by one of them |
-| `--max-size` | decode | 16 GiB | Largest total size that may be unpacked |
+| `--passphrase-file` | encode, decode | none | Read the passphrase from the first line of a file instead of prompting. On encode it needs `--encrypt` |
+| `--verify-key` | decode | none | Trusted public key, as a key file or the key line itself; may be repeated. When given, the transfer must be signed by one of them |
+| `--max-size` | decode | 16 GiB | Largest total size that may be unpacked, with a unit: `B`, `K`/`KiB`, `M`/`MiB`, `G`/`GiB`, `T`/`TiB` (binary) or `kB`, `MB`, `GB`, `TB` (decimal) |
 | `--overwrite` | decode | off | Allow existing files in the output folder to be replaced |
 | `--state-dir` | decode | none | Keep progress for resuming and merging |
 | `--report` | decode | none | Write a JSON report of the decode |
 | `--ffmpeg` | all | `embedded` | `embedded`, `system` or a path. `system` runs outside the sandbox: for recordings the user made themselves |
 | HEVC fast-path flag `--unsandboxed-hevc` | decode, inspect, calibrate read | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three |
-| `--jobs` | all | CPU count | Worker count |
-| `--json`, `--plain`, `--quiet`, `--verbose` | all | | Output style |
+| `--jobs` | all | CPU count | Worker count, 0-1024; 0 is the CPU count, reduced to fit memory |
+| `--json`, `--plain`, `--quiet`, `--verbose` | all | | Output style. `--json` excludes `--plain` and `--quiet`; `--quiet` excludes `--verbose` |
 
 - **Dashboard.** Built with Charm v2 (bubbletea, bubbles, lipgloss): source, video and signal panels, one
   bar per stage, rate and time remaining, and on decode a block map that fills in. When output is not a
-  terminal it prints plain lines; `--json` prints one JSON event per line.
+  terminal it prints plain lines; `--json` prints one JSON event per line. Plain progress lines and
+  warnings go to standard error and the summary to standard output; `--json` writes only to standard
+  output, a start line, every event, then a summary or an error line, following the committed schema
+  `internal/cli/ui/events.schema.json`. A hidden `qrvt demo` command plays a recorded decode through
+  any of the three, for trying the display without a recording.
+- **Output folder and inputs.** `-o` is required by every command that writes. Inputs, recordings, key
+  files and `--ffmpeg` paths are checked before any work starts; every bad flag is a usage error naming
+  the flag, the value and the accepted range.
+- **Exit codes.** 0 success; 1 other failure; 2 bad command line; 3 not enough data yet (record more
+  and try again); 4 wrong passphrase, or a bad or missing signature; 5 input refused (unsafe archive, a
+  limit, an unsupported version); 130 stopped by the user.
 - **Help.** Each flag has a long description, default, range and example. `--help`, the man page and the
   website are generated from one definition (cobra with fang), so they cannot drift.
 - **Failure guidance.** A decode that falls short says what is missing and what to do, for example
@@ -954,3 +964,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 review round 3: section 12 requires `WithCloseOnContextDone(true)` on the runtime qrvt creates, adds the 30 s no-progress watchdog with the M1 stream D cost measurement, gives the stream-copy instance's mounts, and states that the HEVC fast-path flag does not ship until the decoder's assembly can be excluded |
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc`; section 14's `DecodeOptions` (and the root package's `AnalyzeOptions` and `InspectOptions`) gain `UnsandboxedHEVC` |
+| 2026-11-13 | M1 stream F: section 13 resolves what the command line left open: the `--resolution` presets (with `2160p` as another name for `4k`) and its use by `calibrate make` for the monitor resolution; ranges for `--fps` (1-240) and `--jobs` (0-1024, 0 the CPU count); `--hdr` replaces `--mode`; `--passphrase-file` reads the first line and needs `--encrypt` on encode; `--verify-key` takes a key file or a key line; the `--max-size` units; which output flags exclude each other; where plain, summary and JSON output go and the JSON schema; the hidden `demo` command; required `-o`; and the exit codes |

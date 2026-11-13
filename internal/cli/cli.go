@@ -3,10 +3,13 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 
+	"charm.land/fang/v2"
 	qrvt "github.com/platten/qrvideotransfer"
-	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // API is the part of the root package the commands call. The real one is [Root]; tests use fakes.
@@ -64,21 +67,39 @@ type Env struct {
 	ReadPassword func(prompt string) (string, error)
 }
 
-// NewEnv returns the environment of the running process (stub).
-func NewEnv(version string) *Env { return &Env{} }
+// NewEnv returns the environment of the running process.
+func NewEnv(version string) *Env {
+	env := &Env{API: Root{}, In: os.Stdin, Out: os.Stdout, Err: os.Stderr, Version: version, IsTerminal: isTerminal}
+	env.ReadPassword = func(prompt string) (string, error) {
+		f, ok := env.In.(*os.File)
+		if !ok || !term.IsTerminal(int(f.Fd())) {
+			return "", errors.New("standard input is not a terminal")
+		}
+		if _, err := fmt.Fprint(env.Err, prompt); err != nil {
+			return "", err
+		}
+		b, err := term.ReadPassword(int(f.Fd()))
+		_, _ = fmt.Fprintln(env.Err)
+		return string(b), err
+	}
+	return env
+}
 
-// Execute runs the command line (stub).
-func Execute(ctx context.Context, env *Env, args []string) error { return nil }
+// isTerminal reports whether a stream is a terminal.
+func isTerminal(stream any) bool {
+	f, ok := stream.(interface{ Fd() uintptr })
+	return ok && term.IsTerminal(int(f.Fd()))
+}
 
-// ExitCode maps an error to the process exit code (stub).
-func ExitCode(err error) int { return 0 }
-
-func usagef(format string, a ...any) error { return errors.New(format) }
-
-func guide(err error, last *qrvt.Stats, o *qrvt.DecodeOptions) error { return err }
-
-func newRoot(env *Env) *cobra.Command { return &cobra.Command{} }
-
-func parseSize(s string) (int64, error) { return 0, nil }
-
-func parseResolution(s string) (w, h int, err error) { return 0, 0, nil }
+// Execute runs the command line args (without the program name) and returns the error, already
+// printed on env.Err, that the process should exit with; see [ExitCode]. An interrupt signal
+// cancels the running command.
+func Execute(ctx context.Context, env *Env, args []string) error {
+	root := newRoot(env)
+	root.SetArgs(args)
+	root.SetIn(env.In)
+	root.SetOut(env.Out)
+	root.SetErr(env.Err)
+	return fang.Execute(ctx, root, fang.WithVersion(env.Version), fang.WithoutManpage(),
+		fang.WithErrorHandler(handleError), fang.WithNotifySignal(os.Interrupt))
+}
