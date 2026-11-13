@@ -240,7 +240,7 @@ func TestStoreWriterProcess(t *testing.T) {
 			}
 		}
 		if pass == 0 {
-			_ = os.WriteFile(path+".started", nil, 0o600)
+			_ = os.WriteFile(path+".started", nil, 0o600) //nolint:gosec // a path under the parent test's temporary directory
 		}
 	}
 }
@@ -306,5 +306,40 @@ func TestStoreSurvivesKill(t *testing.T) {
 		}
 		t.Logf("round %d: %d of %s shards present after the kill", round, total, strconv.Itoa(killPlan.Blocks*(killPlan.K+killPlan.M)))
 		_ = s.Close()
+	}
+}
+
+// I/O errors are returned, not hidden.
+func TestStoreIOErrors(t *testing.T) {
+	s, path := newStore(t, smallPlan)
+	defer func() { _ = s.Close() }()
+	size, _ := StoreSize(smallPlan)
+	ro, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wo, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = wo.Close() }()
+	rw := s.f
+	// Read-only: the read works, the write fails and Have is unchanged.
+	s.f = ro
+	if err := s.Put(0, 0, content(smallPlan, 0, 0)); err == nil || s.Have(0) != 0 {
+		t.Errorf("Put through a read-only handle: %v, Have %d", err, s.Have(0))
+	}
+	// Write-only: the read fails.
+	s.f = wo
+	if err := s.Put(0, 0, content(smallPlan, 0, 0)); err == nil {
+		t.Error("Put through a write-only handle accepted")
+	}
+	s.f = rw
+	if err := openedStore(wo, smallPlan).scan(size); err == nil {
+		t.Error("scan through a write-only handle: no error")
+	}
+	_ = ro.Close()
+	if err := openedStore(ro, smallPlan).scan(size); err == nil {
+		t.Error("scan of a closed file: no error")
 	}
 }
