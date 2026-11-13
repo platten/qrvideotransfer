@@ -1,0 +1,68 @@
+{
+ "comment": "SHA-256 of the Y, Cb and Cr planes of whole code frames (FORMAT.md sections 4 to 7). Header: version 1, the session, frame index and total frames below, grid width/pitch x height/pitch, the modulation, the inner code. Data cell e shows the symbol given by the top b bits of SplitMix64 output e (counting from 0) from state symbolSeed. 8-bit planes are hashed one byte per sample; 10-bit planes (modulation 4) two bytes per sample, little-endian.",
+ "width": 848,
+ "height": 480,
+ "pitch": 4,
+ "session": 4660,
+ "totalFrames": 8,
+ "innerCode": 2,
+ "symbolSeed": 24301,
+ "frames": [
+  {
+   "modulation": 1,
+   "frameIndex": 0,
+   "y": "9dfd9405ab3131b5886a6e6b02f011681469aa3002ebfc86f3bb26dbf04b30b9",
+   "cb": "e267e49a0fdf8665b157d631ac658123ac496a156e051995ea40ea01980664f3",
+   "cr": "e267e49a0fdf8665b157d631ac658123ac496a156e051995ea40ea01980664f3"
+  },
+  {
+   "modulation": 1,
+   "frameIndex": 1,
+   "y": "ae57273d68524fd73eaf4494f04e25d7664a57c34f188767c412b72aa613586f",
+   "cb": "e267e49a0fdf8665b157d631ac658123ac496a156e051995ea40ea01980664f3",
+   "cr": "e267e49a0fdf8665b157d631ac658123ac496a156e051995ea40ea01980664f3"
+  },
+  {
+   "modulation": 2,
+   "frameIndex": 0,
+   "y": "27995e485aad688f7d32d1f134bd146c71fc79584e22f19347fa93a34ed9a4ad",
+   "cb": "e267e49a0fdf8665b157d631ac658123ac496a156e051995ea40ea01980664f3",
+   "cr": "e267e49a0fdf8665b157d631ac658123ac496a156e051995ea40ea01980664f3"
+  },
+  {
+   "modulation": 2,
+   "frameIndex": 1,
+   "y": "3d43b7ddc2f1d8bd221b8b96431796cb6d2ba817e21089b12391034c714e2331",
+   "cb": "e267e49a0fdf8665b157d631ac658123ac496a156e051995ea40ea01980664f3",
+   "cr": "e267e49a0fdf8665b157d631ac658123ac496a156e051995ea40ea01980664f3"
+  },
+  {
+   "modulation": 3,
+   "frameIndex": 0,
+   "y": "0f60cacb9093a6a55701132f30feed2a503b30c2a462b0a8441a538ec1a33726",
+   "cb": "bfbda8e9710c73f65c72fa05d956ca091ed5c02cd59f8a73f3a3e36792c7a364",
+   "cr": "e7388c4f9809c57fe491efa1f51270b8559aa41d1849eda8ba2576a0e3ec4877"
+  },
+  {
+   "modulation": 3,
+   "frameIndex": 1,
+   "y": "556dec4f8c064b041ea95bb0c0603215f44221c40dd5839201c2b76019a4cf21",
+   "cb": "bfbda8e9710c73f65c72fa05d956ca091ed5c02cd59f8a73f3a3e36792c7a364",
+   "cr": "e7388c4f9809c57fe491efa1f51270b8559aa41d1849eda8ba2576a0e3ec4877"
+  },
+  {
+   "modulation": 4,
+   "frameIndex": 0,
+   "y": "d41fa3fb65b133406f84223abcd3113d965dbe25c0a7d2c055af5e2eec143f07",
+   "cb": "a9cb93ec2682e36c94a25b6b037552befd7e3938e9b21c149d622e351f94501f",
+   "cr": "a9cb93ec2682e36c94a25b6b037552befd7e3938e9b21c149d622e351f94501f"
+  },
+  {
+   "modulation": 4,
+   "frameIndex": 1,
+   "y": "ec95493cbac9242da8ec428b3f89dfc1453c5533243f5b6e20168b089410dd06",
+   "cb": "a9cb93ec2682e36c94a25b6b037552befd7e3938e9b21c149d622e351f94501f",
+   "cr": "a9cb93ec2682e36c94a25b6b037552befd7e3938e9b21c149d622e351f94501f"
+  }
+ ]
+}

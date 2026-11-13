@@ -830,9 +830,10 @@ passes results through channels to a single goroutine that owns the accumulators
    flicker, scan-out timing, optional sub-pixel structure.
 2. **Timing**: camera frame rate, jitter, exposure, rolling readout, dropped frames, a freeze at the seam.
 3. **Geometry**: pose, hand-shake random walk, rolling-shutter shear, radial distortion.
-4. **Optics**: defocus and motion blur, vignetting, veiling and specular glare, interference fringes.
-5. **Sensor and processing**: noise, white balance, colour matrix, tone curve, sharpening, colour noise
-   reduction, clipping, 4:2:0.
+4. **Optics**: defocus and motion blur, vignetting, veiling and specular glare.
+5. **Sensor and processing**: white balance, colour matrix, tone curve, interference fringes, noise,
+   sharpening, colour noise reduction, clipping, 4:2:0. Fringes are applied here rather than in the
+   optics because their amplitude is given in code values.
 6. **Recorder codec**: in integration tests, x264 through the embedded engine (the engine has no HEVC
    encoder) at the bitrates below, which are the HEVC figures of section 11 times 1.4; in unit tests, a
    pure-Go quantiser stand-in.
@@ -858,6 +859,59 @@ from steps S2 and G1 replace them.
 | Glare patch, share of code area | 0 | 0 | 0 | 0 | 0 | 2% |
 | Dropped captures | 0 | 0 | 0.5% | 1% | 0.5% | 3% |
 | Recorder bitrate, Mbit/s | lossless | 74 | 74 | 17 | 74 | 32 |
+
+The table above does not name every parameter the stages need. These complete the presets:
+
+| | `ideal` | `tripod` | `handheld` | `budget-android` | `iphone-hdr` | `harsh` |
+| --- | --- | --- | --- | --- | --- | --- |
+| Panel black, share of white | 0 | 0.1% | 0.1% | 0.2% | 0.1% | 0.5% |
+| Panel response, ms | 0 | 4 | 4 | 4 | 4 | 8 |
+| Capture-time jitter, ms RMS | 0 | 0.2 | 0.5 | 0.5 | 0.5 | 1 |
+| Exposure gain, linear signal of display white | 1 | 0.9 | 0.9 | 0.9 | 0.265 | 0.9 |
+| Colour matrix saturation boost | 0 | 0.1 | 0.2 | 0.3 | 0.2 | 0.3 |
+| Colour noise reduction, share | 0 | 0.5 | 0.5 | 1 | 0.5 | 1 |
+| Veiling glare, share of white | 0 | 0 | 1% | 2% | 1% | 3% |
+
+How the parameters are read, and the values every preset shares:
+
+- *Display.* The panel has the video's size unless set otherwise; the player scales bilinearly to fit,
+  with black bars. Panel drive is 8-bit; light is black + (1 - black) V^(2.4 + gamma error). The panel
+  refreshes in 1/60 s, top to bottom unless a scan rotation of 90, 180 or 270 degrees makes it run
+  right to left, bottom to top or left to right (0 in every preset); a pixel's change is a linear
+  ramp over the response time. Player tearing is not modelled. The backlight flickers at 240 Hz with
+  the given relative amplitude. Sub-pixel stripes are off unless a test turns them on. The player may
+  hold the last frame longer at the seam; every preset sets 0.
+- *Timing.* A drop starts with the given probability per capture and loses one capture (bursts are a
+  parameter, 1 in every preset). The readout is the time over which the rows' exposures start: row
+  *y* of *H* (centre *y* + 0.5) starts at start + ((y + 0.5) / H) readout and is exposed for the
+  exposure time. Capture-time jitter is Gaussian, clipped at 4 times its RMS.
+- *Geometry.* A pinhole camera with focal length W / 1.4 pixels (70.0 degrees across) looks at
+  the screen from the distance at which the untilted screen fills the given share of the frame width.
+  The screen is tilted by an angle drawn uniformly up to the maximum, about an axis in its plane at a
+  uniform direction; in-plane roll and mirroring are parameters, 0 in every preset. Shake is a random
+  walk with one step per camera frame, steps of the given RMS in pixels (split evenly between x and
+  y), pulled back by a factor 0.95 per step, plus a rotation whose steps move the frame's edge by
+  about half as much; the pose is linear between steps, so a moving camera shears the rows of a
+  rolling shutter. Distortion maps a capture point p, relative to the centre in units of half the
+  frame width, to the pinhole point p (1 + k1 |p|^2); positive k1 is barrel.
+- *Optics.* Defocus is a Gaussian; motion during the exposure widens it along x and y by the motion's
+  length over the square root of 12. Corner vignetting falls off with the squared distance from the
+  centre. Veiling glare is added light; the specular patch is a disc at 1.5 times white, at a random
+  place on the code, with a smooth edge out to 1.25 times its radius.
+- *Sensor.* Display white gives the exposure gain as linear signal, clipped at 1. White balance
+  multiplies red by 1 + s and blue by 1 - s. The tone curve is gamma 1/2.4 into BT.709 limited range,
+  or for `iphone-hdr` the BT.2087 BT.709-to-BT.2020 primaries matrix in linear light, then the
+  BT.2100 HLG curve into 10-bit BT.2020 limited range. Fringes are a plane wave with a random period
+  of 8 to 32 pixels and random direction. Noise is Gaussian (exact, tails included) and independent
+  per colour channel. Noise sigma and fringe amplitude are in 8-bit full-range units of each R'G'B'
+  channel, added after the tone curve; in limited-range brightness codes they come to about 0.64 and
+  0.86 times the table's value (219/255 times the length of the BT.709 luma weights for independent
+  noise, 219/255 for fringes, which are equal in the three channels). For 10-bit output they scale
+  by 4. Sharpening is an unsharp mask of brightness against a 3 x 3 binomial blur;
+  colour noise reduction mixes the 4:2:0 colour planes with a 5 x 5 binomial blur of themselves.
+- *Recorder stand-in.* 8 x 8 DCT blocks with a uniform step of 3 / *b* code values, where *b* is the
+  bitrate in bits per camera pixel per frame; the step is about 20 for `tripod`, 11 for
+  `budget-android` and 23 for `harsh`. It is not calibrated against x264; it only lets unit tests exercise a lossy recorder.
 
 | Impairment | Asserted property |
 | --- | --- |
@@ -1004,4 +1058,6 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 review round 3: section 12 requires `WithCloseOnContextDone(true)` on the runtime qrvt creates, adds the 30 s no-progress watchdog with the M1 stream D cost measurement, gives the stream-copy instance's mounts, and states that the HEVC fast-path flag does not ship until the decoder's assembly can be excluded |
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc`; section 14's `DecodeOptions` (and the root package's `AnalyzeOptions` and `InspectOptions`) gain `UnsandboxedHEVC` |
+| 2026-11-13 | M1 stream E: section 15 moves interference fringes from the optics stage to the sensor stage (their amplitude is in code values), completes the presets with a second table (panel black and response, capture jitter, exposure gain, colour matrix, colour noise reduction, veiling glare), and states how each parameter is read and the values every preset shares (panel scan-out, flicker frequency, field of view, shake walk, distortion convention, glare patch, recorder stand-in step) |
+| 2026-11-13 | M1 stream E review: section 15 adds the panel scan rotation (0 in every preset) and says player tearing is not modelled; noise is exact Gaussian and jitter is clipped at 4 times its RMS; HLG output applies the BT.2087 primaries matrix first; noise and fringe amplitudes are stated as per-channel full-range units (about 0.64 and 0.86 times in brightness codes); the field of view is 70.0 degrees; the readout wording and the quantiser-step figures are corrected |
 | 2026-11-13 | M1 stream D: section 8 caps the worker count at `video.EngineInstances()` (GOMAXPROCS - 1), because compiled Wasm cannot be preempted and instances on every P starved the watchdog on the 4-vCPU CI runners. Section 12 records the engine as built: the embedded copy of the module and its hash check, the encoder's MP4 and even-length `.h264` runs with `Concat`, how slices are read (1 s preroll with `-noaccurate_seek`, `-copyts`, `showinfo` timestamps, `-fps_mode passthrough`, source pixel format, size changes refused), the instance cap, and the measured cost of `WithCloseOnContextDone` (75-91% on decoding, reported to the owner; kept on); the HEVC fast path is compiled only with the `unsandboxedhevc` tag, sends parameter sets that differ from the probe to the engine, takes timestamps from `framemd5`, and times each picture from its first slice. Section 13: the `--ffmpeg` row says where `ffprobe` comes from and that a path also runs outside the sandbox; the `--unsandboxed-hevc` row says the flag exists only in tagged builds |

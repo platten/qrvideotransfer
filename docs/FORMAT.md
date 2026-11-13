@@ -159,6 +159,9 @@ paint structure. At 1080p and 4K every structure edge falls on a cell boundary.
 The chroma planes have half the resolution of luma. Each chroma sample takes the colour of the top-left
 of the four luma pixels it covers.
 
+In a 10-bit frame (modulation 4), mid-grey is luma 504 and chroma 512 (the 8-bit values times 4), and
+dark and light are the modulation's lowest and highest ten-bit levels.
+
 ## 5. Grid contents
 
 ### 5.1 Reserved cells
@@ -486,3 +489,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-13 | First draft |
 | 2026-11-13 | M0: section 3 states the grid limits a decoder enforces (GridY at least 30, 15 GridX > GridY); section 11 states the limits on B and F; section 13 writes the example session as `0x1234`. All numbers of sections 5.3 and 13 reproduced by the implementation and by an independent script; no value changed |
 | 2026-11-13 | M0 spikes: section 3 allows H.264 Main as well as High profile (the encoder's fastest settings turn off the 8x8 transform, so x264 signals Main, a subset of High); section 14 records the S1 result for the modulation 4 codec. No value a decoder relies on changed |
+| 2026-11-13 | M1 render: section 4.5 states mid-grey in a 10-bit frame (luma 504, chroma 512); the 8-bit rule was silent on it. No value a decoder relies on changed |
