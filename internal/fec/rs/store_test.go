@@ -257,12 +257,17 @@ func TestStoreSurvivesKill(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = null.Close() }()
 	for round := range 3 {
 		s, path := newStore(t, killPlan)
 		_ = s.Close()
 		p, err := os.StartProcess(exe, []string{exe, "-test.run=^TestStoreWriterProcess$"}, &os.ProcAttr{
 			Env:   append(os.Environ(), writerEnv+"="+path),
-			Files: []*os.File{nil, nil, os.Stderr},
+			Files: []*os.File{null, null, os.Stderr},
 		})
 		if err != nil {
 			t.Skip(err)
