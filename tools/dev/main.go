@@ -211,6 +211,15 @@ func test(args []string) error {
 	return run(env, "go", goArgs...)
 }
 
+func lintRuns(tags string, fix bool) [][]string { return nil }
+
+type vulnRun struct {
+	goos string
+	args []string
+}
+
+func vulncheckRuns(tags string) []vulnRun { return nil }
+
 func lint(args []string) error {
 	fs := newFlags("lint")
 	fix := fs.Bool("fix", false, "apply automatic fixes")
