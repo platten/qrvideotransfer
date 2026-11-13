@@ -15,6 +15,12 @@ func NewMapping(h Header) (*Mapping, error) {
 	return &Mapping{}, nil
 }
 
+// InterleaveSeed returns the interleaver seed of FORMAT.md section 9:
+// Seed("qrvt/inner-interleave/v1", session16 | GridX16 | GridY16 | modulation8 | inner8).
+func InterleaveSeed(h Header) uint64 {
+	return 0
+}
+
 // CodewordsPerFrame returns C.
 func (m *Mapping) CodewordsPerFrame() int { return m.cpf }
 

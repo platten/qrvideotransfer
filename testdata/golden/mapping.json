@@ -1,0 +1,831 @@
+{
+ "tables": {
+  "modulations": [
+   {
+    "id": 1,
+    "bitsPerCell": 1,
+    "levels": 2
+   },
+   {
+    "id": 2,
+    "bitsPerCell": 2,
+    "levels": 4
+   },
+   {
+    "id": 3,
+    "bitsPerCell": 3,
+    "levels": 8
+   },
+   {
+    "id": 4,
+    "bitsPerCell": 3,
+    "levels": 8
+   }
+  ],
+  "inner": [
+   {
+    "id": 1,
+    "motherK": 1620,
+    "shardSize": 192,
+    "infoBits": 1568,
+    "shortened": 52,
+    "sent": 1892
+   },
+   {
+    "id": 2,
+    "motherK": 1458,
+    "shardSize": 128,
+    "infoBits": 1056,
+    "shortened": 402,
+    "sent": 1542
+   },
+   {
+    "id": 3,
+    "motherK": 1296,
+    "shardSize": 128,
+    "infoBits": 1056,
+    "shortened": 240,
+    "sent": 1704
+   },
+   {
+    "id": 4,
+    "motherK": 972,
+    "shardSize": 64,
+    "infoBits": 544,
+    "shortened": 428,
+    "sent": 1516
+   }
+  ]
+ },
+ "capacity": [
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 1,
+   "innerCode": 1,
+   "nbits": 22848,
+   "codewordsPerFrame": 12
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 1,
+   "innerCode": 2,
+   "nbits": 22848,
+   "codewordsPerFrame": 14
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 1,
+   "innerCode": 3,
+   "nbits": 22848,
+   "codewordsPerFrame": 13
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 1,
+   "innerCode": 4,
+   "nbits": 22848,
+   "codewordsPerFrame": 15
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 2,
+   "innerCode": 1,
+   "nbits": 45696,
+   "codewordsPerFrame": 24
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 2,
+   "innerCode": 2,
+   "nbits": 45696,
+   "codewordsPerFrame": 29
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 2,
+   "innerCode": 3,
+   "nbits": 45696,
+   "codewordsPerFrame": 26
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 2,
+   "innerCode": 4,
+   "nbits": 45696,
+   "codewordsPerFrame": 30
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 3,
+   "innerCode": 1,
+   "nbits": 68544,
+   "codewordsPerFrame": 36
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 3,
+   "innerCode": 2,
+   "nbits": 68544,
+   "codewordsPerFrame": 44
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 3,
+   "innerCode": 3,
+   "nbits": 68544,
+   "codewordsPerFrame": 40
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 3,
+   "innerCode": 4,
+   "nbits": 68544,
+   "codewordsPerFrame": 45
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 4,
+   "innerCode": 1,
+   "nbits": 68544,
+   "codewordsPerFrame": 36
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 4,
+   "innerCode": 2,
+   "nbits": 68544,
+   "codewordsPerFrame": 44
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 4,
+   "innerCode": 3,
+   "nbits": 68544,
+   "codewordsPerFrame": 40
+  },
+  {
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 4,
+   "innerCode": 4,
+   "nbits": 68544,
+   "codewordsPerFrame": 45
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 1,
+   "innerCode": 1,
+   "nbits": 51540,
+   "codewordsPerFrame": 27
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 1,
+   "innerCode": 2,
+   "nbits": 51540,
+   "codewordsPerFrame": 33
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 1,
+   "innerCode": 3,
+   "nbits": 51540,
+   "codewordsPerFrame": 30
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 1,
+   "innerCode": 4,
+   "nbits": 51540,
+   "codewordsPerFrame": 33
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 2,
+   "innerCode": 1,
+   "nbits": 103080,
+   "codewordsPerFrame": 54
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 2,
+   "innerCode": 2,
+   "nbits": 103080,
+   "codewordsPerFrame": 66
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 2,
+   "innerCode": 3,
+   "nbits": 103080,
+   "codewordsPerFrame": 60
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 2,
+   "innerCode": 4,
+   "nbits": 103080,
+   "codewordsPerFrame": 67
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 3,
+   "innerCode": 1,
+   "nbits": 154620,
+   "codewordsPerFrame": 81
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 3,
+   "innerCode": 2,
+   "nbits": 154620,
+   "codewordsPerFrame": 100
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 3,
+   "innerCode": 3,
+   "nbits": 154620,
+   "codewordsPerFrame": 90
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 3,
+   "innerCode": 4,
+   "nbits": 154620,
+   "codewordsPerFrame": 101
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 4,
+   "innerCode": 1,
+   "nbits": 154620,
+   "codewordsPerFrame": 81
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 4,
+   "innerCode": 2,
+   "nbits": 154620,
+   "codewordsPerFrame": 100
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 4,
+   "innerCode": 3,
+   "nbits": 154620,
+   "codewordsPerFrame": 90
+  },
+  {
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 4,
+   "innerCode": 4,
+   "nbits": 154620,
+   "codewordsPerFrame": 101
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 1,
+   "innerCode": 1,
+   "nbits": 117112,
+   "codewordsPerFrame": 61
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 1,
+   "innerCode": 2,
+   "nbits": 117112,
+   "codewordsPerFrame": 75
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 1,
+   "innerCode": 3,
+   "nbits": 117112,
+   "codewordsPerFrame": 68
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 1,
+   "innerCode": 4,
+   "nbits": 117112,
+   "codewordsPerFrame": 77
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 2,
+   "innerCode": 1,
+   "nbits": 234224,
+   "codewordsPerFrame": 123
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 2,
+   "innerCode": 2,
+   "nbits": 234224,
+   "codewordsPerFrame": 151
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 2,
+   "innerCode": 3,
+   "nbits": 234224,
+   "codewordsPerFrame": 137
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 2,
+   "innerCode": 4,
+   "nbits": 234224,
+   "codewordsPerFrame": 154
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 3,
+   "innerCode": 1,
+   "nbits": 351336,
+   "codewordsPerFrame": 185
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 3,
+   "innerCode": 2,
+   "nbits": 351336,
+   "codewordsPerFrame": 227
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 3,
+   "innerCode": 3,
+   "nbits": 351336,
+   "codewordsPerFrame": 206
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 3,
+   "innerCode": 4,
+   "nbits": 351336,
+   "codewordsPerFrame": 231
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 4,
+   "innerCode": 1,
+   "nbits": 351336,
+   "codewordsPerFrame": 185
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 4,
+   "innerCode": 2,
+   "nbits": 351336,
+   "codewordsPerFrame": 227
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 4,
+   "innerCode": 3,
+   "nbits": 351336,
+   "codewordsPerFrame": 206
+  },
+  {
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 4,
+   "innerCode": 4,
+   "nbits": 351336,
+   "codewordsPerFrame": 231
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 1,
+   "innerCode": 1,
+   "nbits": 207948,
+   "codewordsPerFrame": 109
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 1,
+   "innerCode": 2,
+   "nbits": 207948,
+   "codewordsPerFrame": 134
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 1,
+   "innerCode": 3,
+   "nbits": 207948,
+   "codewordsPerFrame": 122
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 1,
+   "innerCode": 4,
+   "nbits": 207948,
+   "codewordsPerFrame": 137
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 2,
+   "innerCode": 1,
+   "nbits": 415896,
+   "codewordsPerFrame": 219
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 2,
+   "innerCode": 2,
+   "nbits": 415896,
+   "codewordsPerFrame": 269
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 2,
+   "innerCode": 3,
+   "nbits": 415896,
+   "codewordsPerFrame": 244
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 2,
+   "innerCode": 4,
+   "nbits": 415896,
+   "codewordsPerFrame": 274
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 3,
+   "innerCode": 1,
+   "nbits": 623844,
+   "codewordsPerFrame": 329
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 3,
+   "innerCode": 2,
+   "nbits": 623844,
+   "codewordsPerFrame": 404
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 3,
+   "innerCode": 3,
+   "nbits": 623844,
+   "codewordsPerFrame": 366
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 3,
+   "innerCode": 4,
+   "nbits": 623844,
+   "codewordsPerFrame": 411
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 4,
+   "innerCode": 1,
+   "nbits": 623844,
+   "codewordsPerFrame": 329
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 4,
+   "innerCode": 2,
+   "nbits": 623844,
+   "codewordsPerFrame": 404
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 4,
+   "innerCode": 3,
+   "nbits": 623844,
+   "codewordsPerFrame": 366
+  },
+  {
+   "gridX": 640,
+   "gridY": 360,
+   "modulation": 4,
+   "innerCode": 4,
+   "nbits": 623844,
+   "codewordsPerFrame": 411
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 1,
+   "innerCode": 1,
+   "nbits": 469088,
+   "codewordsPerFrame": 247
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 1,
+   "innerCode": 2,
+   "nbits": 469088,
+   "codewordsPerFrame": 304
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 1,
+   "innerCode": 3,
+   "nbits": 469088,
+   "codewordsPerFrame": 275
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 1,
+   "innerCode": 4,
+   "nbits": 469088,
+   "codewordsPerFrame": 309
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 2,
+   "innerCode": 1,
+   "nbits": 938176,
+   "codewordsPerFrame": 495
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 2,
+   "innerCode": 2,
+   "nbits": 938176,
+   "codewordsPerFrame": 608
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 2,
+   "innerCode": 3,
+   "nbits": 938176,
+   "codewordsPerFrame": 550
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 2,
+   "innerCode": 4,
+   "nbits": 938176,
+   "codewordsPerFrame": 618
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 3,
+   "innerCode": 1,
+   "nbits": 1407264,
+   "codewordsPerFrame": 743
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 3,
+   "innerCode": 2,
+   "nbits": 1407264,
+   "codewordsPerFrame": 912
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 3,
+   "innerCode": 3,
+   "nbits": 1407264,
+   "codewordsPerFrame": 825
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 3,
+   "innerCode": 4,
+   "nbits": 1407264,
+   "codewordsPerFrame": 928
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 4,
+   "innerCode": 1,
+   "nbits": 1407264,
+   "codewordsPerFrame": 743
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 4,
+   "innerCode": 2,
+   "nbits": 1407264,
+   "codewordsPerFrame": 912
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 4,
+   "innerCode": 3,
+   "nbits": 1407264,
+   "codewordsPerFrame": 825
+  },
+  {
+   "gridX": 960,
+   "gridY": 540,
+   "modulation": 4,
+   "innerCode": 4,
+   "nbits": 1407264,
+   "codewordsPerFrame": 928
+  }
+ ],
+ "mappings": [
+  {
+   "session": 0,
+   "gridX": 480,
+   "gridY": 270,
+   "modulation": 2,
+   "innerCode": 2,
+   "nbits": 234224,
+   "sent": 1542,
+   "codewordsPerFrame": 151,
+   "interleaveSeed": "6eca5aab84a46a75",
+   "probes": [
+    {
+     "frame": 0,
+     "codeword": 1,
+     "bit": 0,
+     "rho": 0,
+     "q": 1885,
+     "scramble": 1
+    },
+    {
+     "frame": 1,
+     "codeword": 1,
+     "bit": 0,
+     "rho": 209393,
+     "q": 138625,
+     "scramble": 0
+    },
+    {
+     "frame": 5,
+     "codeword": 0,
+     "bit": 0,
+     "rho": 110069,
+     "q": 35123,
+     "scramble": 0
+    },
+    {
+     "frame": 3,
+     "codeword": 150,
+     "bit": 1541,
+     "rho": 159731,
+     "q": 23403,
+     "scramble": 1
+    },
+    {
+     "frame": 4194299,
+     "codeword": 7,
+     "bit": 99,
+     "rho": 27,
+     "q": 66112,
+     "scramble": 1
+    }
+   ]
+  },
+  {
+   "session": 21298,
+   "gridX": 212,
+   "gridY": 120,
+   "modulation": 1,
+   "innerCode": 4,
+   "nbits": 22848,
+   "sent": 1516,
+   "codewordsPerFrame": 15,
+   "interleaveSeed": "46edb47c7b6b7004",
+   "probes": [
+    {
+     "frame": 0,
+     "codeword": 0,
+     "bit": 0,
+     "rho": 0,
+     "q": 15092,
+     "scramble": 0
+    },
+    {
+     "frame": 2,
+     "codeword": 14,
+     "bit": 1515,
+     "rho": 1634,
+     "q": 21665,
+     "scramble": 1
+    },
+    {
+     "frame": 9,
+     "codeword": 3,
+     "bit": 700,
+     "rho": 7353,
+     "q": 2719,
+     "scramble": 1
+    }
+   ]
+  },
+  {
+   "session": 48879,
+   "gridX": 320,
+   "gridY": 180,
+   "modulation": 3,
+   "innerCode": 1,
+   "nbits": 154620,
+   "sent": 1892,
+   "codewordsPerFrame": 81,
+   "interleaveSeed": "959428bd7283556a",
+   "probes": [
+    {
+     "frame": 0,
+     "codeword": 0,
+     "bit": 0,
+     "rho": 0,
+     "q": 86650,
+     "scramble": 1
+    },
+    {
+     "frame": 11,
+     "codeword": 80,
+     "bit": 1891,
+     "rho": 43331,
+     "q": 124117,
+     "scramble": 0
+    },
+    {
+     "frame": 123456,
+     "codeword": 40,
+     "bit": 1000,
+     "rho": 91956,
+     "q": 38652,
+     "scramble": 1
+    }
+   ]
+  }
+ ]
+}
