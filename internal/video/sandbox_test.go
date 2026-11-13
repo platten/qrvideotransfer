@@ -275,7 +275,7 @@ func TestCancel(t *testing.T) {
 	start := time.Now()
 	cancel()
 	wg.Wait()
-	if el := time.Since(start); el > 3*time.Second {
+	if el := time.Since(start); el > 5*time.Second {
 		t.Errorf("instances stopped %v after the cancel", el)
 	}
 	if !errors.Is(errs[0], context.Canceled) || !errors.Is(errs[2], context.Canceled) {

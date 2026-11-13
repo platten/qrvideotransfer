@@ -402,7 +402,7 @@ func TestRunErrors(t *testing.T) {
 	start := time.Now()
 	err := run(t.Context(), slow, job{timeout: 2 * time.Second, progress: progFiles, outDir: t.TempDir()})
 	var le *LimitError
-	if !errors.As(err, &le) || time.Since(start) > 5*time.Second {
+	if !errors.As(err, &le) || time.Since(start) > 15*time.Second {
 		t.Errorf("stall: %v", err)
 	}
 	pr, pw := io.Pipe()

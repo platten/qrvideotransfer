@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -114,12 +115,29 @@ func defaultCacheDir() string {
 	return filepath.Join(d, "qrvt", "wazero")
 }
 
-// EngineInstances is how many engine instances may run at once.
-func EngineInstances() int { return 0 }
+// slots holds one token per engine instance allowed to run. Compiled Wasm cannot be preempted by
+// the Go scheduler, so instances that spin without calling the host would starve every goroutine,
+// the watchdog's included, if they occupied every P; at most GOMAXPROCS - 1 run at once.
+var slots = make(chan struct{}, max(1, runtime.GOMAXPROCS(0)-1))
+
+// EngineInstances is how many engine instances may run at once: one fewer than GOMAXPROCS at
+// start-up (at least one), so that a P stays free for the watchdog and for qrvt itself. Further
+// instances wait for a turn; the time they wait is not a stall. A caller that keeps more decoders open
+// than this waits on them.
+func EngineInstances() int { return cap(slots) }
 
 // exec implements runner. The instance sees the input file read-only through inputFS at /in, the
 // output directory at /out, and nothing else; it has no network.
 func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
+	m.waiting.Add(1)
+	select {
+	case slots <- struct{}{}:
+		m.waiting.Add(-1)
+	case <-ctx.Done():
+		m.waiting.Add(-1)
+		return 0, ctx.Err()
+	}
+	defer func() { <-slots }()
 	var in string
 	reads := &atomic.Int64{}
 	if j.progress == progReads {
