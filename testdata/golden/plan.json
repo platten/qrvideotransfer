@@ -1,0 +1,222 @@
+{
+ "plans": [
+  {
+   "streamLen": 10485760,
+   "shardSize": 128,
+   "parity": 20,
+   "seed": 1,
+   "codewordsPerFrame": 151,
+   "Nd": 81920,
+   "B": 3,
+   "K": 27307,
+   "M": 5462,
+   "T": 98307,
+   "F": 656,
+   "locate": [
+    {
+     "packet": 0,
+     "block": 0,
+     "shard": 22956
+    },
+    {
+     "packet": 1,
+     "block": 1,
+     "shard": 9712
+    },
+    {
+     "packet": 2,
+     "block": 2,
+     "shard": 29115
+    },
+    {
+     "packet": 3,
+     "block": 0,
+     "shard": 2029
+    },
+    {
+     "packet": 98306,
+     "block": 2,
+     "shard": 21168
+    },
+    {
+     "packet": 50000,
+     "block": 2,
+     "shard": 21781
+    }
+   ],
+   "carried": [
+    {
+     "frame": 0,
+     "codeword": 1,
+     "packet": 0
+    },
+    {
+     "frame": 655,
+     "codeword": 150,
+     "packet": 92
+    },
+    {
+     "frame": 5,
+     "codeword": 7,
+     "packet": 756
+    }
+   ]
+  },
+  {
+   "streamLen": 1073741824,
+   "shardSize": 128,
+   "parity": 20,
+   "seed": 3735928559,
+   "codewordsPerFrame": 151,
+   "Nd": 8388608,
+   "B": 256,
+   "K": 32768,
+   "M": 6554,
+   "T": 10066432,
+   "F": 67112,
+   "locate": [
+    {
+     "packet": 0,
+     "block": 0,
+     "shard": 26895
+    },
+    {
+     "packet": 1,
+     "block": 1,
+     "shard": 29486
+    },
+    {
+     "packet": 255,
+     "block": 255,
+     "shard": 4399
+    },
+    {
+     "packet": 256,
+     "block": 0,
+     "shard": 38443
+    },
+    {
+     "packet": 10066431,
+     "block": 255,
+     "shard": 17067
+    },
+    {
+     "packet": 5000000,
+     "block": 64,
+     "shard": 19376
+    }
+   ],
+   "carried": [
+    {
+     "frame": 67111,
+     "codeword": 150,
+     "packet": 367
+    },
+    {
+     "frame": 67112,
+     "codeword": 1,
+     "packet": 368
+    },
+    {
+     "frame": 1000,
+     "codeword": 2,
+     "packet": 150001
+    }
+   ]
+  },
+  {
+   "streamLen": 1000,
+   "shardSize": 64,
+   "parity": 5,
+   "seed": 7,
+   "codewordsPerFrame": 15,
+   "Nd": 16,
+   "B": 1,
+   "K": 16,
+   "M": 1,
+   "T": 17,
+   "F": 4,
+   "locate": [
+    {
+     "packet": 0,
+     "block": 0,
+     "shard": 4
+    },
+    {
+     "packet": 15,
+     "block": 0,
+     "shard": 8
+    },
+    {
+     "packet": 16,
+     "block": 0,
+     "shard": 13
+    }
+   ],
+   "carried": [
+    {
+     "frame": 0,
+     "codeword": 1,
+     "packet": 0
+    },
+    {
+     "frame": 1,
+     "codeword": 14,
+     "packet": 10
+    }
+   ]
+  },
+  {
+   "streamLen": 6291457,
+   "shardSize": 192,
+   "parity": 100,
+   "seed": 42,
+   "codewordsPerFrame": 3,
+   "Nd": 32769,
+   "B": 2,
+   "K": 16385,
+   "M": 16385,
+   "T": 65540,
+   "F": 32772,
+   "locate": [
+    {
+     "packet": 0,
+     "block": 0,
+     "shard": 26880
+    },
+    {
+     "packet": 1,
+     "block": 1,
+     "shard": 15578
+    },
+    {
+     "packet": 2,
+     "block": 0,
+     "shard": 961
+    },
+    {
+     "packet": 65535,
+     "block": 1,
+     "shard": 19504
+    },
+    {
+     "packet": 65536,
+     "block": 0,
+     "shard": 527
+    },
+    {
+     "packet": 65539,
+     "block": 1,
+     "shard": 5944
+    }
+   ],
+   "carried": [
+    {
+     "frame": 43690,
+     "codeword": 2,
+     "packet": 21841
+    }
+   ]
+  }
+ ]
+}
