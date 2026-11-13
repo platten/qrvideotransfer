@@ -434,11 +434,28 @@ Costs a user should expect:
   and 0.63 fps). Without the 8x8 transform the stream is Main profile. Workers each encode a run of
   frames to an elementary stream; all-intra streams with identical parameter sets concatenate validly,
   and one final copy pass wraps them in MP4. Each run has an even number of frames, because x264
-  alternates `idr_pic_id` between 0 and 1 and consecutive IDR pictures must differ in it.
+  alternates `idr_pic_id` between 0 and 1 and consecutive IDR pictures must differ in it. In
+  `internal/video` an encoder writes an MP4 (`-use_editlist 0`) or, for a run, an H.264 elementary
+  stream (`.h264`) whose `Close` refuses an odd frame count (`ErrOddRun`); `Concat` wraps the runs
+  into the MP4 with `-c copy`. The caller builds the `yuv420p` planes; input and output are tagged
+  BT.709 limited range, so ffmpeg converts nothing. `--hdr` (M6) can use 10-bit input, encoded as
+  High 10.
 - **Reading.** Each worker decodes its own time slice to raw frames, without auto-rotation, brightness
   only for grey modes. Captures identify themselves, so slices overlap freely and order does not matter.
   Every codec, HEVC included, is decoded by the embedded engine inside the sandbox. That is the
   owner's decision for version 1.
+  - *How a slice is read* (M1). Decoding starts 1 s before the slice (`-noaccurate_seek -ss`, with
+    `-copyts`) and frames before it are dropped by qrvt: ffmpeg seeks to the random access point whose
+    decode time precedes the target, and at an open-GOP point (an HEVC CRA picture) the leading
+    pictures before it in display order cannot be decoded, which in the HEVC test clip lost frames
+    after the target. Each frame's timestamp is read from the `showinfo` filter's log line
+    (`checksum=0`) in the stream's time base, so slices that partition the duration decode every frame
+    exactly once, and decoding stops at the slice's end. `-fps_mode passthrough`: ffmpeg's default
+    for raw output would duplicate frames to fill gaps in the timestamps. Output is in the source's
+    own pixel format (`yuv420p`, `yuvj420p`, `yuv420p10le`) or its Y plane alone (`gray`,
+    `gray10le`, through `extractplanes=y`), so ffmpeg converts neither range nor depth; other formats
+    are read as brightness only, 10-bit output needs a 10-bit source, and more than 10 bits is
+    refused. Every frame must keep the probed size; a change mid-stream stops the decode.
   - *Engine speed at 4K HEVC* (spike S1, one instance, luma only, medians of five runs): 8-bit 3.9 fps,
     or 4.5 with `-skip_loop_filter all`; 10-bit 3.6 fps, or 3.35 with it. The 4 fps target is not met
     without skipping the loop filter; with it, it is met for 8-bit only, narrowly (3.8-4.7). Skipping
@@ -474,8 +491,17 @@ Costs a user should expect:
     - 10 s per picture. The decoder cannot be cancelled, so at the first picture that exceeds it the
       whole decode stops with an error naming the limit; no abandoned decoder is left running while work
       continues.
-    - On any error, panic or refused stream the slice is decoded by the engine. CI decodes the test
-      clips with both and requires identical output.
+    - On any error, panic or refused stream the rest of the slice is decoded by the engine (from just
+      after the last frame returned). CI decodes the test clips with both and requires identical
+      output (`TestFastPathMatchesEngine`, whole and in slices, 8 and 10 bits).
+    - *As built in M1.* The fast path is compiled only with the build tag `unsandboxedhevc` (tests:
+      `-tags unsandboxedhevc,noasm`); other builds, releases included, refuse `--unsandboxed-hevc`
+      (`video.ErrUnsupported`). The tag goes once the assembly question below is settled. A
+      parameter set that declares a size, chroma format or bit depth other than the probed one sends
+      the slice to the engine rather than starting a new decoder. The copy instance also writes each
+      packet's timestamps (`framemd5`), and each picture is tagged with its access unit's index, so
+      the fast path's timestamps equal the engine's. The time limit runs from a picture's first slice
+      on a single decoder goroutine; at the limit that goroutine is abandoned and the decode fails.
     - The decoder's assembly is excluded, and the flag does not ship until it can be. Its `noasm` build
       tag is global: `klauspost/reedsolomon` and
       `klauspost/compress` also honour it. M1 measures the whole release built with `-tags noasm` and
@@ -483,12 +509,18 @@ Costs a user should expect:
       fast path needs a package-specific tag upstream. This concerns the fast path and those
       libraries only, not the default path's safety.
 - **Backends.** One interface with three implementations: embedded (default), an external `ffmpeg`
-  process for `--ffmpeg system`, and a raw-frame file backend for tests.
+  process for `--ffmpeg system`, and a raw-frame file backend for tests (`video.New`,
+  `NewEmbedded`, `NewSystem`, `NewRaw`). The native backend runs the same arguments, with paths given
+  as `file:` URLs, and takes `ffprobe` from beside the chosen `ffmpeg`, else from `PATH`.
 - **Start-up.** The compiled module is cached on disk, so only the first run pays for compilation
   (spike S1: 7-9 s first, under 3 s cached).
 - **Loading.** `go-ffmpreg/embed` decompresses the module in its `init`, costing 0.25 s and about 70 MB
   at every start, even for `--help`. `internal/video` loads the compressed module itself, on first use,
-  and passes it to `go-ffmpreg/wasm`.
+  and passes it to `go-ffmpreg/wasm`: it embeds a byte-for-byte copy of go-ffmpreg v0.6.22's
+  `embed/ffmpreg.wasm.gz` (7.8 MB), checks the SHA-256 of the decompressed module
+  (`357dd97d…bc766`, `video.EngineSHA256`) before compiling it, and keeps one compiled module per
+  process. A test compares the copy with the module cache's file. The compilation cache is
+  `qrvt/wazero` under `os.UserCacheDir()`.
 - **Memory.** Each instance's linear memory is reserved at its limit, 512 MiB for decoding and
   encoding, which is also its ceiling (SECURITY.md section 5): `WithMemoryLimitPages(8192)` with
   `WithMemoryCapacityFromMax`, never grown by reallocation, since otherwise the discarded copies double
@@ -510,7 +542,12 @@ Costs a user should expect:
   that exceeds it later in case the probe was lied to. Spike S1 measured at most 75.5 pixels per byte
   on its clips and the S2 pattern files. The option adds periodic checks to the
   compiled code, so M1 stream D re-runs the S1 decode and encode figures with it on and records both;
-  a cost above about 10% goes to the owner. The implementation and its test are M1 stream D work.
+  a cost above about 10% goes to the owner. Measured (spike S1 report, section 10): COSTLINE
+  wazero implements the option by calling a check through a trampoline at every loop back-edge,
+  so the cost depends on the work: a crafted stream whose decoding is mostly picture-filling loops ran
+  13 times slower (1.1-1.3 s off, 15-17 s on). The option stays on (owner's decision); the watchdog
+  ticks once a second, and while an instance waits on qrvt (a full output pipe, an empty input pipe)
+  it is not stalled. Encoding instances count a frame taken as progress.
 
 Rejected as a foundation: the pure-Go H.264 stack (`oops1/go.264`, `go-avkit/*`). An independent check
 found it is one author's 2.5-month-old project that links glibc on Linux through purego and silently
@@ -558,8 +595,8 @@ qrvt profiles | version | completion | man
 | `--overwrite` | decode | off | Allow existing files in the output folder to be replaced |
 | `--state-dir` | decode | none | Keep progress for resuming and merging |
 | `--report` | decode | none | Write a JSON report of the decode |
-| `--ffmpeg` | all | `embedded` | `embedded`, `system` or a path. `system` runs outside the sandbox: for recordings the user made themselves |
-| HEVC fast-path flag (named in M1) | decode, inspect | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three |
+| `--ffmpeg` | all | `embedded` | `embedded`, `system` (`ffmpeg` and `ffprobe` from `PATH`) or the path of an `ffmpeg` (its `ffprobe` beside it, else from `PATH`). `system` and a path run outside the sandbox: for recordings the user made themselves. The help text says both |
+| HEVC fast-path flag (named in M1) | decode, inspect | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three. Present only in builds with the `unsandboxedhevc` tag until the decoder's assembly can be excluded; other builds refuse it |
 | `--jobs` | all | CPU count | Worker count |
 | `--json`, `--plain`, `--quiet`, `--verbose` | all | | Output style |
 
