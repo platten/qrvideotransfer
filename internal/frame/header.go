@@ -95,10 +95,12 @@ func (h Header) Validate() error {
 		return fmt.Errorf("frame: invalid frame count %d", h.TotalFrames)
 	case h.FrameIndex >= h.TotalFrames:
 		return fmt.Errorf("frame: frame index %d not below frame count %d", h.FrameIndex, h.TotalFrames)
-	case h.Modulation < 1 || h.Modulation > 4:
-		return fmt.Errorf("frame: unknown modulation %d", h.Modulation)
-	case h.InnerCode < 1 || h.InnerCode > 4:
-		return fmt.Errorf("frame: unknown inner code %d", h.InnerCode)
+	}
+	if _, err := LookupModulation(h.Modulation); err != nil {
+		return err
+	}
+	if _, err := LookupInner(h.InnerCode); err != nil {
+		return err
 	}
 	return CheckGrid(int(h.GridX), int(h.GridY))
 }
