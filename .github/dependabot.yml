@@ -1,0 +1,28 @@
+# Dependency updates (DESIGN.md section 17, SECURITY.md section 8). Dependabot keeps actions pinned
+# by commit and updates the version comment with the SHA. Pinned tools in tools/dev/tools.go (with
+# their SHA-256 sums) and the Go version are updated by hand.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]

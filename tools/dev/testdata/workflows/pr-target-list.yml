@@ -1,0 +1,10 @@
+# Violation: pull_request_target in a flow list.
+name: pr-target-list
+on: [push, "pull_request_target"]
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: "true"
