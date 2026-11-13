@@ -48,7 +48,7 @@ Each arrow carries attacker-controlled data. Each box must hold when its input i
 
 | # | Threat | Defence |
 | --- | --- | --- |
-| T1 | A malformed container or bitstream exploits the video decoder | **Sandboxed:** ffmpeg runs inside the wazero WebAssembly sandbox and parses every container, and every H.264 bitstream. It is given a read-only view of the single input file where the runtime allows, otherwise of the file's directory; no network; a memory ceiling; and it is cancelled with the command's context. Its outputs are raw frames, or for HEVC the stream copied out of the container, on a pipe, length-checked. **Not sandboxed:** HEVC bitstreams are decoded by `gen2brain/h265` in its pure-Go form, without its assembly, in the qrvt process (DESIGN.md section 12). There it relies on Go's memory safety (bounds-checked, no `unsafe` on that path), a `recover` boundary per decode, the limits of section 5 and a fuzz target (section 9.1); a panic, error or exceeded limit falls back to the sandboxed engine for that slice. A data race or a logic bug in that decoder is not contained by a sandbox |
+| T1 | A malformed container or bitstream exploits the video decoder | **Sandboxed:** ffmpeg runs inside the wazero WebAssembly sandbox and parses every container, and every H.264 bitstream. It is given a read-only view of the single input file where the runtime allows, otherwise of the file's directory; no network; a memory ceiling; and it is cancelled with the command's context. Its outputs are raw frames, or for HEVC the stream copied out of the container, on a pipe, length-checked. **Not sandboxed:** HEVC bitstreams are decoded by `gen2brain/h265` in the qrvt process (DESIGN.md section 12). That decoder is v0.2.5 of a project created in August 2026, and it has had no independent security review. It must run without its hand-written assembly: that is a requirement, the mechanism is decided in M1, and no release ships until it is in place. Each decoder is configured with `Threads(1)`, so all its code runs on the calling goroutine (with more threads it starts goroutines of its own, whose panics no caller can recover); parallelism comes only from qrvt's own time slices. Each slice runs inside its own `recover` boundary, under the limits of section 5, and relies on Go's memory safety (bounds-checked, no `unsafe` on that path) and a fuzz target (section 9.1). A panic, an error, an unsupported stream or an exceeded limit sends that slice to the sandboxed engine. A data race or a logic bug in that decoder is not contained by a sandbox |
 | T2 | A lying header or descriptor drives huge allocations or loops | Every field is used only after its CRC passes and its value is checked against section 5. Parameters derived from the stream length are recomputed and must match (FORMAT.md section 10). A decode locks onto the first valid session; frames from any other session are counted and ignored |
 | T3 | Soft-bit or shard floods exhaust memory or disk | The soft-bit store is capped and evicts. The shard store is a file whose size is fixed by the validated descriptor, and free disk space is checked before it is created |
 | T4 | A decompression bomb | Decompression is streaming and stops at the archive length declared in the stream header. That length must not exceed `--max-size` or the free space on disk |
@@ -80,9 +80,10 @@ Implementation defaults, each a named constant with a test that exceeds it:
 | Soft-bit store | 256 MB |
 | LDPC iterations per codeword | 25 |
 | Sessions tracked per decode | 1 |
-| Engine memory per instance | 1 GiB decoding, 1.5 GiB encoding |
+| Engine memory per instance | 512 MiB of linear memory, decoding and encoding, reserved up front (the reservation is the ceiling). Spike S1 measured at most 252 MB in use; process memory reached 920 MB per instance when the whole reservation became resident, and a 1 GiB reservation raised that to 1,434 MB |
 | Capture size accepted from the engine or the HEVC decoder | 8,192 x 8,192 pixels |
-| HEVC decoder (unsandboxed) | Picture size refused above the capture size before allocation (`FrameSizeLimit`), which with the decoded picture buffer (at most 16 pictures) bounds its memory; 10 s per picture, after which the slice falls back to the engine |
+| HEVC decoder (unsandboxed) | Before decoding, every sequence parameter set is checked: anything other than 4:2:0 at 8 or 10 bits, a picture larger than 7680 x 4320 luma samples (also set as `FrameSizeLimit`), or `sps_max_dec_pic_buffering` above 6 sends the slice to the engine; a change of picture size, bit depth or chroma format starts a new decoder. Memory per decoder is then at most 7 pictures (6 in the buffer, 1 being decoded) of 7680 x 4320 at 10 bits, 3 bytes per luma sample for 4:2:0 samples stored 16-bit plus about 0.1 byte of motion data: about 720 MB (about 180 MB at 3840 x 2160) |
+| HEVC decode time | 10 s per picture. The decoder cannot be cancelled: when the limit passes, the slice is abandoned (its goroutine keeps running until it returns, and its memory stays allocated meanwhile) and decoded by the engine. After the first abandoned decode, the rest of that recording is decoded by the engine only. At most one abandoned decode per worker: past that, the decode stops with an error naming the limit |
 
 A decode that reaches a limit stops with an error that names the limit and, where one exists, the flag
 that raises it. Only the unpacked size has a flag in version 1.
@@ -146,7 +147,7 @@ Each runs briefly on every pull request and for longer nightly, with its corpus 
 | Stream header, manifest and key-file parsing | No panic; rejects everything FORMAT.md forbids |
 | Unpacking arbitrary archive bytes into a temporary root | No file created outside the root; no panic |
 | Finder detection and mesh fitting on arbitrary images | No panic; time bounded by image size |
-| HEVC decoding (`gen2brain/h265`, pure Go) of arbitrary NAL units, seeded with the test clips and the HEVC conformance streams | No panic escapes the recover boundary; no picture larger than the capture limit is allocated; time bounded per picture |
+| HEVC decoding (`gen2brain/h265`, pure Go, `Threads(1)`) of arbitrary NAL units, seeded with the test clips and the HEVC conformance streams | No panic escapes the recover boundary; every stream refused by the parameter-set check of section 5 is handed to the engine; no picture larger than 7680 x 4320 is allocated. The fuzzer reports inputs that take longer than the per-picture limit; it cannot bound their time |
 | Whole decode from arbitrary raw frames, seeded with valid and near-valid frames | No panic; reports success only when the recovered stream matches the descriptor's hash; writes nothing outside the root |
 
 ### 9.2 Hostile corpus
@@ -172,8 +173,12 @@ Windows:
 - The embedded engine, asked to write during a decode, fails.
 - An engine instance that exceeds its memory ceiling is stopped and reported, and the process survives.
 - Cancelling the command stops every engine instance promptly.
-- The pure-Go HEVC decoder and the engine give identical frames on the test clips; a panic injected into
-  the HEVC decoder is recovered and the slice is decoded by the engine instead.
+- The pure-Go HEVC decoder and the engine give identical frames on the test clips.
+- The HEVC wrapper refuses a decoder configured with more than one thread.
+- A panic raised inside the decoder's call path (from within `DecodeNAL`, through a test decoder, not
+  only in the caller's own code) is recovered, and the slice is decoded by the engine instead.
+- A decode that exceeds the time limit is abandoned and the rest of the recording goes to the engine; a
+  second one on the same worker stops the decode with an error naming the limit.
 
 ### 9.4 Authenticity tests
 
@@ -227,3 +232,4 @@ instruction and states which versions receive fixes.
 | Date | Change |
 | --- | --- |
 | 2026-11-13 | M0 spikes: HEVC is decoded by the pure-Go `gen2brain/h265` outside the sandbox (spike S1). Section 3 shows the new boundary; T1 states what is and is not sandboxed; section 5 adds the HEVC decoder's limits; section 9.1 adds its fuzz target and section 9.3 its comparison and fallback tests |
+| 2026-11-13 | M0 review: T1 states that the HEVC decoder runs with `Threads(1)` inside per-slice recover boundaries, that excluding its assembly is a requirement whose mechanism is decided in M1, and its version, age and lack of review. Section 5: the engine's ceiling is 512 MiB for decoding and encoding, reserved up front (a 1 GiB reservation raised worst-case memory in spike S1); the HEVC decoder's parameter-set checks and worst-case memory; the time limit abandons rather than stops a decode, with a limit on abandoned decodes. Sections 9.1 and 9.3 claim only what can be tested |

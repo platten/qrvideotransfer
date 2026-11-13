@@ -309,9 +309,10 @@ Shards live in a temporary file of (1 + parity) times the stream size, on both t
 side. qrvt's own memory, not counting engine instances, is targeted at 600 MB at 1080p and 1.5 GB at 4K.
 Each engine instance adds its linear memory, which spike S1 measured at 155 MB (8-bit) and 252 MB
 (10-bit) when decoding 4K HEVC and 140-240 MB when encoding 4K, within a reserved limit of 512 MiB per
-instance. Process memory per 4K decoding instance was 320-415 MB in 10 of 12 runs and up to 825 MB in
-the other 2. The default worker count is the CPU count, reduced so that the engine instances, counted at
-the worst measured 825 MB each, stay within half of the machine's physical memory.
+instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of the 21 runs where it
+was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). A pure-Go HEVC decoder (section 12) needs at most about
+720 MB. The default worker count is the CPU count, reduced so that the workers, each counted at the
+larger of the two worst cases, 920 MB, stay within half of the machine's physical memory.
 
 ## 9. Payload
 
@@ -432,15 +433,32 @@ Costs a user should expect:
   only for grey modes. Captures identify themselves, so slices overlap freely and order does not matter.
   H.264 is decoded by the embedded engine. HEVC is decoded by `github.com/gen2brain/h265` in its pure-Go
   form (no assembly), after the engine has copied the stream out of its container (`-c copy`, Annex B):
-  spike S1 measured 4.7 fps (8-bit) and 5.0 fps (10-bit) per core at 4K, against 3.1-3.9 for the
-  engine, with luma byte-identical to the engine's on every frame. Because this decoder runs outside the
-  sandbox, each decode runs inside a `recover` boundary, under the limits of SECURITY.md section 5
-  (capture size, memory, a time bound per frame), and on any error or panic the slice is decoded again
-  by the embedded engine. CI decodes the test clips with both and requires identical output.
-  The assembly of `gen2brain/h265` is excluded through its `noasm` build tag. That tag is global:
-  `klauspost/reedsolomon` and `klauspost/compress` also honour it and would lose their assembly, so
-  the release build must not set it. How to exclude only the decoder's assembly (a package-specific
-  tag upstream, or a vendored copy without the assembly files) is decided in M1.
+  spike S1 measured 4.7 fps (8-bit) and 5.0 fps (10-bit) per core at 4K with `Threads(1)`, against
+  3.1-3.9 for the engine, with luma byte-identical to the engine's on every frame. This decoder runs
+  outside the sandbox (SECURITY.md T1), so:
+  - Each decoder runs with `Threads(1)`. With more, it decodes wavefront rows and loop-filter bands on
+    goroutines it starts itself, and a panic there cannot be recovered by any caller. Parallelism comes
+    only from qrvt's own time slices, each decoded inside its own `recover` boundary.
+  - Before decoding, the wrapper checks every sequence parameter set (`hevc.SPSFormat` and its own
+    parse of `sps_max_dec_pic_buffering`) and hands the slice to the engine unless the stream is 4:2:0
+    at 8 or 10 bits, at most 7680 x 4320 luma samples (also set as `FrameSizeLimit`), with a decoded
+    picture buffer of at most 6 pictures. Six is the HEVC maximum (Annex A.4.2, `maxDpbPicBuf`) for
+    any picture larger than three quarters of its level's `MaxLumaPs`, which covers phone recordings:
+    3840 x 2160 at level 5.1 (8,294,400 > 6,684,672 samples), 7680 x 4320 at level 6.2
+    (33,177,600 > 26,738,688) and 1920 x 1080 at level 4.1 (2,073,600 > 1,671,168). A stream may
+    declare up to 16 only when its pictures are small for its level; those go to the engine. The x265
+    test clips declare 5. A change of picture size, bit depth or chroma format starts a new decoder.
+    Worst case per decoder: 7 pictures of 7680 x 4320 at 10 bits, about 720 MB (SECURITY.md section 5).
+  - Each picture has 10 s. The decoder cannot be cancelled, so a slice that exceeds it is abandoned and
+    decoded by the engine, and the rest of that recording goes to the engine only; a second abandoned
+    decode on a worker stops the decode with an error naming the limit.
+  - On any error, panic or refused stream the slice is decoded by the engine. CI decodes the test clips
+    with both and requires identical output.
+  - The assembly of `gen2brain/h265` must be excluded. Its `noasm` build tag is global:
+    `klauspost/reedsolomon` and `klauspost/compress` also honour it. The mechanism is decided in M1,
+    which first measures the whole release built with `-tags noasm` and accepts that only if
+    Reed-Solomon and zstd each stay above about 50 MB/s per core; otherwise a package-specific tag
+    upstream or a vendored copy without the assembly files. No release ships until it is in place.
 - **Backends.** One interface with three implementations: embedded (default), an external `ffmpeg`
   process for `--ffmpeg system`, and a raw-frame file backend for tests.
 - **Start-up.** The compiled module is cached on disk, so only the first run pays for compilation
@@ -448,9 +466,11 @@ Costs a user should expect:
 - **Loading.** `go-ffmpreg/embed` decompresses the module in its `init`, costing 0.25 s and about 70 MB
   at every start, even for `--help`. `internal/video` loads the compressed module itself, on first use,
   and passes it to `go-ffmpreg/wasm`.
-- **Memory.** Each instance's linear memory is reserved at its limit (`WithMemoryLimitPages` with
-  `WithMemoryCapacityFromMax`) and never grown by reallocation; otherwise the discarded copies double
-  the resident memory (spike S1).
+- **Memory.** Each instance's linear memory is reserved at its limit, 512 MiB for decoding and
+  encoding, which is also its ceiling (SECURITY.md section 5): `WithMemoryLimitPages(8192)` with
+  `WithMemoryCapacityFromMax`, never grown by reallocation, since otherwise the discarded copies double
+  the resident memory (spike S1). A 1 GiB reservation raised the worst-case process memory from 920 MB
+  to 1,434 MB, so the limit stays at 512 MiB.
 - **Sandbox.** When decoding, the module sees only the input file, read-only, where the runtime allows
   that, and otherwise the file's directory read-only. When encoding it sees one output directory. It
   has no network and a memory ceiling.
@@ -888,4 +908,5 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | --- | --- |
 | 2026-11-13 | M0: section 14 names the enum constants with a prefix (`StagePack`, `KindStats`, `UnitBytes`, `CompressAuto`, ...) because `Stats` and `Warning` are also type names; `Plan` caches its shard order in an unexported field so that `Locate` is O(1) |
 | 2026-11-13 | M0 review: section 16 says Go comes from the pinned go.dev archive (SHA-256 checked) rather than a package manager, and wasmtime from its release archive; section 14 gains `Plan.CheckFrames` and `fec.MaxFrames`, by which an encoder refuses more than 4,194,300 frames (`Frames` is unchanged) |
-| 2026-11-13 | M0 spikes S1 and S3: section 3 records the wazero against wasmtime outcome (1.22-1.30x, continue in Go) and that HEVC is decoded outside the sandbox; section 4 (F3) says which x264 settings give 8.4 bits per cell; section 5 records the HDR output measurements (libaom AV1 10-bit unusable, H.264 High 10 the candidate, choice in M6); section 8 records the LDPC decoder as built and its measured speed (threshold not met), forbids Go experiments and amd64-only packages in release builds, and sizes the default worker count on the worst measured engine memory (825 MB); section 12 gives the tuned x264 settings, even-length encode runs, the pure-Go HEVC path with its recover boundary, limits, engine fallback and the `noasm` tag problem, lazy module loading, and reserved linear memory |
+| 2026-11-13 | M0 spikes S1 and S3: section 3 records the wazero against wasmtime outcome (1.22-1.30x, continue in Go) and that HEVC is decoded outside the sandbox; section 4 (F3) says which x264 settings give 8.4 bits per cell; section 5 records the HDR output measurements (libaom AV1 10-bit unusable, H.264 High 10 the candidate, choice in M6); section 8 records the LDPC decoder as built and its measured speed (threshold not met), forbids Go experiments and amd64-only packages in release builds, and sizes the default worker count on the worst measured engine memory; section 12 gives the tuned x264 settings, even-length encode runs, the pure-Go HEVC path with its recover boundary, limits, engine fallback and the `noasm` tag problem, lazy module loading, and reserved linear memory |
+| 2026-11-13 | M0 review: section 12 runs the HEVC decoder with `Threads(1)` inside per-slice recover boundaries, checks parameter sets before decoding (4:2:0, 8 or 10 bits, at most 7680 x 4320, a buffer of at most 6 pictures, justified from HEVC Annex A.4.2), states the 10 s limit abandons rather than stops a decode, and plans the M1 measurement for the `noasm` tag; the engine reservation is 512 MiB and equals its ceiling; section 8 sizes workers on the larger worst case, 920 MB |

@@ -22,9 +22,15 @@ Released binaries will embed ffmpeg, built with x264, as a WebAssembly module
 License, which is why qrvt as a whole is GPL-3.0-or-later. The corresponding source of that module,
 its build script and its licence notices will be shipped with the first release that embeds it.
 
+The WebAssembly runtime github.com/tetratelabs/wazero is licensed under the Apache License,
+Version 2.0. Its NOTICE file reads:
+
+    Copyright 2020-2023 wazero authors
+
 Released binaries will also include github.com/gen2brain/h265, a pure-Go HEVC decoder, under the MIT
-licence. It is a port of roticv/rust_h265 (offered under MIT or Apache-2.0) and OxideAV/oxideav-h265
-(MIT); its LICENSE carries the notice below.
+licence. It is a port of roticv/rust_h265 (offered under MIT or Apache-2.0) and of
+OxideAV/oxideav-h265 (MIT licence, "Copyright (c) 2026 Karpelès Lab Inc."); its LICENSE carries the
+notice below.
 
     MIT License
 
