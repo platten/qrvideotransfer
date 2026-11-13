@@ -234,7 +234,9 @@ func (p parser) entry() (Entry, error) {
 			e.Size, err = p.int(0, math.MaxInt64)
 		case "mode":
 			v, err = p.int(0, math.MaxUint32)
-			e.Mode = uint32(v) //nolint:gosec // range checked
+			if v <= math.MaxUint32 { // p.int checked it; repeated where static analysis sees it
+				e.Mode = uint32(v) //nolint:gosec // range checked on the line above
+			}
 		case "mtime":
 			if s, err = p.string(); err == nil {
 				e.MTime, err = time.Parse(time.RFC3339, s)
