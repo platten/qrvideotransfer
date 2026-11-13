@@ -1,7 +1,6 @@
 # Configuration for vladopajic/go-test-coverage v2, used in CI. The same gate runs offline in
 # `go run ./tools/dev cover`; keep the two in step.
 profile: coverage.out
-local-prefix: github.com/platten/qrvideotransfer
 
 threshold:
   file: 0
