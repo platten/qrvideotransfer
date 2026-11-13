@@ -579,6 +579,7 @@ type Plan struct{ Blocks, K, M, ShardSize int; Packets int64; Seed uint32 } // a
 func NewPlan(streamLen int64, shardSize, m int, seed uint32) (Plan, error)
 func (p Plan) Locate(packet int64) (block, shard int)
 func (p Plan) Frames(codewordsPerFrame int) int
+func (p Plan) CheckFrames(codewordsPerFrame int) (int, error) // Frames, or an error above MaxFrames
 type ShardStore interface {
     Put(block, shard int, b []byte) error
     Get(block, shard int, b []byte) (bool, error)
