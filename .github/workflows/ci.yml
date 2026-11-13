@@ -110,6 +110,68 @@ jobs:
           go-package: ./...
           repo-checkout: false # already checked out above
 
+  # Runs the stand-alone setup scripts as a new developer would, non-interactively and with --spike,
+  # on a runner without the pinned Go (no setup-go here: the runner's own Go is a different version,
+  # so the scripts must download and verify Go 1.27.4 themselves), then checks independently that
+  # every pinned version is in place. Not exercised on hosted runners: installing git (it is
+  # preinstalled on all three images, so the scripts only report it) and the dnf and pacman paths of
+  # setup.sh (no Fedora or Arch runners).
+  setup-scripts:
+    name: setup scripts (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # apt (Ubuntu) or Homebrew (macOS) installs ffmpeg with libx265; Go and wasmtime come from
+      # their release archives with pinned SHA-256.
+      - name: scripts/setup.sh --yes --spike
+        if: runner.os != 'Windows'
+        timeout-minutes: 35
+        shell: bash
+        run: scripts/setup.sh --yes --spike
+
+      # winget installs ffmpeg (Gyan.FFmpeg); Go and wasmtime come from their release archives.
+      - name: scripts/setup.ps1 -Yes -Spike
+        if: runner.os == 'Windows'
+        timeout-minutes: 35
+        shell: pwsh
+        run: scripts/setup.ps1 -Yes -Spike
+
+      - name: Check the installed versions (Unix)
+        if: runner.os != 'Windows'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          export PATH="$HOME/.local/go1.27.4/bin:$HOME/.local/bin:$PATH"
+          test "$(go env GOVERSION)" = go1.27.4
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          go run ./tools/dev check-tools # Go, git and every tool pinned in tools/dev, by version
+          ffmpeg -hide_banner -encoders | grep -q libx265
+          wasmtime --version | grep -q ' 50\.0\.1'
+
+      - name: Check the installed versions (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $p = Join-Path $env:LOCALAPPDATA 'Programs'
+          $env:PATH = (Join-Path $p 'go1.27.4\go\bin') + ';' + (Join-Path $p 'wasmtime-v50.0.1-x86_64-windows') + ';' +
+            [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'User')
+          if ((go env GOVERSION) -ne 'go1.27.4') { throw "go is $(go env GOVERSION)" }
+          $env:PATH = (Join-Path (go env GOPATH) 'bin') + ';' + $env:PATH
+          go run ./tools/dev check-tools
+          if ($LASTEXITCODE -ne 0) { throw 'check-tools failed' }
+          if (-not ((ffmpeg -hide_banner -encoders 2>$null) -match 'libx265')) { throw 'ffmpeg has no libx265' }
+          if (-not ((wasmtime --version) -match ' 50\.0\.1')) { throw 'wrong wasmtime' }
+
   release-snapshot:
     name: release snapshot
     runs-on: ubuntu-24.04
