@@ -70,8 +70,11 @@ type DecodeOptions struct {
 	Overwrite  bool
 	Report     string // optional path for a JSON report
 	Backend    string
-	Workers    int
-	Progress   func(Event)
+	// UnsandboxedHEVC opts in to decoding HEVC recordings in-process with the pure-Go decoder, outside
+	// the WebAssembly sandbox (flag --unsandboxed-hevc). Only for recordings the user made; see SECURITY.md.
+	UnsandboxedHEVC bool
+	Workers         int
+	Progress        func(Event)
 }
 
 // CalibrationOptions are the inputs of [CalibrationVideo].
@@ -87,16 +90,22 @@ type CalibrationOptions struct {
 type AnalyzeOptions struct {
 	Recordings []string
 	Backend    string
-	Workers    int
-	Progress   func(Event)
+	// UnsandboxedHEVC opts in to decoding HEVC recordings in-process with the pure-Go decoder, outside
+	// the WebAssembly sandbox (flag --unsandboxed-hevc). Only for recordings the user made; see SECURITY.md.
+	UnsandboxedHEVC bool
+	Workers         int
+	Progress        func(Event)
 }
 
 // InspectOptions are the inputs of [Inspect].
 type InspectOptions struct {
-	Path     string // a code video or a recording of one
-	Backend  string
-	Workers  int
-	Progress func(Event)
+	Path    string // a code video or a recording of one
+	Backend string
+	// UnsandboxedHEVC opts in to decoding HEVC recordings in-process with the pure-Go decoder, outside
+	// the WebAssembly sandbox (flag --unsandboxed-hevc). Only for recordings the user made; see SECURITY.md.
+	UnsandboxedHEVC bool
+	Workers         int
+	Progress        func(Event)
 }
 
 // Stage names a step of encoding or decoding.

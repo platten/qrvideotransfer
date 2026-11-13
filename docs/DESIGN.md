@@ -422,7 +422,7 @@ Costs a user should expect:
   to 40% slower per core than the opt-in HEVC fast path (spike S1, same session: 26% slower for 8-bit,
   37% for 10-bit). The two speed-ups, both outside the sandbox and both for recordings the user made
   themselves, are `--ffmpeg system`, which should bring decoding near real time, and the HEVC
-  fast-path flag (named in M1) of section 12.
+  fast-path flag `--unsandboxed-hevc` of section 12.
 
 ## 12. Video engine
 
@@ -443,7 +443,7 @@ Costs a user should expect:
     or 4.5 with `-skip_loop_filter all`; 10-bit 3.6 fps, or 3.35 with it. The 4 fps target is not met
     without skipping the loop filter; with it, it is met for 8-bit only, narrowly (3.8-4.7). Skipping
     the loop filter stays off by default until the S2 or G1 recordings show it costs no cells.
-  - *HEVC fast path, opt-in.* With the HEVC fast-path flag (named in M1), HEVC is decoded instead by
+  - *HEVC fast path, opt-in.* With the HEVC fast-path flag `--unsandboxed-hevc`, HEVC is decoded instead by
     `github.com/gen2brain/h265` (v0.2.5) in the qrvt process, outside the sandbox: 4.7 fps (8-bit) and
     5.0 fps (10-bit) per core at 4K without its assembly, with luma byte-identical to the engine's. It
     is in the same trust class as `--ffmpeg system`; the help text, section 13 and SECURITY.md say that
@@ -559,7 +559,7 @@ qrvt profiles | version | completion | man
 | `--state-dir` | decode | none | Keep progress for resuming and merging |
 | `--report` | decode | none | Write a JSON report of the decode |
 | `--ffmpeg` | all | `embedded` | `embedded`, `system` or a path. `system` runs outside the sandbox: for recordings the user made themselves |
-| HEVC fast-path flag (named in M1) | decode, inspect | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three |
+| HEVC fast-path flag `--unsandboxed-hevc` | decode, inspect | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three |
 | `--jobs` | all | CPU count | Worker count |
 | `--json`, `--plain`, `--quiet`, `--verbose` | all | | Output style |
 
@@ -642,6 +642,7 @@ type DecodeOptions struct {
     Overwrite        bool
     Report           string   // optional path for a JSON report
     Backend          string
+    UnsandboxedHEVC  bool     // opt-in pure-Go HEVC decoding outside the sandbox
     Workers          int
     Progress         func(Event)
 }
@@ -952,3 +953,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 review round 2 and the owner's decision for version 1: every codec, HEVC included, is decoded by the sandboxed engine; the pure-Go `gen2brain/h265` is only an opt-in HEVC fast path, because it allocates a full picture for every missing reference a slice names (about 6.5 GB at 8K), so the 720 MB bound is withdrawn. Section 3 records this; section 8 does not count the fast path; section 11 gives the default decode time (about 2.8-3.6 times the duration for 4K60 on 8 cores, 25-40% slower per core than the fast path) and the two speed-ups; section 12 gives the engine's 4K HEVC figures, keeps skipping the loop filter off, and lists the fast path's protections (exactly `Threads(1)`, the per-sub-layer `sps_max_dec_pic_buffering_minus1 + 1 <= 6` check, `-c copy` before decoding, a stop at the first abandoned decode) as reducing risk, not bounding it; section 13 adds the fast-path flag |
 | 2026-11-13 | M0 review round 3: section 12 requires `WithCloseOnContextDone(true)` on the runtime qrvt creates, adds the 30 s no-progress watchdog with the M1 stream D cost measurement, gives the stream-copy instance's mounts, and states that the HEVC fast-path flag does not ship until the decoder's assembly can be excluded |
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
+| 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc`; section 14's `DecodeOptions` (and the root package's `AnalyzeOptions` and `InspectOptions`) gain `UnsandboxedHEVC` |
