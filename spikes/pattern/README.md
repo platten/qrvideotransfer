@@ -42,7 +42,8 @@ After writing, the program checks the file and stops with an error on any differ
   frame the program rendered; and decodes the header from the four copies with `frame.DecodeHeader`,
   requiring every field to equal the expected header.
 
-All three files passed: zero wrong points and zero wrong headers in every segment.
+All four files (1920x1080, 2560x1440, 3200x2000 and 3840x2160) passed: zero wrong points and zero wrong
+headers in every segment. Generated pattern files stay out of git (`spikes/pattern/out/` is ignored).
 
 ## Reproduce
 
@@ -110,6 +111,29 @@ go run ./spikes/pattern -verify-only -w 3840 -h 2160 -out spikes/pattern/out
 | 15 | 60.0 | 60 | 8 | 320 x 180 | 1 Gray2 | 1728 | 240 |
 | 16 | 64.0 | 60 | 8 | 320 x 180 | 2 Gray4 | 1968 | 240 |
 | 17 | 68.0 | 60 | 8 | 320 x 180 | 3 RGB8 | 2208 | 240 |
+
+`pattern-3200x2000.mp4`: 4320 video frames (72.0 s), F = 2448 code frames.
+
+| # | Start (s) | Rate (fps) | Cell (px) | Grid | Modulation | First frame index | Code frames |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0.0 | 12 | 4 | 800 x 500 | 1 Gray2 | 0 | 48 |
+| 1 | 4.0 | 12 | 4 | 800 x 500 | 2 Gray4 | 48 | 48 |
+| 2 | 8.0 | 12 | 4 | 800 x 500 | 3 RGB8 | 96 | 48 |
+| 3 | 12.0 | 12 | 8 | 400 x 250 | 1 Gray2 | 144 | 48 |
+| 4 | 16.0 | 12 | 8 | 400 x 250 | 2 Gray4 | 192 | 48 |
+| 5 | 20.0 | 12 | 8 | 400 x 250 | 3 RGB8 | 240 | 48 |
+| 6 | 24.0 | 30 | 4 | 800 x 500 | 1 Gray2 | 288 | 120 |
+| 7 | 28.0 | 30 | 4 | 800 x 500 | 2 Gray4 | 408 | 120 |
+| 8 | 32.0 | 30 | 4 | 800 x 500 | 3 RGB8 | 528 | 120 |
+| 9 | 36.0 | 30 | 8 | 400 x 250 | 1 Gray2 | 648 | 120 |
+| 10 | 40.0 | 30 | 8 | 400 x 250 | 2 Gray4 | 768 | 120 |
+| 11 | 44.0 | 30 | 8 | 400 x 250 | 3 RGB8 | 888 | 120 |
+| 12 | 48.0 | 60 | 4 | 800 x 500 | 1 Gray2 | 1008 | 240 |
+| 13 | 52.0 | 60 | 4 | 800 x 500 | 2 Gray4 | 1248 | 240 |
+| 14 | 56.0 | 60 | 4 | 800 x 500 | 3 RGB8 | 1488 | 240 |
+| 15 | 60.0 | 60 | 8 | 400 x 250 | 1 Gray2 | 1728 | 240 |
+| 16 | 64.0 | 60 | 8 | 400 x 250 | 2 Gray4 | 1968 | 240 |
+| 17 | 68.0 | 60 | 8 | 400 x 250 | 3 RGB8 | 2208 | 240 |
 
 `pattern-3840x2160.mp4`: 6480 video frames (108.0 s), F = 3672 code frames.
 
