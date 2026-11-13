@@ -749,14 +749,18 @@ note in this document.
 
 | | macOS and Linux | Windows | Does |
 | --- | --- | --- | --- |
-| Setup | `scripts/setup.sh` | `scripts/setup.ps1` | Installs or verifies pinned versions of Go, the linter, the release tool and git through Homebrew, apt, dnf, pacman or winget. Native ffmpeg is optional |
+| Setup | `scripts/setup.sh` | `scripts/setup.ps1` | Installs or verifies pinned Go from the official go.dev archive (SHA-256 pinned in the script), git through Homebrew, apt, dnf, pacman or winget, and the linter and release tool through `go install`. Native ffmpeg and wasmtime are optional |
 | Build | `scripts/build.sh` | `scripts/build.ps1` | Static build for the host, or all six targets |
 | Test | `scripts/test.sh` | `scripts/test.ps1` | Unit and integration tests with the coverage gate; options for fuzzing, the simulator matrix and real recordings |
 
 The setup scripts stand alone, because Go may not be installed yet: they install or verify Go itself and
-then run `go run ./tools/dev install-tools`. With `--spike` they also install the two tools only spike
-S1 needs, a native ffmpeg with an HEVC encoder and the wasmtime command-line runner. They print what they
-are about to install before installing anything. The build and test scripts are thin wrappers around
+then run `go run ./tools/dev install-tools`. Go comes from the go.dev release archive rather than a
+package manager, because distributions lag and cannot pin a patch release; the archive's SHA-256 is
+pinned in the script, and `GOTOOLCHAIN=local` stops an older Go from fetching a toolchain on its own.
+With `--spike` they also install the two tools only spike S1 needs: a native ffmpeg with an HEVC encoder
+(libx265, from the package manager or winget) and the wasmtime command-line runner (from its release
+archive, SHA-256 pinned). They print what they are about to install, and ask, before installing
+anything. The build and test scripts are thin wrappers around
 `go run ./tools/dev <task>`, so that logic exists once. CI calls the same scripts on all three systems.
 
 ## 17. CI and release
@@ -841,3 +845,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | Date | Change |
 | --- | --- |
 | 2026-11-13 | M0: section 14 names the enum constants with a prefix (`StagePack`, `KindStats`, `UnitBytes`, `CompressAuto`, ...) because `Stats` and `Warning` are also type names; `Plan` caches its shard order in an unexported field so that `Locate` is O(1) |
+| 2026-11-13 | M0 review: section 16 says Go comes from the pinned go.dev archive (SHA-256 checked) rather than a package manager, and wasmtime from its release archive; section 14 gains `Plan.CheckFrames` and `fec.MaxFrames`, by which an encoder refuses more than 4,194,300 frames (`Frames` is unchanged) |

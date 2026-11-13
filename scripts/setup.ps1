@@ -22,6 +22,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
+# Never let an older go on PATH download a toolchain before the plan is printed.
+$env:GOTOOLCHAIN = 'local'
 
 $GoVersion = '1.27.4'
 $WasmtimeVersion = '50.0.1'

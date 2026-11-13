@@ -13,6 +13,9 @@
 # pinned below, and go under $QRVT_PREFIX (default ~/.local). git, curl, xz and ffmpeg come from
 # the system package manager: Homebrew, apt, dnf or pacman.
 set -eu
+# Never let an older go on PATH download a toolchain before the plan is printed.
+GOTOOLCHAIN=local
+export GOTOOLCHAIN
 
 GO_VERSION=1.27.4
 WASMTIME_VERSION=50.0.1

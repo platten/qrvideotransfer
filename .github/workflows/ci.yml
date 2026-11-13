@@ -16,7 +16,6 @@ concurrency:
 
 env:
   GO_VERSION: "1.27.4"
-  GOLANGCI_LINT_VERSION: v2.15.0
 
 jobs:
   check:
@@ -36,10 +35,19 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Lint
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+      # Installs the pinned golangci-lint v2.15.0 and GoReleaser v2.20.2 into GOBIN, where the
+      # lint task finds them.
+      - name: Install pinned tools
+        run: go run ./tools/dev install-tools
+
+      - name: Lint (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/test.sh lint
+      - name: Lint (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/test.ps1 lint
 
       - name: Import rule (SECURITY.md section 9.6)
         run: go test -count=1 -run "^TestImportRules" .
