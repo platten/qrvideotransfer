@@ -248,9 +248,10 @@ func BenchmarkCapture4K(b *testing.B) {
 		panels[k] = display(rc.frames[o.j], rc.scr)
 	}
 	q := Quantiser(QuantiserStep(c))
+	var buf scratch
 	b.ResetTimer()
 	for range b.N {
-		f := rc.capture(&sh, occs, panels)
+		f := rc.capture(&sh, occs, panels, &buf)
 		_ = q(f)
 	}
 }

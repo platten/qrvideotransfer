@@ -49,7 +49,7 @@ func TestSensorNoise(t *testing.T) {
 	c.Sensor.Noise = 6
 	rc := sensorOf(t, c)
 	measure := func(rc *recording) (sy, sc float64) {
-		f := rc.sensor(uniformImage(256, 256, [3]float32{0.2, 0.2, 0.2}), &shot{})
+		f := rc.sensor(uniformImage(256, 256, [3]float32{0.2, 0.2, 0.2}), &shot{}, &scratch{})
 		return stddev(f.Y), stddev(f.Cb)
 	}
 	sy, sc := measure(rc)
@@ -84,7 +84,7 @@ func TestSensorSubsampling(t *testing.T) {
 	for _, i := range []int{2, 3, 6, 7} {
 		img.p[0][i] = 1
 	}
-	f := rc.sensor(img, &shot{})
+	f := rc.sensor(img, &shot{}, &scratch{})
 	wantCb := 128 + 224*0.5*0.5 // half the blocks' pixels at full blue difference 0.5
 	if math.Abs(float64(f.Cb[0])-wantCb) > 0.5 || math.Abs(float64(f.Cr[1])-(128+224*0.5)) > 0.5 || f.Cb[1] >= 128 {
 		t.Errorf("Cb %v Cr %v", f.Cb, f.Cr)
@@ -95,17 +95,17 @@ func TestSensorSubsampling(t *testing.T) {
 func TestSensorColour(t *testing.T) {
 	c := still(2, 2)
 	c.Sensor.Saturation = 0.3
-	f := sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{0.3, 0.3, 0.3}), &shot{})
+	f := sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{0.3, 0.3, 0.3}), &shot{}, &scratch{})
 	if f.Cb[0] != 128 || f.Cr[0] != 128 {
 		t.Errorf("grey became %d %d", f.Cb[0], f.Cr[0])
 	}
 	c.Sensor.WhiteBalance = 0.1
-	f = sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{0.3, 0.3, 0.3}), &shot{})
+	f = sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{0.3, 0.3, 0.3}), &shot{}, &scratch{})
 	if f.Cr[0] <= 130 || f.Cb[0] >= 126 {
 		t.Errorf("white balance gave %d %d", f.Cb[0], f.Cr[0])
 	}
 	c.Sensor.Gain, c.Sensor.WhiteBalance, c.Sensor.Saturation = 2, 0, 0 // sensor saturation clips
-	f = sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{0.9, 0.9, 0.9}), &shot{})
+	f = sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{0.9, 0.9, 0.9}), &shot{}, &scratch{})
 	if f.Y[0] != 235 {
 		t.Errorf("clipped white = %d", f.Y[0])
 	}
@@ -125,7 +125,7 @@ func TestToneCurves(t *testing.T) {
 	}
 	c := still(2, 2)
 	c.Sensor.Bits, c.Sensor.HLG, c.Sensor.Gain = 10, true, 1
-	f := sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{1, 1, 1}), &shot{})
+	f := sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{1, 1, 1}), &shot{}, &scratch{})
 	if f.Bits != 10 || f.Y[0] != 940 || f.Cb[0] != 512 {
 		t.Errorf("10-bit white = %d %d (%d bits)", f.Y[0], f.Cb[0], f.Bits)
 	}
@@ -145,14 +145,14 @@ func TestSharpenAndFringe(t *testing.T) {
 			}
 		}
 	}
-	f := rc.sensor(img, &shot{})
+	f := rc.sensor(img, &shot{}, &scratch{})
 	if f.Y[3] != 0 || f.Y[4] != 255 || f.Y[2] != 16 || f.Y[5] != 235 {
 		t.Errorf("sharpened edge %v", f.Y[:8])
 	}
 	c = still(64, 64)
 	c.Sensor.Fringe = 6
 	rc = sensorOf(t, c)
-	f = rc.sensor(uniformImage(64, 64, [3]float32{0.2, 0.2, 0.2}), &shot{})
+	f = rc.sensor(uniformImage(64, 64, [3]float32{0.2, 0.2, 0.2}), &shot{}, &scratch{})
 	lo, hi := f.Y[0], f.Y[0]
 	for _, v := range f.Y {
 		lo, hi = min(lo, v), max(hi, v)

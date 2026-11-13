@@ -140,7 +140,8 @@ func TestRollingShutterShear(t *testing.T) {
 	for k, o := range occs {
 		panels[k] = display(rc.frames[o.j], rc.scr)
 	}
-	img := rc.render(&sh, occs, panels)
+	img := newRGB(200, 100)
+	rc.render(img, &sh, occs, panels)
 	for _, y := range []int{5, 40, 90} {
 		want, _ := tr.Point(50.5, (float64(y)+0.5)/2)
 		var s, m float64

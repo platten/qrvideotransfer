@@ -123,11 +123,12 @@ func (rc *recording) project(sh *shot, px, py float64) (x, y float64) {
 	return x, y
 }
 
-// capture runs stages 2 to 5 for one shot.
-func (rc *recording) capture(sh *shot, occs []occ, panels []*panel) *video.Frame {
-	img := rc.render(sh, occs, panels)
+// capture runs stages 2 to 5 for one shot, with buf's buffers.
+func (rc *recording) capture(sh *shot, occs []occ, panels []*panel, buf *scratch) *video.Frame {
+	img := buf.image(rc.cam.w, rc.cam.h)
+	rc.render(img, sh, occs, panels)
 	rc.optics(img, sh)
-	return rc.sensor(img, sh)
+	return rc.sensor(img, sh, buf)
 }
 
 // Simulate films the looping input with the simulated camera c and calls emit once per capture
@@ -171,8 +172,9 @@ func Simulate(ctx context.Context, in Input, c Config, r Run, emit func(*video.F
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			var buf scratch
 			for j := range jobs {
-				f := rc.capture(&j.sh, j.occs, j.panels)
+				f := rc.capture(&j.sh, j.occs, j.panels, &buf)
 				err := codec(f)
 				select {
 				case results <- result{job: j, f: f, err: err}:

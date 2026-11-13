@@ -15,10 +15,10 @@ func newRGB(w, h int) *rgb {
 // render is stages 2 and 3 for one capture. Each capture pixel sees the panel point that the camera
 // geometry maps it to at the time its row is exposed; its light is the exposure-weighted mix of the
 // frames that point shows (scan-out and pixel response included), times the backlight's mean
-// level. occs lists the showings that can be visible, with panels[k] the panel of occs[k].
-func (rc *recording) render(sh *shot, occs []occ, panels []*panel) *rgb {
+// level. occs lists the showings that can be visible, with panels[k] the panel of occs[k]. It
+// draws into img, which has the camera's size.
+func (rc *recording) render(img *rgb, sh *shot, occs []occ, panels []*panel) {
 	c, tl := rc.cam, rc.tl
-	img := newRGB(c.w, c.h)
 	kx, ky := rc.sharpness(sh)
 	pw, ph := float64(rc.scr.pw), float64(rc.scr.ph)
 	sub := float64(rc.scr.sub)
@@ -61,7 +61,28 @@ func (rc *recording) render(sh *shot, occs []occ, panels []*panel) *rgb {
 			img.p[0][i], img.p[1][i], img.p[2][i] = float32(r*fl), float32(g*fl), float32(bl*fl)
 		}
 	}
-	return img
+}
+
+// scratch holds one worker's buffers, reused from capture to capture. It is never shared.
+type scratch struct {
+	img     *rgb
+	yp, tmp []float32
+}
+
+// image returns the w x h linear image.
+func (s *scratch) image(w, h int) *rgb {
+	if s.img == nil || s.img.w != w || s.img.h != h {
+		s.img = newRGB(w, h)
+	}
+	return s.img
+}
+
+// planes returns two planes of n samples.
+func (s *scratch) planes(n int) (a, b []float32) {
+	if len(s.yp) != n {
+		s.yp, s.tmp = make([]float32, n), make([]float32, n)
+	}
+	return s.yp, s.tmp
 }
 
 // sharpness returns how much the panel's sample-grid interpolation is sharpened along x and y:

@@ -62,7 +62,8 @@ func newFringe(w, h int, seed uint64) *fringe {
 // sensor is stage 5 for one capture: exposure gain and sensor saturation, white balance, colour
 // matrix, tone curve, fringes and noise in code values, conversion to Y'CbCr, sharpening of
 // brightness, 4:2:0 subsampling, colour noise reduction, and quantisation with clipping.
-func (rc *recording) sensor(img *rgb, sh *shot) *video.Frame {
+// Its brightness planes come from buf.
+func (rc *recording) sensor(img *rgb, sh *shot, buf *scratch) *video.Frame {
 	s := &rc.cfg.Sensor
 	w, h := img.w, img.h
 	gen := prng.SplitMix64{State: prng.Seed("qrvt/channel/noise", strconv.AppendInt(u64(rc.seed), int64(sh.slot), 10))}
@@ -78,7 +79,7 @@ func (rc *recording) sensor(img *rgb, sh *shot) *video.Frame {
 	noise := float64(s.Noise / 255)
 	amp := float32(s.Fringe / 255)
 	cw, ch := w/2, h/2
-	yp := make([]float32, w*h)
+	yp, blurred := buf.planes(w * h)
 	cb, cr := make([]float32, cw*ch), make([]float32, cw*ch)
 	lut := rc.tone
 	for y := range h {
@@ -116,7 +117,7 @@ func (rc *recording) sensor(img *rgb, sh *shot) *video.Frame {
 		cr[j] /= 4
 	}
 	if s.Sharpen != 0 {
-		blurred := append([]float32(nil), yp...)
+		copy(blurred, yp)
 		binomial(blurred, w, h, []float32{0.25, 0.5, 0.25})
 		a := float32(s.Sharpen)
 		for i := range yp {

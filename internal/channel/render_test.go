@@ -13,7 +13,9 @@ func renderShot(rc *recording, sh shot) *rgb {
 	for k, o := range occs {
 		panels[k] = display(rc.frames[o.j], rc.scr)
 	}
-	return rc.render(&sh, occs, panels)
+	img := newRGB(rc.cam.w, rc.cam.h)
+	rc.render(img, &sh, occs, panels)
+	return img
 }
 
 // A mixed capture: black until 50 ms, then white, with a 16 ms scan-out, seen by a 4 ms exposure
