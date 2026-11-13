@@ -9,7 +9,7 @@ import (
 // the zero-width joiner) are extracted, not refused, and that the caller gets every extracted path in
 // manifest order, so that it can warn about such names.
 func TestFormatCharactersInNames(t *testing.T) {
-	name := "family‍\U0001F468.txt"
+	name := "family\u200d\U0001F468.txt"
 	stream, _ := pack(t, PackOptions{Inputs: tree{"d/": "", "d/" + name: "x"}.write(t, t.TempDir())})
 	out := t.TempDir()
 	res, err := unpack(stream, UnpackOptions{OutputDir: out})
