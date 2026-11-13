@@ -109,3 +109,33 @@ func TestSharpSampling(t *testing.T) {
 		t.Errorf("sharpness %v %v", kx, ky)
 	}
 }
+
+// The panel's scan can run in any of four directions. Scanning left to right (270 degrees), the
+// switch at 50 ms reaches column fraction 0.2578125 (display column 16.5) at 54.125 ms whatever the
+// row; scanning bottom to top (180), row 23.75 is at the same fraction.
+func TestScanRotation(t *testing.T) {
+	c := still(128, 64)
+	c.Timing.Exposure = 4 * time.Millisecond
+	c.Display.ScanOut = 16 * time.Millisecond
+	in := loop(50*time.Millisecond, 4, flat(64, 32, 16), flat(64, 32, 235))
+	for _, p := range []struct {
+		rot  int
+		u, v float64
+	}{{270, 16.5, 3}, {270, 16.5, 29}, {180, 10, 23.75}, {180, 60, 23.75}, {90, 64 - 16.5, 12}, {0, 40, 8.25}} {
+		c.Display.ScanRotation = p.rot
+		rc := mustRecording(t, in, c, Run{Captures: 1})
+		m := (&Truth{rc: rc, sh: shot{start: 0.052}}).Mix(p.u, p.v)
+		if len(m) != 2 || !near(m[1].W, 0.46875, 1e-12) {
+			t.Errorf("rotation %d at (%v, %v): Mix = %v", p.rot, p.u, p.v, m)
+		}
+	}
+	// The rendered pixels agree: capture column 32 sees display column 16.25, fraction 0.25390625.
+	c.Display.ScanRotation = 270
+	rc := mustRecording(t, in, c, Run{Captures: 1})
+	img := renderShot(rc, shot{start: 0.052})
+	for _, y := range []int{3, 30, 60} {
+		if got := img.p[1][y*128+32]; math.Abs(float64(got)-0.484375) > 1e-6 {
+			t.Errorf("row %d pixel = %v, want 0.484375", y, got)
+		}
+	}
+}

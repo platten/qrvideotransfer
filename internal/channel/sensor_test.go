@@ -131,6 +131,31 @@ func TestToneCurves(t *testing.T) {
 	}
 }
 
+// HLG output converts BT.709 primaries to BT.2020 in linear light (BT.2087) before the curve: pure
+// red becomes (0.6274, 0.0691, 0.0164), and grey stays grey.
+func TestHLGPrimaries(t *testing.T) {
+	hlg := func(e float64) float64 {
+		if e <= 1.0/12 {
+			return math.Sqrt(3 * e)
+		}
+		return 0.17883277*math.Log(12*e-0.28466892) + 0.55991073
+	}
+	c := still(2, 2)
+	c.Sensor.Bits, c.Sensor.HLG, c.Sensor.Gain = 10, true, 1
+	f := sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{1, 0, 0}), &shot{}, &scratch{})
+	r, g, b := hlg(0.6274), hlg(0.0691), hlg(0.0164)
+	y := 0.2627*r + 0.6780*g + 0.0593*b
+	wantY := 4 * (16 + 219*y)
+	wantCr := 4 * (128 + 224*(r-y)/(2*(1-0.2627)))
+	if math.Abs(float64(f.Y[0])-wantY) > 1 || math.Abs(float64(f.Cr[0])-wantCr) > 1 {
+		t.Errorf("red = Y %d Cr %d, want %.1f %.1f", f.Y[0], f.Cr[0], wantY, wantCr)
+	}
+	f = sensorOf(t, c).sensor(uniformImage(2, 2, [3]float32{0.2, 0.2, 0.2}), &shot{}, &scratch{})
+	if f.Cb[0] != 512 || f.Cr[0] != 512 {
+		t.Errorf("grey = Cb %d Cr %d", f.Cb[0], f.Cr[0])
+	}
+}
+
 // Sharpening overshoots a step edge by amount * (step / 4) on each side; fringes have the stated
 // amplitude.
 func TestSharpenAndFringe(t *testing.T) {

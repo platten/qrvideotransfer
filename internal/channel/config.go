@@ -23,7 +23,8 @@ type DisplayParams struct {
 	GammaError     float64       // added to the BT.1886 exponent 2.4
 	Black          float64       // panel black, as a share of white
 	Response       time.Duration // pixel response, modelled as a linear ramp
-	ScanOut        time.Duration // time to refresh the panel from the top row to the bottom
+	ScanOut        time.Duration // time to refresh the whole panel
+	ScanRotation   int           // scan direction, degrees clockwise from top-to-bottom: 0, 90, 180 or 270
 	FlickerAmp     float64       // backlight modulation, as a share of the mean
 	FlickerHz      float64       // backlight modulation frequency
 	SubPixel       bool          // draw each panel pixel as red, green and blue stripes

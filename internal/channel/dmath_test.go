@@ -44,24 +44,34 @@ func TestSinCos(t *testing.T) {
 	}
 }
 
-// Noise statistics: the approximate normal has mean 0, variance 1 and the kurtosis of a sum of four
-// uniforms (3 - 1.2/4).
+// Noise statistics: gauss is a true standard normal, so beyond the moments its tails have the
+// normal's probabilities: P(|Z| > 3) = 2.700e-3, P(|Z| > 3.5) = 4.653e-4, P(|Z| > 4) = 6.334e-5.
 func TestGauss(t *testing.T) {
 	g := prng.SplitMix64{State: 7}
-	const n = 400000
+	const n = 4000000
 	var m1, m2, m4 float64
+	var over [3]int
+	limits := [3]float64{3, 3.5, 4}
 	for range n {
 		v := gauss(&g)
-		if math.Abs(v) > 3.47 {
-			t.Fatalf("gauss = %v, beyond its bound", v)
-		}
 		m1 += v
 		m2 += v * v
 		m4 += v * v * v * v
+		for k, l := range limits {
+			if math.Abs(v) > l {
+				over[k]++
+			}
+		}
 	}
 	m1, m2, m4 = m1/n, m2/n, m4/n
-	if math.Abs(m1) > 0.01 || math.Abs(m2-1) > 0.01 || math.Abs(m4/(m2*m2)-2.7) > 0.03 {
+	if math.Abs(m1) > 0.003 || math.Abs(m2-1) > 0.003 || math.Abs(m4/(m2*m2)-3) > 0.03 {
 		t.Errorf("mean %v, variance %v, kurtosis %v", m1, m2, m4/(m2*m2))
+	}
+	for k, p := range [3]float64{2.6998e-3, 4.6525e-4, 6.3342e-5} {
+		want := p * n
+		if d := math.Abs(float64(over[k]) - want); d > 4*math.Sqrt(want) {
+			t.Errorf("%d values beyond %v sigma, want %.0f", over[k], limits[k], want)
+		}
 	}
 	u := uniform(&g)
 	if u < 0 || u >= 1 {

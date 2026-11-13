@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -150,7 +151,7 @@ func TestPresetsMatchDesign(t *testing.T) {
 			t.Fatal(err)
 		}
 		d, tm, g := c.Display, c.Timing, c.Geometry
-		if d.ScanOut != time.Second/60 || d.FlickerHz != 240 || d.PanelW != 0 || d.PanelH != 0 || d.SubPixel ||
+		if d.ScanOut != time.Second/60 || d.FlickerHz != 240 || d.PanelW != 0 || d.PanelH != 0 || d.SubPixel || d.ScanRotation != 0 ||
 			tm.DropBurst != 0 || tm.SeamFreeze != 0 || g.Roll != 0 || g.Mirror || c.Name != name {
 			t.Errorf("%s: shared values differ: %+v", name, c)
 		}
@@ -178,6 +179,7 @@ func TestResize(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
+	nan := math.NaN()
 	bad := []func(c *Config){
 		func(c *Config) { c.Geometry.Width = 101 },
 		func(c *Config) { c.Geometry.Height = 0 },
@@ -193,6 +195,52 @@ func TestValidate(t *testing.T) {
 		func(c *Config) { c.Sensor.Gain = 0 },
 		func(c *Config) { c.Optics.Glare = 1 },
 		func(c *Config) { c.Sensor.ChromaNR = 2 },
+		func(c *Config) { c.Display.GammaError = nan },
+		func(c *Config) { c.Display.GammaError = -2.5 },
+		func(c *Config) { c.Display.Black = nan },
+		func(c *Config) { c.Display.Black = 0.6 },
+		func(c *Config) { c.Display.FlickerAmp = nan },
+		func(c *Config) { c.Display.FlickerAmp = 1 },
+		func(c *Config) { c.Display.FlickerHz = nan },
+		func(c *Config) { c.Display.FlickerHz = -1 },
+		func(c *Config) { c.Display.ScanRotation = 45 },
+		func(c *Config) { c.Display.Response = time.Hour },
+		func(c *Config) { c.Display.ScanOut = time.Hour },
+		func(c *Config) { c.Timing.Jitter = 10 * time.Millisecond },
+		func(c *Config) { c.Timing.Exposure = 2 * time.Second },
+		func(c *Config) { c.Timing.Readout = 2 * time.Second },
+		func(c *Config) { c.Timing.SeamFreeze = time.Hour },
+		func(c *Config) { c.Timing.Drop = nan },
+		func(c *Config) { c.Timing.DropBurst = 10000 },
+		func(c *Config) { c.Geometry.Fill = nan },
+		func(c *Config) { c.Geometry.Tilt = nan },
+		func(c *Config) { c.Geometry.Roll = nan },
+		func(c *Config) { c.Geometry.Roll = 1000 },
+		func(c *Config) { c.Geometry.Shake = nan },
+		func(c *Config) { c.Geometry.Shake = 1000 },
+		func(c *Config) { c.Geometry.K1 = nan },
+		func(c *Config) { c.Optics.Blur = nan },
+		func(c *Config) { c.Optics.Blur = 50 },
+		func(c *Config) { c.Optics.Vignette = nan },
+		func(c *Config) { c.Optics.Vignette = 1.5 },
+		func(c *Config) { c.Optics.Veil = nan },
+		func(c *Config) { c.Optics.Veil = -0.1 },
+		func(c *Config) { c.Optics.Glare = nan },
+		func(c *Config) { c.Sensor.Gain = nan },
+		func(c *Config) { c.Sensor.Gain = math.Inf(1) },
+		func(c *Config) { c.Sensor.Noise = nan },
+		func(c *Config) { c.Sensor.Noise = 100 },
+		func(c *Config) { c.Sensor.WhiteBalance = nan },
+		func(c *Config) { c.Sensor.WhiteBalance = 1 },
+		func(c *Config) { c.Sensor.Saturation = nan },
+		func(c *Config) { c.Sensor.Saturation = 3 },
+		func(c *Config) { c.Sensor.Sharpen = nan },
+		func(c *Config) { c.Sensor.Sharpen = -1 },
+		func(c *Config) { c.Sensor.ChromaNR = nan },
+		func(c *Config) { c.Sensor.Fringe = nan },
+		func(c *Config) { c.Sensor.Fringe = 100 },
+		func(c *Config) { c.Recorder.Bitrate = nan },
+		func(c *Config) { c.Recorder.Bitrate = math.Inf(1) },
 	}
 	for i, f := range bad {
 		c, _ := Preset("handheld")
