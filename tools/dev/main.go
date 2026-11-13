@@ -3,9 +3,9 @@
 //
 //	go run ./tools/dev <task> [flags] [-- extra go test arguments]
 //
-// Tasks: install-tools, check-tools, build, test, cover, lint, fuzz, licenses, check-workflows,
-// release-snapshot and sign-windows. Run a task with -h for its flags. Builds and ordinary tests
-// run with CGO_ENABLED=0; the race detector needs cgo.
+// Tasks: install-tools, check-tools, build, test, cover, lint, fuzz, licenses, vulncheck,
+// check-workflows, release-snapshot and sign-windows. Run a task with -h for its flags. Builds and
+// ordinary tests run with CGO_ENABLED=0; the race detector needs cgo.
 package main
 
 import (
@@ -41,6 +41,7 @@ var tasks = map[string]func(args []string) error{
 	"lint":             lint,
 	"fuzz":             fuzz,
 	"licenses":         licenses,
+	"vulncheck":        vulncheck,
 	"check-workflows":  checkWorkflows,
 	"release-snapshot": releaseSnapshot,
 	"sign-windows":     signWindows,
@@ -211,14 +212,19 @@ func test(args []string) error {
 	return run(env, "go", goArgs...)
 }
 
-func lintRuns(tags string, fix bool) [][]string { return nil }
-
-type vulnRun struct {
-	goos string
-	args []string
+// lintRuns returns the golangci-lint invocations: the default build, then, when the release build
+// has tags, the release build, whose files can differ by build constraint.
+func lintRuns(tags string, fix bool) [][]string {
+	base := []string{"run"}
+	if fix {
+		base = append(base, "--fix")
+	}
+	runs := [][]string{append(slices.Clone(base), "./...")}
+	if tags != "" {
+		runs = append(runs, append(slices.Clone(base), "--build-tags="+tags, "./..."))
+	}
+	return runs
 }
-
-func vulncheckRuns(tags string) []vulnRun { return nil }
 
 func lint(args []string) error {
 	fs := newFlags("lint")
@@ -228,11 +234,57 @@ func lint(args []string) error {
 	if err != nil {
 		return err
 	}
-	lintArgs := []string{"run"}
-	if *fix {
-		lintArgs = append(lintArgs, "--fix")
+	tags, err := releaseTags()
+	if err != nil {
+		return err
 	}
-	return run([]string{"CGO_ENABLED=0"}, p, append(lintArgs, "./...")...)
+	for _, a := range lintRuns(tags, *fix) {
+		if err := run([]string{"CGO_ENABLED=0"}, p, a...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// vulnRun is one govulncheck invocation, for one target system.
+type vulnRun struct {
+	goos string
+	args []string
+}
+
+// vulncheckRuns returns the govulncheck invocations for the release build: its tags, on each of
+// the three target systems, since both decide which code is reachable.
+func vulncheckRuns(tags string) []vulnRun {
+	var args []string
+	if tags != "" {
+		args = append(args, "-tags="+tags)
+	}
+	args = append(args, "./...")
+	var runs []vulnRun
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		runs = append(runs, vulnRun{goos, args})
+	}
+	return runs
+}
+
+// vulncheck runs the pinned govulncheck over the release build (RELEASE_TAGS). The CI action runs
+// it over the default build.
+func vulncheck(args []string) error {
+	_ = newFlags("vulncheck").Parse(args) // ExitOnError: never returns an error
+	p, err := find(toolNamed("govulncheck"))
+	if err != nil {
+		return err
+	}
+	tags, err := releaseTags()
+	if err != nil {
+		return err
+	}
+	for _, r := range vulncheckRuns(tags) {
+		if err := run([]string{"CGO_ENABLED=0", "GOOS=" + r.goos}, p, r.args...); err != nil {
+			return fmt.Errorf("govulncheck for %s: %w", r.goos, err)
+		}
+	}
+	return nil
 }
 
 // allowedLicenses are the licence names (as go-licenses reports them) whose code may be combined
