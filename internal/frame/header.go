@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/platten/qrvideotransfer/internal/fec"
 	"github.com/platten/qrvideotransfer/internal/fec/conv"
 )
 
@@ -12,7 +13,7 @@ import (
 const (
 	HeaderBits  = 112 // fields and CRC
 	HeaderSlots = 236 // coded bits, one per slot
-	MaxFrames   = 1<<22 - 4
+	MaxFrames   = fec.MaxFrames
 	Version     = 1
 )
 

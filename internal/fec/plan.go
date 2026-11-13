@@ -104,7 +104,14 @@ func (p Plan) Frames(codewordsPerFrame int) int {
 // CheckFrames returns Frames(codewordsPerFrame), or an error when codewordsPerFrame is below 2 or
 // the frame count exceeds MaxFrames. An encoder must refuse such a stream (FORMAT.md section 11).
 func (p Plan) CheckFrames(codewordsPerFrame int) (int, error) {
-	return 0, nil
+	if codewordsPerFrame < 2 {
+		return 0, fmt.Errorf("fec: %d codewords per frame, fewer than 2", codewordsPerFrame)
+	}
+	f := p.Frames(codewordsPerFrame)
+	if f > MaxFrames {
+		return 0, fmt.Errorf("fec: the stream needs %d frames, more than %d", f, MaxFrames)
+	}
+	return f, nil
 }
 
 // DataOffset returns the offset in the stream of data shard i of block b. Bytes from the offset that

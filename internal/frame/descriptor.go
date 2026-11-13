@@ -75,6 +75,12 @@ func ParseDescriptor(b []byte, h Header, codewordsPerFrame int) (Descriptor, err
 	bad := func(format string, a ...any) (Descriptor, error) {
 		return Descriptor{}, fmt.Errorf("%w: "+format, append([]any{ErrDescriptor}, a...)...)
 	}
+	if err := h.Validate(); err != nil {
+		return bad("%v", err)
+	}
+	if codewordsPerFrame < 2 {
+		return bad("%d codewords per frame", codewordsPerFrame)
+	}
 	if len(b) < DescriptorSize {
 		return bad("%d bytes", len(b))
 	}
@@ -97,13 +103,13 @@ func ParseDescriptor(b []byte, h Header, codewordsPerFrame int) (Descriptor, err
 		DisplayFPS:        b[37],
 	}
 	copy(d.StreamHash[:], b[39:55])
-	inner, err := LookupInner(h.InnerCode)
+	inner, _ := LookupInner(h.InnerCode) // known after Validate
 	switch {
 	case uint16(d.Session) != h.Session: //nolint:gosec // low 16 bits on purpose
 		return bad("session %016x does not match header session %04x", d.Session, h.Session)
 	case d.Frames != int(h.TotalFrames):
 		return bad("frame count %d does not match header %d", d.Frames, h.TotalFrames)
-	case err != nil || d.ShardSize != inner.ShardSize:
+	case d.ShardSize != inner.ShardSize:
 		return bad("shard size %d does not match inner code %d", d.ShardSize, h.InnerCode)
 	case d.CodewordsPerFrame != codewordsPerFrame:
 		return bad("codewords per frame %d, expected %d", d.CodewordsPerFrame, codewordsPerFrame)
