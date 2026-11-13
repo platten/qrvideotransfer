@@ -170,12 +170,10 @@ func BenchmarkExtractWorstCase(b *testing.B) {
 			b.StopTimer()
 			for range b.N {
 				out := b.TempDir()
-				start := time.Now()
 				b.StartTimer()
 				_, err := unpackArchive(context.Background(), io.NewSectionReader(f, 0, n), n, UnpackOptions{OutputDir: out})
 				b.StopTimer()
 				must(b, err)
-				b.Logf("%d files of %d components: %.1f s", files, depth, time.Since(start).Seconds())
 			}
 		})
 	}
