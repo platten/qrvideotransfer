@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -223,5 +224,40 @@ func TestJSONEncodesEveryString(t *testing.T) {
 	_ = r.Finish(nil, nil)
 	if !strings.Contains(b.String(), `"sources":["a\"b"]`) {
 		t.Errorf("got %s", b.String())
+	}
+}
+
+// TestJSONClamps checks that values outside the schema are clamped, not printed or turned into an
+// encoding failure.
+func TestJSONClamps(t *testing.T) {
+	root := schema(t)
+	nan, inf := math.NaN(), math.Inf(1)
+	events := []qrvt.Event{
+		{Time: t0, Stage: qrvt.StagePack, Kind: qrvt.KindProgress, Done: -5, Total: -1, Unit: qrvt.UnitBytes},
+		{Time: t0, Kind: qrvt.KindStats, Stats: &qrvt.Stats{Captures: -1, FramesSeen: -2, FramesTotal: -3, CleanFraction: nan,
+			RawBitErrors: inf, CodewordsOK: -4, BlocksReady: -5, BlocksTotal: -6}},
+		{Time: t0, Kind: qrvt.KindStats, Stats: &qrvt.Stats{CleanFraction: 1.5, RawBitErrors: -0.5}},
+		{Time: t0, Kind: qrvt.KindStats, Stats: &qrvt.Stats{CleanFraction: math.Inf(-1), RawBitErrors: nan}},
+	}
+	var ob bytes.Buffer
+	r := New(Options{Mode: JSON, Out: &ob}, Info{Command: "decode"})
+	for _, e := range events {
+		r.Event(e)
+	}
+	if err := r.Finish(DemoSummary(), nil); err != nil {
+		t.Fatalf("Finish = %v", err)
+	}
+	out := ob.String()
+	ls := lines(t, out)
+	if len(ls) != len(events)+2 {
+		t.Fatalf("%d lines for %d events:\n%s", len(ls), len(events), out)
+	}
+	for i, l := range ls {
+		if err := validate(root, root, l, fmt.Sprintf("line %d", i+1)); err != nil {
+			t.Error(err)
+		}
+	}
+	if !strings.Contains(out, `"clean_fraction":1,`) || !strings.Contains(out, `"done":0,"total":0`) {
+		t.Errorf("not clamped:\n%s", out)
 	}
 }

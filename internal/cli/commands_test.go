@@ -64,7 +64,9 @@ func TestGuidance(t *testing.T) {
 		{qrvt.ErrBadSignature, nil, nil, "altered or damaged"},
 		{qrvt.ErrMissingSignature, nil, nil, "not signed by any key given with --verify-key"},
 		{&qrvt.UnsafeArchiveError{Path: "../x", Reason: "leaves the folder"}, nil, nil, "Nothing was written"},
-		{&qrvt.LimitError{Limit: "unpacked size", Value: 2, Max: 1}, nil, nil, "--max-size"},
+		{&qrvt.LimitError{Limit: "unpacked size", Value: 2, Max: 1, Flag: "--max-size"}, nil, nil, "--max-size"},
+		{&qrvt.LimitError{Limit: "unpacked size", Value: 2, Max: 1}, nil, nil, "no flag raises it"},
+		{&qrvt.LimitError{Limit: "stream size", Value: 2, Max: 1, Flag: "--other"}, nil, nil, "no flag raises it"},
 		{&qrvt.LimitError{Limit: "manifest entries", Value: 2, Max: 1}, nil, nil, "no flag raises it"},
 		{&qrvt.UnsupportedVersionError{What: "format version", Value: 9}, nil, nil, "newer qrvt"},
 		{qrvt.ErrNotImplemented, nil, nil, "not implemented yet"},
@@ -118,23 +120,147 @@ func TestErrorsAreSanitised(t *testing.T) {
 	}
 }
 
+// jsonLines decodes NDJSON output into objects with their type, message, guidance and exit code.
+type jsonLine struct {
+	Type, Message, Guidance string
+	Exit                    int
+	Warning                 *struct{ Code, Text string }
+}
+
+func jsonLines(t *testing.T, out string) []jsonLine {
+	t.Helper()
+	var r []jsonLine
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		var j jsonLine
+		if err := json.Unmarshal([]byte(l), &j); err != nil {
+			t.Fatalf("line %q: %v", l, err)
+		}
+		r = append(r, j)
+	}
+	return r
+}
+
+// TestJSONFailure checks that with --json every failure, usage errors included, is exactly one
+// error line on stdout, and that nothing is written on stderr.
 func TestJSONFailure(t *testing.T) {
 	f := newFiles(t)
-	fa := &fakeAPI{err: qrvt.ErrWrongPassphrase}
-	out, _, err := run(t, fa, nil, "--json", "decode", f.r1, "-o", f.dir)
-	if ExitCode(err) != 4 {
-		t.Fatalf("exit %d", ExitCode(err))
+	tests := []struct {
+		name  string
+		fa    *fakeAPI
+		args  []string
+		exit  int
+		guide string
+	}{
+		{"job error", &fakeAPI{err: qrvt.ErrWrongPassphrase}, []string{"--json", "decode", f.r1, "-o", f.dir}, 4, "passphrase"},
+		{"usage error", &fakeAPI{}, []string{"--json", "encode", "-o", "o.mp4"}, 2, ""},
+		{"flag error", &fakeAPI{}, []string{"--json", "decode", f.r1, "--bogus"}, 2, ""},
+		{"flag before --json", &fakeAPI{}, []string{"inspect", "--jobs", "x", "--json"}, 2, ""},
+		{"output flags", &fakeAPI{}, []string{"--json", "--plain", "inspect", f.r1}, 2, ""},
+		{"keygen error", &fakeAPI{err: qrvt.ErrNotImplemented}, []string{"--json", "keygen", "-o", filepath.Join(f.dir, "k")}, 1, "not implemented"},
 	}
-	ls := strings.Split(strings.TrimSpace(out), "\n")
-	var last struct {
-		Type, Message, Guidance string
-		Exit                    int
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out, errOut, err := run(t, tc.fa, nil, tc.args...)
+			if ExitCode(err) != tc.exit {
+				t.Fatalf("exit %d, want %d (%v)", ExitCode(err), tc.exit, err)
+			}
+			if errOut != "" {
+				t.Errorf("stderr in JSON mode: %q", errOut)
+			}
+			errs := 0
+			ls := jsonLines(t, out)
+			for _, l := range ls {
+				if l.Type == "error" {
+					errs++
+				}
+			}
+			last := ls[len(ls)-1]
+			if errs != 1 || last.Type != "error" || last.Exit != tc.exit || last.Message == "" || !strings.Contains(last.Guidance, tc.guide) {
+				t.Errorf("output %q", out)
+			}
+		})
 	}
-	if err := json.Unmarshal([]byte(ls[len(ls)-1]), &last); err != nil {
+}
+
+func TestJSONWarningGoesThroughRenderer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not meaningful on Windows")
+	}
+	f := newFiles(t)
+	if err := os.Chmod(f.priv, 0o644); err != nil { //nolint:gosec // the test needs a key readable by others
 		t.Fatal(err)
 	}
-	if last.Type != "error" || last.Exit != 4 || !strings.Contains(last.Guidance, "passphrase") {
-		t.Errorf("last line %+v", last)
+	out, errOut, err := run(t, &fakeAPI{}, nil, "--json", "encode", f.a, "-o", "o.mp4", "--sign-key", f.priv)
+	if err != nil || errOut != "" {
+		t.Fatalf("%v, stderr %q", err, errOut)
+	}
+	found := false
+	for _, l := range jsonLines(t, out) {
+		found = found || l.Warning != nil && strings.Contains(l.Warning.Text, "readable by others")
+	}
+	if !found {
+		t.Errorf("no warning event: %s", out)
+	}
+}
+
+func TestSecretValuesNotEchoed(t *testing.T) {
+	f := newFiles(t)
+	for _, args := range [][]string{
+		{"decode", f.r1, "-o", f.dir, "--passphrase-file", "hunter2 secret"},
+		{"encode", f.a, "-o", "o.mp4", "--encrypt", "--passphrase-file", "hunter2 secret"},
+		{"decode", f.r1, "-o", f.dir, "--verify-key", "hunter2 secret"},
+		{"decode", f.r1, "-o", f.dir, "--verify-key", "qrvt-public-key-v1:hunter2"},
+		{"decode", f.r1, "-o", f.dir, "--verify-key", "qrvt-private-key-v1:hunter2"},
+	} {
+		out, errOut, err := run(t, &fakeAPI{}, nil, args...)
+		if ExitCode(err) != 2 || strings.Contains(out+errOut+err.Error(), "hunter2") {
+			t.Errorf("%v: exit %d, echoed: %q", args, ExitCode(err), errOut)
+		}
+	}
+}
+
+func TestPassphraseFileContent(t *testing.T) {
+	f := newFiles(t)
+	write := func(name, s string) string {
+		p := filepath.Join(f.dir, name)
+		if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	long := write("long", strings.Repeat("a", maxSecretFile+10))
+	exact := write("exact", strings.Repeat("a", maxSecretFile))
+	for _, tc := range []struct{ path, want string }{
+		{long, "the first line is longer than 4096 bytes"},
+		{exact, "the first line is longer than 4096 bytes"},
+		{write("nul", "pass\x00word\n"), "the first line holds control characters"},
+		{write("esc", "pass\x1b[2Jword"), "the first line holds control characters"},
+		{write("bin", "\x01\x02\x03"), "the first line holds control characters"},
+		{write("bomonly", "\ufeff\n"), "the first line is empty"},
+	} {
+		_, _, err := run(t, &fakeAPI{askPass: true}, nil, "decode", f.r1, "-o", f.dir, "--passphrase-file", tc.path)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || ExitCode(err) != 2 {
+			t.Errorf("%s: %v", filepath.Base(tc.path), err)
+		}
+	}
+	fa := &fakeAPI{askPass: true}
+	bom := write("bom", "\ufeffcorrect horse\r\n")
+	if _, _, err := run(t, fa, nil, "decode", f.r1, "-o", f.dir, "--passphrase-file", bom); err != nil || fa.pass[0] != "correct horse" {
+		t.Errorf("BOM not stripped: %v %q", err, fa.pass)
+	}
+	fa = &fakeAPI{askPass: true}
+	ok := write("ok", strings.Repeat("b", maxSecretFile-1)+"\n")
+	if _, _, err := run(t, fa, nil, "decode", f.r1, "-o", f.dir, "--passphrase-file", ok); err != nil || len(fa.pass[0]) != maxSecretFile-1 {
+		t.Errorf("a passphrase of the largest length was refused: %v", err)
+	}
+}
+
+func TestResolutionHelpNames2160p(t *testing.T) {
+	for _, args := range [][]string{{"encode", "--help"}, {"calibrate", "make", "--help"}} {
+		out, _, _ := run(t, &fakeAPI{}, nil, args...)
+		if !strings.Contains(out, "2160p") {
+			t.Errorf("%v does not name 2160p", args)
+		}
 	}
 }
 
