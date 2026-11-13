@@ -1,2 +1,11 @@
+# Recordings of the screen stay on the owner's machine; never commit them.
 recordings/
+# Build output.
 dist/
+.claude/
+# Coverage and test output.
+coverage.out
+*.coverprofile
+*.test
+# Go fuzzing corpus generated locally (committed seeds live in testdata/fuzz/).
+/.fuzzcache/

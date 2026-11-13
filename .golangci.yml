@@ -1,0 +1,58 @@
+# golangci-lint v2 configuration. Pinned linter version: v2.15.0 (tools/dev).
+version: "2"
+
+run:
+  timeout: 10m
+  tests: true
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - gosec # SECURITY.md section 9.6
+    - revive # doc comments on exported names
+    - errorlint
+    - misspell
+    - nolintlint
+    - unconvert
+    - copyloopvar
+    - bodyclose
+  settings:
+    misspell:
+      locale: UK
+      ignore-rules:
+        - color
+        - colors
+        - analyze
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: indent-error-flow
+        - name: errorf
+        - name: error-strings
+        - name: error-naming
+        - name: receiver-naming
+        - name: unused-parameter
+          disabled: true
+  exclusions:
+    generated: lax
+    paths:
+      - spikes/ # throwaway spike code (IMPLEMENTATION_PROMPT.md section 4)
+    rules:
+      # Developer tooling must launch other programs and read paths it is given.
+      - path: tools/
+        linters: [gosec]
+        text: "G204|G304|G301|G306|G302"
+      # Tests use fixed-seed math/rand on purpose and read golden files by path.
+      - path: _test\.go
+        linters: [gosec]
+        text: "G404|G304|G115"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    paths:
+      - spikes/

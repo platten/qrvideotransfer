@@ -13,11 +13,11 @@ These were set by the owner on 2026-11-13.
 | Action | Allowed |
 | --- | --- |
 | Install development tools on this machine with `scripts/setup.*`, including the two tools only spike S1 needs (a native ffmpeg with an HEVC encoder, and the wasmtime command-line runner) | yes |
-| Create the private GitHub repository `github.com/platten/qrvideotransfer` and push branches to it | yes |
+| Push branches to `github.com/platten/qrvideotransfer`. The repository already exists: the owner created it, and it is public | yes |
 | Open pull requests and merge them when CI is green and the reviewing agent approves | yes |
 
 Never without asking in the moment, whatever the table says: publish a release or push a `v*` tag, change
-repository settings or secrets, make the repository public, or delete anything outside this repository.
+repository settings or secrets, change the repository's visibility, or delete anything outside this repository.
 
 If GitHub is not authorised, work on local branches and run the same checks through the scripts on this
 machine. An exit test that names "six runners" is then met by passing on this machine and
@@ -224,9 +224,8 @@ within 0.5 dB of it. Record the source. If no curve can be found for a code, req
 within 2.5 dB of the binary-input capacity limit for the code's rate, and record that this is the weaker
 check.
 
-*For stream G.* CodeQL, private vulnerability reporting and Pages may be unavailable on a private
-repository, depending on the account's plan. Wire each so that it works once available, and list in
-your report any that could not be exercised.
+*For stream G.* The repository is public, so CodeQL, private vulnerability reporting and Pages should be
+available. Wire each, and list in your report any that could not be exercised.
 
 ### M2. Vision (2 agents)
 

@@ -1,0 +1,97 @@
+# Checks for every push to main and every pull request (DESIGN.md section 17). Every step calls the
+# same scripts a developer runs locally. Actions are pinned by commit; the comment gives the tag.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.27.4"
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Installs the pinned golangci-lint v2.15.0 and GoReleaser v2.20.2 into GOBIN, where the
+      # lint task finds them.
+      - name: Install pinned tools
+        run: go run ./tools/dev install-tools
+
+      - name: Lint (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/test.sh lint
+      - name: Lint (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/test.ps1 lint
+
+      - name: Import rule (SECURITY.md section 9.6)
+        run: go test -count=1 -run "^TestImportRules" .
+        env:
+          CGO_ENABLED: "0"
+
+      - name: Tests with coverage gate (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/test.sh cover
+      - name: Tests with coverage gate (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/test.ps1 cover
+
+      - name: Coverage gate (go-test-coverage)
+        if: matrix.os == 'ubuntu-24.04'
+        uses: vladopajic/go-test-coverage@6890500b00a7e5862e54662c04ea9fa7c799ce1e # v2.23.0
+        with:
+          config: ./.testcoverage.yml
+
+      # The race detector needs cgo and does not support windows/arm64.
+      - name: Race tests (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/test.sh -race
+      - name: Race tests (Windows)
+        if: matrix.os == 'windows-2025'
+        shell: pwsh
+        run: scripts/test.ps1 -race
+
+      - name: Static build, all six targets (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/build.sh -all
+      - name: Static build, all six targets (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/build.ps1 -all
+
+      - name: Vulnerability scan
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-input: ${{ env.GO_VERSION }}
+          check-latest: false
+          go-package: ./...
+          repo-checkout: false # already checked out above
