@@ -19,6 +19,9 @@ type eventMsg qrvt.Event
 // doneMsg tells the dashboard model that the job has finished.
 type doneMsg struct{}
 
+// syncMsg does nothing; sending it waits until the program's event loop runs.
+type syncMsg struct{}
+
 // Dashboard colours and styles. Colours are fixed values so that the output is the same on every
 // terminal of a given colour profile.
 var (
@@ -352,6 +355,9 @@ func (d *dashboard) Event(e qrvt.Event) {
 
 // Pause implements Renderer.
 func (d *dashboard) Pause(fn func() error) error {
+	// The program must be past its start-up before the terminal is released: a message taken by
+	// its event loop (the channel is unbuffered) proves it.
+	d.send(syncMsg{})
 	_ = d.p.ReleaseTerminal()
 	defer func() { _ = d.p.RestoreTerminal() }()
 	return fn()

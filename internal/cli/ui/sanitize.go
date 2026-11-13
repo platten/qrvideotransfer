@@ -25,7 +25,7 @@ func Clean(s string) string {
 	}
 	return strings.Map(func(r rune) rune {
 		switch {
-		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f' || r == ' ' || r == ' ':
+		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f' || r == '\u2028' || r == '\u2029':
 			return ' '
 		case unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r):
 			return -1
