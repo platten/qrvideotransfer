@@ -779,9 +779,10 @@ passes results through channels to a single goroutine that owns the accumulators
    flicker, scan-out timing, optional sub-pixel structure.
 2. **Timing**: camera frame rate, jitter, exposure, rolling readout, dropped frames, a freeze at the seam.
 3. **Geometry**: pose, hand-shake random walk, rolling-shutter shear, radial distortion.
-4. **Optics**: defocus and motion blur, vignetting, veiling and specular glare, interference fringes.
-5. **Sensor and processing**: noise, white balance, colour matrix, tone curve, sharpening, colour noise
-   reduction, clipping, 4:2:0.
+4. **Optics**: defocus and motion blur, vignetting, veiling and specular glare.
+5. **Sensor and processing**: white balance, colour matrix, tone curve, interference fringes, noise,
+   sharpening, colour noise reduction, clipping, 4:2:0. Fringes are applied here rather than in the
+   optics because their amplitude is given in code values.
 6. **Recorder codec**: in integration tests, x264 through the embedded engine (the engine has no HEVC
    encoder) at the bitrates below, which are the HEVC figures of section 11 times 1.4; in unit tests, a
    pure-Go quantiser stand-in.
@@ -807,6 +808,51 @@ from steps S2 and G1 replace them.
 | Glare patch, share of code area | 0 | 0 | 0 | 0 | 0 | 2% |
 | Dropped captures | 0 | 0 | 0.5% | 1% | 0.5% | 3% |
 | Recorder bitrate, Mbit/s | lossless | 74 | 74 | 17 | 74 | 32 |
+
+The table above does not name every parameter the stages need. These complete the presets:
+
+| | `ideal` | `tripod` | `handheld` | `budget-android` | `iphone-hdr` | `harsh` |
+| --- | --- | --- | --- | --- | --- | --- |
+| Panel black, share of white | 0 | 0.1% | 0.1% | 0.2% | 0.1% | 0.5% |
+| Panel response, ms | 0 | 4 | 4 | 4 | 4 | 8 |
+| Capture-time jitter, ms RMS | 0 | 0.2 | 0.5 | 0.5 | 0.5 | 1 |
+| Exposure gain, linear signal of display white | 1 | 0.9 | 0.9 | 0.9 | 0.265 | 0.9 |
+| Colour matrix saturation boost | 0 | 0.1 | 0.2 | 0.3 | 0.2 | 0.3 |
+| Colour noise reduction, share | 0 | 0.5 | 0.5 | 1 | 0.5 | 1 |
+| Veiling glare, share of white | 0 | 0 | 1% | 2% | 1% | 3% |
+
+How the parameters are read, and the values every preset shares:
+
+- *Display.* The panel has the video's size unless set otherwise; the player scales bilinearly to fit,
+  with black bars. Panel drive is 8-bit; light is black + (1 - black) V^(2.4 + gamma error). The panel
+  refreshes top to bottom in 1/60 s, and a pixel's change is a linear ramp over the response time. The
+  backlight flickers at 240 Hz with the given relative amplitude. Sub-pixel stripes are off unless a
+  test turns them on. The player may hold the last frame longer at the seam; every preset sets 0.
+- *Timing.* A drop starts with the given probability per capture and loses one capture (bursts are a
+  parameter, 1 in every preset). Row *y* of *H* is exposed from start + (y / H) readout for the
+  exposure time.
+- *Geometry.* A pinhole camera with focal length W / 1.4 pixels (about 71 degrees across) looks at
+  the screen from the distance at which the untilted screen fills the given share of the frame width.
+  The screen is tilted by an angle drawn uniformly up to the maximum, about an axis in its plane at a
+  uniform direction; in-plane roll and mirroring are parameters, 0 in every preset. Shake is a random
+  walk with one step per camera frame, steps of the given RMS in pixels (split evenly between x and
+  y), pulled back by a factor 0.95 per step, plus a rotation whose steps move the frame's edge by
+  about half as much; the pose is linear between steps, so a moving camera shears the rows of a
+  rolling shutter. Distortion maps a capture point p, relative to the centre in units of half the
+  frame width, to the pinhole point p (1 + k1 |p|^2); positive k1 is barrel.
+- *Optics.* Defocus is a Gaussian; motion during the exposure widens it along x and y by the motion's
+  length over the square root of 12. Corner vignetting falls off with the squared distance from the
+  centre. Veiling glare is added light; the specular patch is a disc at 1.5 times white, at a random
+  place on the code, with a smooth edge out to 1.25 times its radius.
+- *Sensor.* Display white gives the exposure gain as linear signal, clipped at 1. White balance
+  multiplies red by 1 + s and blue by 1 - s. The tone curve is gamma 1/2.4 into BT.709 limited range,
+  or for `iphone-hdr` the BT.2100 HLG curve into 10-bit BT.2020 limited range. Fringes are a plane
+  wave with a random period of 8 to 32 pixels and random direction. Noise is Gaussian per colour
+  channel in code values. Sharpening is an unsharp mask of brightness against a 3 x 3 binomial blur;
+  colour noise reduction mixes the 4:2:0 colour planes with a 5 x 5 binomial blur of themselves.
+- *Recorder stand-in.* 8 x 8 DCT blocks with a uniform step of 3 / *b* code values, where *b* is the
+  bitrate in bits per camera pixel per frame (`tripod` about 20, `budget-android` about 11, `harsh`
+  about 23). It is not calibrated against x264; it only lets unit tests exercise a lossy recorder.
 
 | Impairment | Asserted property |
 | --- | --- |
@@ -952,3 +998,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 review round 2 and the owner's decision for version 1: every codec, HEVC included, is decoded by the sandboxed engine; the pure-Go `gen2brain/h265` is only an opt-in HEVC fast path, because it allocates a full picture for every missing reference a slice names (about 6.5 GB at 8K), so the 720 MB bound is withdrawn. Section 3 records this; section 8 does not count the fast path; section 11 gives the default decode time (about 2.8-3.6 times the duration for 4K60 on 8 cores, 25-40% slower per core than the fast path) and the two speed-ups; section 12 gives the engine's 4K HEVC figures, keeps skipping the loop filter off, and lists the fast path's protections (exactly `Threads(1)`, the per-sub-layer `sps_max_dec_pic_buffering_minus1 + 1 <= 6` check, `-c copy` before decoding, a stop at the first abandoned decode) as reducing risk, not bounding it; section 13 adds the fast-path flag |
 | 2026-11-13 | M0 review round 3: section 12 requires `WithCloseOnContextDone(true)` on the runtime qrvt creates, adds the 30 s no-progress watchdog with the M1 stream D cost measurement, gives the stream-copy instance's mounts, and states that the HEVC fast-path flag does not ship until the decoder's assembly can be excluded |
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
+| 2026-11-13 | M1 stream E: section 15 moves interference fringes from the optics stage to the sensor stage (their amplitude is in code values), completes the presets with a second table (panel black and response, capture jitter, exposure gain, colour matrix, colour noise reduction, veiling glare), and states how each parameter is read and the values every preset shares (panel scan-out, flicker frequency, field of view, shake walk, distortion convention, glare patch, recorder stand-in step) |
