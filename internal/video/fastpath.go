@@ -102,7 +102,8 @@ type fastDecoder struct {
 	pts      []int64 // presentation timestamps of the access units, in decode order
 	tbN      int64
 	tbD      int64
-	au       uint64 // access units seen
+	au       uint64    // access units seen
+	deadline time.Time // when the current picture runs out of time (FastPathPictureTime from its first slice)
 	queue    []*hevc.Picture
 	ended    bool
 	pixels   float64
@@ -494,17 +495,23 @@ func (d *fastDecoder) feed() error {
 		return err
 	}
 	var nal hevc.NALUnit
+	deadline := time.Now().Add(pictureTime)
 	if !flush {
 		var ok bool
 		if nal, ok = hevc.ParseNAL(b); !ok {
 			return nil
 		}
-		if nal.Type.IsVCL() && len(nal.RBSP) > 0 && nal.RBSP[0]&0x80 != 0 {
-			d.au++
+		deadline = time.Now().Add(pictureTime)
+		if nal.Type.IsVCL() {
+			if len(nal.RBSP) > 0 && nal.RBSP[0]&0x80 != 0 { // the first slice of a picture
+				d.au++
+				d.deadline = deadline
+			}
+			deadline = d.deadline // every slice of a picture shares its time
 		}
 		nal.Tag = d.au - 1
 	}
-	r, err := d.w.do(nal, flush, time.Now().Add(pictureTime))
+	r, err := d.w.do(nal, flush, deadline)
 	if err != nil {
 		return err
 	}
