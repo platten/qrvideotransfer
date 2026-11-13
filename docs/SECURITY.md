@@ -118,7 +118,11 @@ that raises it. Only the unpacked size has a flag in version 1.
 - `qrvt keygen -o name` writes an Ed25519 key pair: `name.key` (owner-readable only) and `name.pub`.
   Keys are one line of text: `qrvt-private-key-v1:<base64 of the 32-byte seed>` and
   `qrvt-public-key-v1:<base64 of the 32-byte key>`. A key's fingerprint is the first 16 hexadecimal
-  digits of its public key's SHA-256.
+  digits of its public key's SHA-256. The base64 is standard, padded and canonical; one trailing line
+  ending (LF or CRLF) is accepted and nothing else; a key file over 4 KiB is refused. `keygen` never
+  replaces an existing file. Reading a private key file whose permissions give any access to group or
+  others (any of the bits 0o077) produces a warning; on Windows, where access is governed by ACLs, no
+  check is made.
 - `encode --sign-key name.key` appends the public key and a signature to the stream (FORMAT.md section 12).
 - `decode` behaves as follows:
 
@@ -269,3 +273,4 @@ instruction and states which versions receive fixes.
 | 2026-11-13 | M0 review round 2 and the owner's decision for version 1: every codec, HEVC included, is decoded in the sandbox, and guarantee 1 rests on the sandbox alone (section 1). T1 names the two ways to leave the sandbox, `--ffmpeg system` and the HEVC fast-path flag (named in M1); a new subsection gives the fast path's trust class and known weakness A (missing references allocate full pictures, about 6.5 GB at 8K), withdrawing the 720 MB figure. Section 5 labels the fast path's limits as reducing risk, not bounding it, and its time limit stops the whole decode at the first abandon. Section 9.1 claims no time or memory bound; section 9.3 requires exactly `Threads(1)` (testing 0 and 2) and adds the 64-missing-references test against the engine |
 | 2026-11-13 | M0 review round 3: guarantee 1's "hang" is made true on the default path. Section 5 adds `EngineStallTimeout`, 30 s without progress (about 100 times the time per 4K HEVC frame), for decoding, probing and the stream-copy instance; T1 replaces "cancelled with the command's context" with that watchdog and close-on-cancel, and gives the copy instance's mounts; section 9.3 adds the watchdog test (M1 stream D). The fast-path subsection adds "built without its hand-written assembly" and that the flag does not ship until then |
 | 2026-11-13 | M0 follow-up: section 5 states that `EngineStallTimeout` bounds stalls only, names how progress is measured (the counting `fs.FS` view when probing, output-file growth when copying), and adds `MaxDecodedPixelsPerInputByte` (10,000; checked from the probe and again while decoding; measured 16.6-75.5 on the S1 clips and pattern files); T1 gives the single-file view as an `fs.FS` mount, attaches the raw-frame output to the decoding instance and the output file to the copy instance, and rewords the fast-path sentence; section 9.5 adds the skip-picture test (M1 stream D) |
+| 2026-11-13 | M1 stream A: section 6 states the key-file details implemented: canonical padded standard base64, one trailing LF or CRLF, a 4 KiB size limit, `keygen` never replaces a file, and the readable-key warning (any of the bits 0o077; not checked on Windows) |

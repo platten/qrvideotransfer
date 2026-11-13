@@ -391,12 +391,17 @@ The stream is what the outer code protects. Its length L includes every field be
   `type` is `file` or `dir`. `size` and `sha256` are present for files only. Only the low 9 bits of
   `mode` are meaningful.
 - The tar stream contains exactly the manifest's entries, in the same order, with the same paths, as
-  regular files and directories only.
+  regular files and directories only. A directory's tar name is its path followed by one `/`; a
+  decoder also accepts it without the `/`.
+- The archive is exactly the archive length of the header: decompression must yield neither more nor
+  fewer bytes.
 
 **What an encoder writes.**
 
 - Each input named on the command line is stored under its base name: the file `a/b/c.txt` becomes
-  `c.txt`; the directory `a/b/d` becomes `d`, and everything beneath it becomes `d/...`.
+  `c.txt`; the directory `a/b/d` becomes `d`, and everything beneath it becomes `d/...`. The base name
+  is taken from the absolute path, so `.` is stored under the name of the folder it names; a root
+  folder has no base name and stops the encode.
 - Every directory that contains an entry is itself an entry.
 - Entries are sorted by path, compared byte by byte. A directory therefore precedes its contents.
 - Two inputs with the same base name, or any path that breaks the path rules below, stop the encode
@@ -405,11 +410,19 @@ The stream is what the outer code protects. Its length L includes every field be
 - The manifest is written with its keys in the order shown above and no whitespace between tokens.
 - Tar headers carry the path, size, the low 9 mode bits and the modification time. User and group ids
   are 0 and their names empty.
+- Links and special files (devices, FIFOs, sockets) are not entries; the encoder skips them with a
+  warning.
+- Default compression: the first 4 MiB of the archive are compressed with zstd; the archive is stored
+  with compression 0 unless that sample shrinks by at least 2%, and with zstd otherwise. zstd uses a
+  window of at most 8 MiB and xz a dictionary of 8 MiB; age uses scrypt work factor 18.
 
 **What a decoder rejects.** A wrong magic or stream version; an unknown compression value; any flag bit
 other than 0x01 and 0x02; a non-zero reserved byte; a stream whose length L is not exactly `24 + Lb`,
-plus 96 when the signed flag is set; a manifest that is not valid JSON, has a key other than those
-shown, or has a version other than 1.
+plus 96 when the signed flag is set; a manifest that is not valid UTF-8 JSON, has a key other than those
+shown or any key twice in one object, writes `version`, `size` or `mode` other than as an integer
+without fraction or exponent, has an `mtime` that is not RFC 3339, a `sha256` that is not 64 lowercase
+hexadecimal digits, or a version other than 1; a tar entry that is not the next manifest entry with
+the same type and size, or that follows the last one; a file whose SHA-256 differs from the manifest.
 
 **Order of checks.** A decoder must check the descriptor's stream hash over the whole recovered stream,
 then the stream header, then the signature when one is present or required, and only then decrypt,
@@ -424,8 +437,9 @@ decompress and unpack. It must validate the entire manifest before writing any f
 - no component that is a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`),
   compared without regard to case and ignoring anything from the first dot;
 - each component at most 255 bytes and the whole path at most 4,096 bytes;
-- no two entries equal after Unicode case folding;
-- no entry whose parent path is an entry of type `file`.
+- no two entries equal after Unicode case folding: full case folding (CaseFolding.txt statuses C and F,
+  as `golang.org/x/text/cases.Fold`), then normalisation form C, so `Straße` equals `STRASSE`;
+- no entry beneath an entry of type `file`, at any depth, compared after the same folding.
 
 ## 13. Test vectors
 
@@ -439,7 +453,7 @@ and reviewed by hand against this document:
 | Shuffle(10, 1) and the first 4 SplitMix64 outputs for state 0 | Section 1 |
 | LDPC: for each inner code, an all-zero shard and a fixed pseudo-random shard to sent bits; and `H c = 0` for both | Section 8 |
 | Frame: fixed stream, session and seed to the SHA-256 of the luma plane of frames 0 and 1, for Gray2, Gray4 and RGB8 at 480p | Sections 4 to 11 |
-| Stream: fixed inputs to stream bytes, unsigned and signed with a fixed key; one manifest per path rule that must be refused | Section 12 |
+| Stream (`stream.json`): fixed inputs to stream bytes with compression 0, unsigned and signed with a fixed key (seed bytes 0 to 31); zstd, xz and age-encrypted streams of the same inputs that must still decode; one manifest per path rule that must be refused | Section 12 |
 | Reference video: a small encoded MP4 that every later release must decode | Whole format |
 
 Worked numbers for cross-checking, at 480 x 270, Gray4, `normal`, parity 20:
@@ -486,3 +500,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-13 | First draft |
 | 2026-11-13 | M0: section 3 states the grid limits a decoder enforces (GridY at least 30, 15 GridX > GridY); section 11 states the limits on B and F; section 13 writes the example session as `0x1234`. All numbers of sections 5.3 and 13 reproduced by the implementation and by an independent script; no value changed |
 | 2026-11-13 | M0 spikes: section 3 allows H.264 Main as well as High profile (the encoder's fastest settings turn off the 8x8 transform, so x264 signals Main, a subset of High); section 14 records the S1 result for the modulation 4 codec. No value a decoder relies on changed |
+| 2026-11-13 | M1 stream A: section 12 stream vectors frozen (`testdata/golden/stream.json`, reproduced by an independent script that recomputes the Ed25519 signature). Section 12 states: a directory's tar name ends in `/` (accepted without); decompression must yield exactly the archive length; `.` is stored under its folder's name and a root folder is refused; links and special files are skipped with a warning; the default compression rule and the zstd window, xz dictionary and scrypt work factor written; the decoder's manifest strictness (UTF-8, no repeated keys, plain integers, RFC 3339 `mtime`, lowercase `sha256`) and tar checks; case folding is full Unicode folding followed by NFC; "file under a file" applies at any depth. Section 13's stream row names the file and its contents |
