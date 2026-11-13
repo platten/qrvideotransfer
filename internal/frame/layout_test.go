@@ -242,8 +242,8 @@ func TestFractions(t *testing.T) {
 	}
 	for _, g := range [][2]int{{212, 120}, {480, 270}, {333, 250}, {120, 212}, {2047, 30}} {
 		l := mustLayout(t, g[0], g[1])
-		sep := l.Separator(TopLeft)
-		c0 := float64(sep.X0+sep.X1) / 2 / Denom // finder centre
+		m := l.FinderModule(TopLeft, 3, 3)
+		c0 := float64(m.X0+m.X1) / 2 / Denom // finder centre
 		dx := float64(cells(int64(l.GridX())))/Denom - 2*c0
 		dy := float64(cells(int64(l.GridY())))/Denom - 2*c0
 		frac := func(x, y int64) PointF { return PointF{(float64(x)/Denom - c0) / dx, (float64(y)/Denom - c0) / dy} }

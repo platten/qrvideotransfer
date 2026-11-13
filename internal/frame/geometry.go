@@ -22,7 +22,9 @@ type RectQ struct {
 // Pixels rasterises r for a cell pitch of pitch pixels: each edge is multiplied by the pitch and
 // rounded to the nearest integer, halves up (FORMAT.md section 4.5).
 func (r RectQ) Pixels(pitch int) image.Rectangle {
-	return image.Rectangle{}
+	// Structure coordinates are never negative, so integer division is the floor.
+	px := func(v int64) int { return int((2*v*int64(pitch) + Denom) / (2 * Denom)) }
+	return image.Rect(px(r.X0), px(r.Y0), px(r.X1), px(r.Y1))
 }
 
 // Corner names one of the four corners of the frame. It also numbers the header copies and palette
@@ -51,23 +53,45 @@ type RectF struct {
 // HeaderSlot returns the centre of slot (i, r) of header copy copy (a Corner) as fractions of the
 // finder-centre rectangle (FORMAT.md section 4.2). It does not depend on the grid.
 func HeaderSlot(copy, i, r int) PointF {
-	return PointF{}
+	return mirrorF(Corner(copy), PointF{float64(6+i) / 231, float64(r-3) / 126}) //nolint:gosec // copy is 0..3
 }
 
 // PalettePatch returns patch k of palette strip copy (a Corner) as fractions of the finder-centre
 // rectangle (FORMAT.md section 4.3).
 func PalettePatch(copy, k int) RectF {
-	return RectF{}
+	c := Corner(copy) //nolint:gosec // copy is 0..3
+	a := mirrorF(c, PointF{(129.0/2 + float64(2*k)) / 231, -7.0 / 252})
+	b := mirrorF(c, PointF{(133.0/2 + float64(2*k)) / 231, -3.0 / 252})
+	return RectF{min(a.X, b.X), min(a.Y, b.Y), max(a.X, b.X), max(a.Y, b.Y)}
+}
+
+// mirrorF maps a top-left fraction to corner c.
+func mirrorF(c Corner, p PointF) PointF {
+	if c == TopRight || c == BottomRight {
+		p.X = 1 - p.X
+	}
+	if c == BottomLeft || c == BottomRight {
+		p.Y = 1 - p.Y
+	}
+	return p
 }
 
 // FinderModuleDark reports whether module (mx, my), each in 0..6, of the finder at corner c is dark.
 // The bottom-right finder is inverted.
 func FinderModuleDark(c Corner, mx, my int) bool {
-	return false
+	ring := max(abs(mx-3), abs(my-3))
+	return (ring != 2) != SeparatorDark(c)
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // SeparatorDark reports whether the separator around the finder at corner c is dark; only the
 // bottom-right one is.
 func SeparatorDark(c Corner) bool {
-	return false
+	return c == BottomRight
 }
