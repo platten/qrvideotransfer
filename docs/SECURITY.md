@@ -15,7 +15,7 @@ Two guarantees are the goal:
 1. A crafted video or recording cannot make `qrvt decode` crash the machine, run code, exhaust memory or
    disk, hang, or write outside the chosen output folder. For video decoding this guarantee rests on the
    sandbox alone (T1). It does not hold when the user leaves the sandbox with `--ffmpeg system` or the
-   HEVC fast-path flag (named in M1); those are for recordings the user made themselves.
+   HEVC fast-path flag `--unsandboxed-hevc`; those are for recordings the user made themselves.
 2. When the receiver names the senders they trust, a transfer that was not produced by one of them, or
    that was altered, is rejected before any of its content is decrypted or unpacked.
 
@@ -45,7 +45,7 @@ archive        --> [ manifest check, unpack ]        --> files in a staging fold
 
 Each arrow carries attacker-controlled data. Each box must hold when its input is arbitrary.
 
-Only with the HEVC fast-path flag (named in M1; DESIGN.md section 12): the sandboxed engine copies an
+Only with the HEVC fast-path flag `--unsandboxed-hevc` (DESIGN.md section 12): the sandboxed engine copies an
 HEVC stream out of its container and the pure-Go `gen2brain/h265`, outside the sandbox, turns it into
 raw frames.
 
@@ -53,7 +53,7 @@ raw frames.
 
 | # | Threat | Defence |
 | --- | --- | --- |
-| T1 | A malformed container or bitstream exploits the video decoder | **The default path is fully sandboxed:** ffmpeg runs inside the wazero WebAssembly sandbox and parses every container and every bitstream, H.264 and HEVC alike. A decoding instance sees a read-only view of the single input file only (an `fs.FS` wrapper mounted with `FSConfig.WithFSMount`, which also counts reads for the watchdog); no network; a memory ceiling; a watchdog (section 5) that cancels an instance making no progress for 30 s, with the runtime created with `WithCloseOnContextDone(true)` so that cancellation interrupts running Wasm; and a limit on decoded pixels per input byte (section 5). Its only output is raw frames on a pipe, which are length-checked. The instance that copies an HEVC stream out of its container for the fast path sees the same read-only view of the input and one temporary directory, writable, nothing else; its output is a file in that directory. A user leaves the sandbox in exactly two ways, both opt-in and both for recordings the user made themselves: `--ffmpeg system` (below) and the HEVC fast-path flag (named in M1), which decodes HEVC in the qrvt process with gen2brain/h265 v0.2.5 (created August 2026, no independent security review); the flag does not ship until that decoder can be built without its hand-written assembly. The fast path's memory is not bounded against a crafted stream (known weakness A, below) |
+| T1 | A malformed container or bitstream exploits the video decoder | **The default path is fully sandboxed:** ffmpeg runs inside the wazero WebAssembly sandbox and parses every container and every bitstream, H.264 and HEVC alike. A decoding instance sees a read-only view of the single input file only (an `fs.FS` wrapper mounted with `FSConfig.WithFSMount`, which also counts reads for the watchdog); no network; a memory ceiling; a watchdog (section 5) that cancels an instance making no progress for 30 s, with the runtime created with `WithCloseOnContextDone(true)` so that cancellation interrupts running Wasm; and a limit on decoded pixels per input byte (section 5). Its only output is raw frames on a pipe, which are length-checked. The instance that copies an HEVC stream out of its container for the fast path sees the same read-only view of the input and one temporary directory, writable, nothing else; its output is a file in that directory. A user leaves the sandbox in exactly two ways, both opt-in and both for recordings the user made themselves: `--ffmpeg system` (below) and the HEVC fast-path flag `--unsandboxed-hevc`, which decodes HEVC in the qrvt process with gen2brain/h265 v0.2.5 (created August 2026, no independent security review); the flag does not ship until that decoder can be built without its hand-written assembly. The fast path's memory is not bounded against a crafted stream (known weakness A, below) |
 | T2 | A lying header or descriptor drives huge allocations or loops | Every field is used only after its CRC passes and its value is checked against section 5. Parameters derived from the stream length are recomputed and must match (FORMAT.md section 10). A decode locks onto the first valid session; frames from any other session are counted and ignored |
 | T3 | Soft-bit or shard floods exhaust memory or disk | The soft-bit store is capped and evicts. The shard store is a file whose size is fixed by the validated descriptor, and free disk space is checked before it is created |
 | T4 | A decompression bomb | Decompression is streaming and stops at the archive length declared in the stream header. That length must not exceed `--max-size` or the free space on disk |
@@ -72,7 +72,7 @@ themselves.
 
 ### What the HEVC fast path changes
 
-The HEVC fast-path flag (named in M1) is in the same trust class as `--ffmpeg system`. The help text,
+The HEVC fast-path flag `--unsandboxed-hevc` is in the same trust class as `--ffmpeg system`. The help text,
 the user guide and DESIGN.md section 13 say three things: it is for recordings the user made themselves,
 it runs outside the sandbox, and its memory is not bounded against a crafted stream. The protections of
 DESIGN.md section 12 (built without its hand-written assembly; exactly `Threads(1)`; 4:2:0 at 8 or 10 bits; at most 7680 x 4320; a buffer of at
@@ -269,3 +269,4 @@ instruction and states which versions receive fixes.
 | 2026-11-13 | M0 review round 2 and the owner's decision for version 1: every codec, HEVC included, is decoded in the sandbox, and guarantee 1 rests on the sandbox alone (section 1). T1 names the two ways to leave the sandbox, `--ffmpeg system` and the HEVC fast-path flag (named in M1); a new subsection gives the fast path's trust class and known weakness A (missing references allocate full pictures, about 6.5 GB at 8K), withdrawing the 720 MB figure. Section 5 labels the fast path's limits as reducing risk, not bounding it, and its time limit stops the whole decode at the first abandon. Section 9.1 claims no time or memory bound; section 9.3 requires exactly `Threads(1)` (testing 0 and 2) and adds the 64-missing-references test against the engine |
 | 2026-11-13 | M0 review round 3: guarantee 1's "hang" is made true on the default path. Section 5 adds `EngineStallTimeout`, 30 s without progress (about 100 times the time per 4K HEVC frame), for decoding, probing and the stream-copy instance; T1 replaces "cancelled with the command's context" with that watchdog and close-on-cancel, and gives the copy instance's mounts; section 9.3 adds the watchdog test (M1 stream D). The fast-path subsection adds "built without its hand-written assembly" and that the flag does not ship until then |
 | 2026-11-13 | M0 follow-up: section 5 states that `EngineStallTimeout` bounds stalls only, names how progress is measured (the counting `fs.FS` view when probing, output-file growth when copying), and adds `MaxDecodedPixelsPerInputByte` (10,000; checked from the probe and again while decoding; measured 16.6-75.5 on the S1 clips and pattern files); T1 gives the single-file view as an `fs.FS` mount, attaches the raw-frame output to the decoding instance and the output file to the copy instance, and rewords the fast-path sentence; section 9.5 adds the skip-picture test (M1 stream D) |
+| 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc` |
