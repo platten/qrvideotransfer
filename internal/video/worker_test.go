@@ -39,6 +39,7 @@ const fakeParent = "__test-fake-parent"
 // to the test's coverage directory.
 func TestMain(m *testing.M) {
 	testModules["spin"] = spinWasm
+	testModules["broken"] = []byte("not wasm")
 	if len(os.Args) > 2 && os.Args[1] == WorkerArg {
 		os.Exit(hostileWorker(os.Args[2]))
 	}

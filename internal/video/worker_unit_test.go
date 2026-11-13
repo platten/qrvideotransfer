@@ -51,8 +51,6 @@ func TestWorkerInProcess(t *testing.T) {
 		t.Errorf("messages seen: %v", seen)
 	}
 
-	testModules["broken"] = []byte("not wasm")
-	defer delete(testModules, "broken")
 	out.Reset()
 	if code := serveWorker(job(workerJob{Prog: "ffmpeg", Module: "broken"}), &out, func(int) {}); code != 0 {
 		t.Fatalf("broken module exit %d", code)
