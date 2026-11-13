@@ -14,6 +14,7 @@ once the vision code exists (after milestone M2).
 
 They are in `recordings/patterns/` in the repository folder. Pick the one that matches the monitor's
 native resolution.
+The files are produced in `spikes/pattern/out/` and copied to `recordings/patterns/` for playing.
 
 | File | Size | Length | SHA-256 |
 | --- | --- | --- | --- |
