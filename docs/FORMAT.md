@@ -418,7 +418,8 @@ The stream is what the outer code protects. Its length L includes every field be
 - Default compression: the first 4 MiB of the archive are compressed with zstd; the archive is stored
   with compression 0 unless that sample shrinks by at least 2%, and with zstd otherwise. zstd uses a
   window of 8 MiB and xz a dictionary of 8 MiB; age uses scrypt work factor 18. These are also the
-  largest values a decoder accepts (below).
+  largest values a decoder accepts (below). An xz body is exactly one xz stream, with no stream
+  padding, whose blocks each have the single filter LZMA2.
 
 **What a decoder rejects.** A wrong magic or stream version; an unknown compression value; any flag bit
 other than 0x01 and 0x02; a non-zero reserved byte; a stream whose length L is not exactly `24 + Lb`,
@@ -429,7 +430,8 @@ hexadecimal digits, or a version other than 1; a tar entry that is not the next 
 the same type and size, or that follows the last one; a file whose SHA-256 differs from the manifest.
 It also rejects, before allocating for them: a zstd frame whose window (or, for a single-segment
 frame, content size) exceeds 8 MiB; an xz block whose filter is not LZMA2 alone or whose dictionary
-exceeds 8 MiB; an age header whose scrypt work factor exceeds 18. Any conforming pax tar is accepted;
+exceeds 8 MiB; an xz body with anything after its one stream (a second stream, stream padding or
+other bytes); an age header whose scrypt work factor exceeds 18. Any conforming pax tar is accepted;
 the tar bytes need not match those of the reference encoder.
 
 **Order of checks.** A decoder must check the descriptor's stream hash over the whole recovered stream,
