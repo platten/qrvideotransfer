@@ -82,6 +82,21 @@ func main() {
 		check := fs.Bool("check", false, "decode the output and count cell errors")
 		fs.Parse(args)
 		err = cmdEncode(ctx, newEng(), encOpts{*w, *h, *cell, *mod, *n, *codec, *qp, *preset, *extra, *out, *par, *check})
+	case "h265":
+		in := fs.String("in", "", "Annex B HEVC elementary stream")
+		ref := fs.String("ref", "", "raw luma from another decoder to compare with")
+		n := fs.Int("frames", 120, "frames")
+		th := fs.Int("threads", 1, "decoder threads")
+		fs.Parse(args)
+		err = cmdH265(*in, *ref, *n, *th)
+	case "classify":
+		in := fs.String("in", "", "8-bit clip made by genclips.sh")
+		cell := fs.Int("cell", 5, "cell size used by gen")
+		hold := fs.Int("hold", 1, "hold used by gen")
+		n := fs.Int("frames", 60, "frames")
+		skip := fs.Bool("skiplf", false, "-skip_loop_filter all")
+		fs.Parse(args)
+		err = cmdClassify(ctx, newEng(), *in, *cell, *hold, *n, *skip)
 	case "stream":
 		w := fs.Int("w", 1920, "width")
 		h := fs.Int("h", 1080, "height")
