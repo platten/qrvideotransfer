@@ -22,7 +22,7 @@ import (
 // engineFor returns the embedded backend's loaded engine.
 func engineFor(t *testing.T) *engine {
 	t.Helper()
-	e, err := loadEngine(t.Context(), defaultCacheDir())
+	e, err := loadEngine(t.Context(), defaultCacheDir(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
