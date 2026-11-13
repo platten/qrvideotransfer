@@ -71,6 +71,14 @@ jobs:
         shell: pwsh
         run: scripts/test.ps1 cover
 
+      # The tasks above and below test with RELEASE_TAGS from .goreleaser.yaml, the configuration
+      # that ships; this step keeps the default, untagged build covered too.
+      - name: Tests without the release build tags
+        if: matrix.os == 'ubuntu-24.04'
+        timeout-minutes: 20
+        shell: bash
+        run: scripts/test.sh -untagged
+
       - name: Coverage gate (go-test-coverage)
         if: matrix.os == 'ubuntu-24.04'
         timeout-minutes: 5

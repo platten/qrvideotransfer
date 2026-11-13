@@ -36,7 +36,8 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      # Releases come only from commits already on main, whoever pushed the tag.
+      # Defence in depth: the control is the `v*` tag ruleset that limits who may create release
+      # tags. This step only refuses a tag whose commit is not already on main.
       - name: Check that the tagged commit is on main
         timeout-minutes: 5
         run: |
