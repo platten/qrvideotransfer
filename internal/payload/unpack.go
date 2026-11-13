@@ -338,6 +338,16 @@ func (x *extractor) check(e Entry, overwrite bool) error {
 	st, err := x.root.Lstat(e.Path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		// Windows reports a path beneath a file as missing; the nearest existing ancestor must be a
+		// real folder.
+		for p := path.Dir(e.Path); p != "."; p = path.Dir(p) {
+			if st, err := x.root.Lstat(p); err == nil {
+				if !st.IsDir() {
+					return &ExistsError{e.Path, fmt.Sprintf("cannot be created: %q is not a folder", p)}
+				}
+				break
+			}
+		}
 		return nil
 	case err != nil:
 		return &ExistsError{e.Path, fmt.Sprintf("cannot be created: %v", err)}
