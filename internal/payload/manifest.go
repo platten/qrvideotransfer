@@ -281,8 +281,13 @@ func parseHash(dst *[32]byte, s string) error {
 
 // ValidateManifest applies every path rule of FORMAT.md section 12 to the whole manifest and checks
 // that the files' total size is at most maxSize. It returns an [UnsafeArchiveError] or a [LimitError].
+//
+// Every folder that contains an entry must itself be an entry of type dir. This also refuses an entry
+// beneath a file at any depth, and it bounds the folders an extraction creates by the entry limit and
+// the length of their paths by the manifest size. The cost is linear in the manifest's size.
 func ValidateManifest(entries []Entry, maxSize int64) error {
-	keys := make(map[string]int, len(entries))
+	keys := make(map[string]int, len(entries)) // folded path to entry index
+	folded := make([]string, len(entries))
 	var total int64
 	for i, e := range entries {
 		if err := ValidatePath(e.Path); err != nil {
@@ -299,16 +304,13 @@ func ValidateManifest(entries []Entry, maxSize int64) error {
 		if j, ok := keys[k]; ok {
 			return &UnsafeArchiveError{e.Path, fmt.Sprintf("equal to %q after case folding", entries[j].Path)}
 		}
-		keys[k] = i
+		keys[k], folded[i] = i, k
 	}
-	for _, e := range entries {
-		k := foldKey(e.Path) // '/' folds to itself and is a starter, so ancestors' keys are prefixes
-		for i := range len(k) {
-			if k[i] != '/' {
-				continue
-			}
-			if j, ok := keys[k[:i]]; ok && !entries[j].Dir {
-				return &UnsafeArchiveError{e.Path, fmt.Sprintf("under the file %q", entries[j].Path)}
+	for i, k := range folded {
+		// '/' folds to itself and is a starter, so the key of the parent is a prefix of the key.
+		if s := strings.LastIndexByte(k, '/'); s >= 0 {
+			if j, ok := keys[k[:s]]; !ok || !entries[j].Dir {
+				return &UnsafeArchiveError{entries[i].Path, "its folder is not an entry of type dir"}
 			}
 		}
 	}

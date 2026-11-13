@@ -37,20 +37,36 @@ func (nopCloser) Close() error { return nil }
 func decompressor(r io.Reader, m Method) (io.Reader, func(), error) {
 	switch m {
 	case MethodZstd:
-		d, err := zstd.NewReader(r, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxWindow(MaxZstdWindow))
+		d, err := zstd.NewReader(r, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxWindow(MaxZstdWindow),
+			zstd.WithDecoderMaxMemory(MaxZstdWindow))
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: zstd: %w", ErrFormat, err)
 		}
 		return d, d.Close, nil
 	case MethodXZ:
-		x, err := xz.ReaderConfig{DictCap: XZDictCap, SingleStream: true}.NewReader(r)
+		g := &xzGuard{r: r}
+		x, err := xz.ReaderConfig{DictCap: XZDictCap, SingleStream: true}.NewReader(g)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: xz: %w", ErrFormat, err)
+			return nil, nil, errors.Join(g.err, fmt.Errorf("%w: xz: %w", ErrFormat, err))
 		}
-		return x, func() {}, nil
+		return guarded{x, g}, func() {}, nil
 	default:
 		return r, func() {}, nil
 	}
+}
+
+// guarded reports the guard's error rather than the library's rendering of it.
+type guarded struct {
+	r io.Reader
+	g *xzGuard
+}
+
+func (d guarded) Read(p []byte) (int, error) {
+	n, err := d.r.Read(p)
+	if err != nil && d.g.err != nil {
+		err = d.g.err
+	}
+	return n, err
 }
 
 // methodFor returns the stream method for a compression choice; for CompressAuto, sample yields the

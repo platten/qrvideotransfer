@@ -146,13 +146,18 @@ func TestArchiveReadErrors(t *testing.T) {
 }
 
 func TestParentIsFile(t *testing.T) {
-	es := []tarEntry{fileHdr("a/b", "x")}
+	es := []tarEntry{dirHdr("a"), fileHdr("a/b", "x")}
 	a := archive(t, MarshalManifest(manifestFor(es...)), es...)
 	out := t.TempDir()
 	must(t, os.WriteFile(filepath.Join(out, "a"), nil, 0o600))
 	var ee *ExistsError
 	if _, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out}); !errors.As(err, &ee) {
 		t.Fatalf("parent is a file: %v", err)
+	}
+	// Without its folder as an entry, the manifest itself is refused.
+	a = archive(t, MarshalManifest(manifestFor(es[1])), es[1])
+	if _, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: t.TempDir()}); !isUnsafe(err) {
+		t.Fatalf("folder not an entry: %v", err)
 	}
 }
 

@@ -58,8 +58,9 @@ func parseKey(b []byte, prefix string) ([]byte, error) {
 	if len(b) > maxKeyFile {
 		return nil, fmt.Errorf("%w: file too large", ErrKeyFormat)
 	}
-	b = bytes.TrimSuffix(b, []byte("\n"))
-	b = bytes.TrimSuffix(b, []byte("\r"))
+	if rest, ok := bytes.CutSuffix(b, []byte("\n")); ok {
+		b = bytes.TrimSuffix(rest, []byte("\r")) // LF or CRLF; a lone CR stays and is refused below
+	}
 	rest, ok := bytes.CutPrefix(b, []byte(prefix))
 	if !ok {
 		return nil, fmt.Errorf("%w: want a line starting %q", ErrKeyFormat, prefix)

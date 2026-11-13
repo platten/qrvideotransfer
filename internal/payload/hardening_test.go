@@ -150,9 +150,9 @@ func TestZstdWindowLimit(t *testing.T) {
 		return append([]byte{0xE0}, b...) // single segment, 8-byte content size
 	}
 	cases := map[string][]byte{
-		"window 16 MiB":        zstdFrame([]byte{0x00, 14 << 3}, a), // window log 24
-		"window 8 MiB + 1/8":   zstdFrame([]byte{0x00, 13<<3 | 1}, a),
-		"single segment 9 MiB": zstdFrame(fcs(9<<20), a),
+		"window 16 MiB":         zstdFrame([]byte{0x00, 14 << 3}, a), // window log 24
+		"window 8 MiB + 1/8":    zstdFrame([]byte{0x00, 13<<3 | 1}, a),
+		"single segment 9 MiB":  zstdFrame(fcs(9<<20), a),
 		"single segment 12 GiB": zstdFrame(fcs(12<<30), a),
 	}
 	for name, body := range cases {
@@ -215,13 +215,18 @@ func TestKeyLoneCR(t *testing.T) {
 	}
 }
 
-// deepManifest returns n file entries at the given depth with distinct names.
-func deepManifest(n, depth int) []Entry {
-	deep := strings.Repeat("a/", depth)
-	es := make([]Entry, n)
-	for i := range es {
-		es[i] = Entry{Path: deep + "f" + string(rune('A'+i%26)) + string(rune('A'+i/26%26)) + string(rune('A'+i/676%26)),
-			Mode: 0o600, MTime: testTime}
+// deepManifest returns the folders a, a/a, ... to the given depth and then n files with distinct
+// names in the deepest one, as tar entries in manifest order.
+func deepManifest(n, depth int) []tarEntry {
+	var es []tarEntry
+	p := "a"
+	for range depth {
+		es = append(es, dirHdr(p))
+		p += "/a"
+	}
+	p = strings.TrimSuffix(p, "a")
+	for i := range n {
+		es = append(es, fileHdr(p+"f"+string(rune('A'+i%26))+string(rune('A'+i/26%26))+string(rune('A'+i/676%26)), ""))
 	}
 	return es
 }
@@ -232,9 +237,11 @@ func TestDeepManifestResources(t *testing.T) {
 	if testing.Short() {
 		t.Skip("manifests near the limits; skipped with -short")
 	}
+	if raceEnabled {
+		t.Skip("the time bound does not apply under the race detector; it runs in the ordinary test task")
+	}
 	start := time.Now()
-	es := deepManifest(15000, 2000) // about 62 MB of manifest
-	m := MarshalManifest(es)
+	m := MarshalManifest(manifestFor(deepManifest(14500, 2000)...)) // about 64 MB of manifest
 	if len(m) < 59<<20 || len(m) > MaxManifestBytes {
 		t.Fatalf("manifest is %d bytes", len(m))
 	}
@@ -256,11 +263,7 @@ func TestDeepManifestResources(t *testing.T) {
 	// A real extraction at maximum depth, twice into the same folder (the second time every folder
 	// exists and every file is replaced).
 	start = time.Now()
-	deep := deepManifest(200, 2000)
-	var tes []tarEntry
-	for _, e := range deep {
-		tes = append(tes, fileHdr(e.Path, ""))
-	}
+	tes := deepManifest(200, 2000)
 	a := archive(t, MarshalManifest(manifestFor(tes...)), tes...)
 	out = t.TempDir()
 	for _, overwrite := range []bool{false, true} {

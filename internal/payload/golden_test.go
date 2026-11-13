@@ -6,12 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/golden/stream.json (a format change: review by hand)")
@@ -36,8 +38,19 @@ type goldenDecode struct {
 }
 
 type goldenRefused struct {
-	Rule     string `json:"rule"`
-	Manifest string `json:"manifest"`
+	Rule        string `json:"rule"`
+	Manifest    string `json:"manifest,omitempty"`
+	ManifestHex string `json:"manifest_hex,omitempty"` // a manifest that is not valid UTF-8
+}
+
+// bytes returns the refused manifest's bytes.
+func (r goldenRefused) bytes(t *testing.T) []byte {
+	if r.ManifestHex == "" {
+		return []byte(r.Manifest)
+	}
+	b, err := hex.DecodeString(r.ManifestHex)
+	must(t, err)
+	return b
 }
 
 type golden struct {
@@ -95,6 +108,7 @@ var refusedRules = []struct{ rule, path, second string }{
 	{"console device name", "CONIN$.txt", ""},
 	{"device name with spaces before the dot", "NUL  .txt", ""},
 	{"file under a file at depth", "a", "a/b/c"},
+	{"folder not an entry", "a/b", ""},
 }
 
 func goldenTree() (tree, map[string]uint32) {
@@ -185,17 +199,22 @@ func TestGoldenStream(t *testing.T) {
 	}
 	for _, r := range g.Refused {
 		t.Run("refuse "+r.Rule, func(t *testing.T) {
-			// The manifest itself must be refused, not merely its missing tar entries.
-			es, err := ParseManifest([]byte(r.Manifest))
-			must(t, err)
-			if err := ValidateManifest(es, DefaultMaxSize); !isUnsafe(err) {
-				t.Fatalf("ValidateManifest(%s) = %v", r.Manifest, err)
+			// The manifest itself must be refused, not merely its missing tar entries. A manifest that
+			// is not valid UTF-8 is refused by the parser.
+			m := r.bytes(t)
+			es, err := ParseManifest(m)
+			if r.ManifestHex != "" {
+				if !isFormat(err) {
+					t.Fatalf("ParseManifest(%q) = %v", m, err)
+				}
+			} else if err := errors.Join(err, ValidateManifest(es, DefaultMaxSize)); !isUnsafe(err) {
+				t.Fatalf("ValidateManifest(%s) = %v", m, err)
 			}
-			a := archive(t, []byte(r.Manifest))
+			a := archive(t, m)
 			out := t.TempDir()
 			_, err = unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out})
-			if !isUnsafe(err) {
-				t.Fatalf("%s: %v", r.Manifest, err)
+			if !isUnsafe(err) && (r.ManifestHex == "" || !isFormat(err)) {
+				t.Fatalf("%q: %v", m, err)
 			}
 			expectEmpty(t, out)
 		})
@@ -240,7 +259,16 @@ func writeGolden(t *testing.T, srcs []source, unsigned, signed []byte) {
 		if r.second != "" {
 			es = append(es, Entry{Path: r.second, Size: 0, Mode: 0o644, MTime: testTime, SHA256: sha256.Sum256(nil)})
 		}
-		g.Refused = append(g.Refused, goldenRefused{r.rule, string(MarshalManifest(es))})
+		m := MarshalManifest(es)
+		if !utf8.ValidString(r.path) { // JSON encoding would replace the invalid bytes: splice them in
+			es[0].Path = "PLACEHOLDER"
+			m = bytes.Replace(MarshalManifest(es), []byte("PLACEHOLDER"), []byte(r.path), 1)
+		}
+		if utf8.Valid(m) {
+			g.Refused = append(g.Refused, goldenRefused{Rule: r.rule, Manifest: string(m)})
+		} else {
+			g.Refused = append(g.Refused, goldenRefused{Rule: r.rule, ManifestHex: hex.EncodeToString(m)})
+		}
 	}
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
