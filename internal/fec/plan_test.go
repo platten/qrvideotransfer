@@ -145,8 +145,13 @@ func TestShapeAndPlanErrors(t *testing.T) {
 			t.Errorf("NewPlan(%d, %d) succeeded", c.l, c.s)
 		}
 	}
-	if b, k, err := Shape(MaxStreamLen, 192); err != nil || b != (MaxStreamLen/192+1+MaxShards-1)/MaxShards || k > MaxShards {
-		t.Errorf("Shape(max, 192) = %d, %d, %v", b, k, err)
+	// The block count, not the 6-byte length, is the binding limit: 3 bytes of B at most.
+	largest := int64(MaxBlocks) * MaxShards * 192
+	if b, k, err := Shape(largest, 192); err != nil || b != MaxBlocks || k != MaxShards {
+		t.Errorf("Shape(largest, 192) = %d, %d, %v", b, k, err)
+	}
+	if _, _, err := Shape(largest+1, 192); err == nil {
+		t.Error("Shape(largest + 1, 192) succeeded")
 	}
 	for _, m := range []int{0, -1, MaxShards + 1} {
 		if _, err := NewPlan(1000, 64, m, 0); err == nil {
