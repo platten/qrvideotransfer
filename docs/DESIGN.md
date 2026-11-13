@@ -334,12 +334,37 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   | 4 `robust` | 0.359 | -0.40 dB | 2.20 dB | 2.60 dB | -2.25 dB |
 
   Es/N0 = Eb/N0 + 10 log10(R) is per sent bit, which is what the noise of a cell sets. The test
-  asserts FER below 1e-2 at the limit plus 2.5 dB for codes 1-3. **`robust` misses that fallback
-  criterion by about 0.1 dB.** The cause is FORMAT.md's frozen shortening of 428 of the rate-1/2 mother
-  code's 972 information bits, not the decoder: the same decoder puts the mother code within 0.01 dB of
-  its published curve and 1.63 dB from its own limit. For `robust` the test is a regression check at
-  the limit plus 2.8 dB, on 10,000 frames because its waterfall is shallow. `robust` buys its 2.24 dB
-  of Es/N0 over code 3 with 56% of the payload per sent bit.
+  asserts FER below 1e-2 at the limit plus 2.5 dB for codes 1-3. **With the shipped decoder, `robust`
+  misses that fallback criterion by about 0.1 dB, and the cause is the decoder, not the code.** For
+  `robust` the test is a regression check at the limit plus 2.8 dB, on 10,000 frames because its
+  waterfall is shallow.
+- Decoder comparison (`TestMinSumVariants`, `QRVT_LONG_TESTS=1`; a test-only floating-point reference
+  with the same layered schedule; 4,000 frames per 0.1 dB step, the same frames for every decoder; Eb/N0
+  at FER 1e-2, each code's capacity gap in brackets):
+
+  | Decoder | `robust` (4) | code 3 | `normal` (2) | `fast` (1) |
+  | --- | --- | --- | --- | --- |
+  | Shipped: int16, x0.75 as floor(3m/4), 25 iterations | 2.26 (2.66) | 2.07 (1.29) | 2.49 (1.32) | 3.48 (1.16) |
+  | Sum-product, 50 iterations, float LLRs | 1.13 (1.53) | 1.97 (1.18) | 2.43 (1.25) | 3.41 (1.10) |
+  | Sum-product, 50 iterations, the shipped 8-bit soft bits | 1.14 | 1.98 | 2.42 | 3.42 |
+  | Min-sum x0.75, float, 25 iterations | 1.96 | 2.07 | 2.49 | 3.46 |
+  | Min-sum x0.75, float, 50 iterations | 1.93 | 2.04 | 2.46 | 3.45 |
+  | Min-sum x0.8125, float, 25 iterations | 1.36 | 2.12 | 2.51 | 3.45 |
+  | Min-sum x0.875, float, 25 iterations | 1.35 | 2.21 | 2.60 | 3.48 |
+  | Offset min-sum, 0.25 LLR, float, 25 iterations | 1.33 | 2.20 | 2.62 | 3.50 |
+  | Offset min-sum, 0.5 LLR, float, 25 iterations | 1.33 | 2.07 | 2.51 | 3.47 |
+
+  For codes 1-3 the shipped decoder is within 0.1 dB of sum-product, and x0.75 is the best of the
+  min-sum variants. For `robust` it is 1.13 dB behind sum-product. About 0.3 dB of that is integer
+  truncation: floor(3m/4) of small messages at the low Es/N0 where `robust` works (the float model of
+  the same algorithm is at 1.96 dB, and soft bits at 8 or 16 per unit of LLR instead of 4 bring the
+  shipped decoder to 2.09 and 2.02 dB). About 0.6 dB is the normalisation: after shortening, `robust`'s
+  checks keep only 5 to 7 unshortened variables, and min-sum over few inputs needs less damping than
+  x0.75. Offset min-sum with 0.5 LLR, the most uniform variant, is within 0.03 dB of x0.75 on codes 1-3
+  and 0.6 dB better on `robust`. The 8-bit soft bits cost nothing (sum-product on them equals
+  sum-product on float LLRs). Not changed in M1: changing the decoder changes no format bit, and the
+  choice is the designer's. `robust` buys its 2.24 dB of Es/N0 over code 3 with 56% of the payload per
+  sent bit.
 - Codeword bits are spread over the whole frame by a pseudo-random permutation with a per-frame rotation,
   so glare in one corner costs every codeword a little instead of a few codewords everything.
 - No mature Go library does soft-decision LDPC, so this is written in the repository. The DVB-S2
@@ -1053,3 +1078,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc`; section 14's `DecodeOptions` (and the root package's `AnalyzeOptions` and `InspectOptions`) gain `UnsandboxedHEVC` |
 | 2026-11-13 | M1 stream B: section 8 describes the encoder and the decoder as built (int16 bounds, pinned shortened bits, check before the first iteration), records the production decoder's speed beside the S3 decoder, and records the error-rate test: published FER 1e-2 points for the four 802.11n n = 1944 mother codes with their sources, our measured points (all within 0.2 dB), and the shortened codes' points; section 12 records the `noasm`/`nounsafe` measurement and the decision that the whole release can be built with `-tags noasm,nounsafe` |
 | 2026-11-13 | M1 stream B, review of PR #8: section 8 checks the four shipped inner codes against the binary-input AWGN capacity limit with the rate counted with the CRC (codes 1-3 within 2.5 dB; `robust` 2.60 dB away, missing that criterion by about 0.1 dB because of the frozen shortening), corrects the Es/N0 values for the CRC, and states the shard store's sparse file on Windows and its 64 GiB stream cap; section 12 limits the `noasm,nounsafe` claim to the three `klauspost` libraries and calls Reed-Solomon reconstruction marginally below the bar, accepted because it is 30-50 times faster than LDPC decoding |
+| 2026-11-13 | M1 stream B, designer's follow-up on PR #8: section 8 compares the shipped decoder with a test-only sum-product reference and min-sum variants on the four inner codes, and corrects the cause of `robust`'s capacity gap: the decoder (integer truncation about 0.3 dB, normalisation x0.75 about 0.6 dB), not the shortening; the shipped decoder is unchanged pending the designer's decision |

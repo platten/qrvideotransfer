@@ -199,10 +199,11 @@ func TestCapacityLimit(t *testing.T) {
 // the binary-input AWGN capacity limit for the code's rate.
 const capacityGap = 2.5
 
-// robustGap is the regression bound for code 4 (`robust`), which misses capacityGap: it reaches FER
-// 1e-2 about 2.6 dB from its limit (DESIGN.md section 8). The cause is FORMAT.md's frozen shortening of
-// 428 of the mother code's 972 information bits, not the decoder: the mother rate-1/2 code is at
-// 1.82 dB, 1.63 dB from its own limit. Its waterfall is shallow (FER about 5e-3 at 2.8 dB from the
+// robustGap is the regression bound for code 4 (`robust`), which misses capacityGap with the shipped
+// decoder: it reaches FER 1e-2 about 2.6 dB from its limit (DESIGN.md section 8). The cause is the
+// decoder, not the code: sum-product reaches it 1.53 dB from the limit (TestMinSumVariants). The
+// normalisation 0.75 suits the other codes but not robust's low-degree checks, and floor(3m/4) on
+// small integer messages loses more. Its waterfall is shallow (FER about 5e-3 at 2.8 dB from the
 // limit), so the regression check uses 10,000 frames to keep 0.2 dB of margin over the measured gap.
 const robustGap = 2.8
 
