@@ -62,7 +62,7 @@ The tool is written in Go. Security was the reason Rust was raised, and it does 
 | --- | --- | --- |
 | Memory safety | Safe, except that a data race can corrupt memory | Safe, and data races are ruled out at compile time |
 | Official guidance | NSA/CISA list both as memory-safe languages | Same |
-| Parsing untrusted video | ffmpeg inside the wazero sandbox; no published sandbox advisories, though less scrutinised. Since spike S1, HEVC is decoded outside the sandbox by a pure-Go port (`gen2brain/h265`) of those Rust decoders, bounds-checked, with a fallback to the sandbox (section 12) | wasmtime is heavily fuzzed but had several sandbox-escape CVEs in 2024-26, two rated critical in October 2026. The pure-Rust H.264 and HEVC decoders are all under 8 months old with single maintainers |
+| Parsing untrusted video | ffmpeg inside the wazero sandbox; no published sandbox advisories, though less scrutinised. Every codec, HEVC included, is decoded in the sandbox; a pure-Go HEVC decoder outside it is only an opt-in fast path (section 12) | wasmtime is heavily fuzzed but had several sandbox-escape CVEs in 2024-26, two rated critical in October 2026. The pure-Rust H.264 and HEVC decoders are all under 8 months old with single maintainers |
 | Unpacking and crypto | Standard-library tar; the reference age implementation | tar crate: two CVEs in 2026. zstd binding (C code): three advisories in October 2026. age crate still labelled beta |
 | Static binary on six targets | Pure Go, no C in the process | wasmtime is lowest-tier on Linux-musl and Windows-arm64; C libraries need a toolchain per target |
 | Decode speed | wazero about 4.7x slower than native in the one benchmark found (cryptography, not video) | wasmtime about 2.4x in the same benchmark |
@@ -77,8 +77,8 @@ wasmtime is at least twice as fast, work stops and the numbers go to the project
 only scaffolding exists, and the format, the simulator design and this document are language-neutral.
 
 **Outcome (spike S1).** wasmtime ran the same module 1.22-1.30x faster than wazero on the same clips,
-well under twice as fast, so work continues in Go. wazero alone decodes 4K HEVC at 3.1-3.9 fps; the
-pure-Go HEVC decoder of section 12 reaches the 4 fps target.
+well under twice as fast, so work continues in Go. wazero decodes 4K HEVC at 3.1-3.9 fps, below the
+4 fps target; that is accepted for version 1, with two opt-in speed-ups (section 12).
 
 ## 4. What limits throughput
 
@@ -310,9 +310,10 @@ side. qrvt's own memory, not counting engine instances, is targeted at 600 MB at
 Each engine instance adds its linear memory, which spike S1 measured at 155 MB (8-bit) and 252 MB
 (10-bit) when decoding 4K HEVC and 140-240 MB when encoding 4K, within a reserved limit of 512 MiB per
 instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of the 21 runs where it
-was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). A pure-Go HEVC decoder (section 12) needs at most about
-720 MB. The default worker count is the CPU count, reduced so that the workers, each counted at the
-larger of the two worst cases, 920 MB, stay within half of the machine's physical memory.
+was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). The default worker count is the CPU count, reduced so that the workers, each counted at the
+worst measured engine figure, 920 MB, stay within half of the machine's physical memory. The opt-in
+HEVC fast path of section 12 is not counted: its memory is not bounded against a crafted stream, which
+is why it is opt-in and only for recordings the user made themselves.
 
 ## 9. Payload
 
@@ -415,8 +416,13 @@ Costs a user should expect:
 - A full 4K grid at 60 fps is impractical: its video would need about 260 Mbit/s, beyond what stock
   players sustain, and no phone records enough bits to resolve it. 4K output remains available with
   larger cells, where it carries what 1080p does.
-- Decoding with the embedded engine is expected to take 1-3 times the recording's duration at 4K on
-  8 cores. `--ffmpeg system` should bring that near real time.
+- Decoding with the embedded engine, the default for every codec, is expected to take about 2.8 to 3.6
+  times the recording's duration for 4K60 HEVC on 8 cores (spike S1: 21.8 fps for 8-bit and 16.8 fps
+  for 10-bit with 8 instances on a 16-thread laptop), and about half that for 4K30. That is roughly 25
+  to 40% slower per core than the opt-in HEVC fast path (spike S1, same session: 26% slower for 8-bit,
+  37% for 10-bit). The two speed-ups, both outside the sandbox and both for recordings the user made
+  themselves, are `--ffmpeg system`, which should bring decoding near real time, and the HEVC
+  fast-path flag (named in M1) of section 12.
 
 ## 12. Video engine
 
@@ -431,34 +437,50 @@ Costs a user should expect:
   alternates `idr_pic_id` between 0 and 1 and consecutive IDR pictures must differ in it.
 - **Reading.** Each worker decodes its own time slice to raw frames, without auto-rotation, brightness
   only for grey modes. Captures identify themselves, so slices overlap freely and order does not matter.
-  H.264 is decoded by the embedded engine. HEVC is decoded by `github.com/gen2brain/h265` in its pure-Go
-  form (no assembly), after the engine has copied the stream out of its container (`-c copy`, Annex B):
-  spike S1 measured 4.7 fps (8-bit) and 5.0 fps (10-bit) per core at 4K with `Threads(1)`, against
-  3.1-3.9 for the engine, with luma byte-identical to the engine's on every frame. This decoder runs
-  outside the sandbox (SECURITY.md T1), so:
-  - Each decoder runs with `Threads(1)`. With more, it decodes wavefront rows and loop-filter bands on
-    goroutines it starts itself, and a panic there cannot be recovered by any caller. Parallelism comes
-    only from qrvt's own time slices, each decoded inside its own `recover` boundary.
-  - Before decoding, the wrapper checks every sequence parameter set (`hevc.SPSFormat` and its own
-    parse of `sps_max_dec_pic_buffering`) and hands the slice to the engine unless the stream is 4:2:0
-    at 8 or 10 bits, at most 7680 x 4320 luma samples (also set as `FrameSizeLimit`), with a decoded
-    picture buffer of at most 6 pictures. Six is the HEVC maximum (Annex A.4.2, `maxDpbPicBuf`) for
-    any picture larger than three quarters of its level's `MaxLumaPs`, which covers phone recordings:
-    3840 x 2160 at level 5.1 (8,294,400 > 6,684,672 samples), 7680 x 4320 at level 6.2
-    (33,177,600 > 26,738,688) and 1920 x 1080 at level 4.1 (2,073,600 > 1,671,168). A stream may
-    declare up to 16 only when its pictures are small for its level; those go to the engine. The x265
-    test clips declare 5. A change of picture size, bit depth or chroma format starts a new decoder.
-    Worst case per decoder: 7 pictures of 7680 x 4320 at 10 bits, about 720 MB (SECURITY.md section 5).
-  - Each picture has 10 s. The decoder cannot be cancelled, so a slice that exceeds it is abandoned and
-    decoded by the engine, and the rest of that recording goes to the engine only; a second abandoned
-    decode on a worker stops the decode with an error naming the limit.
-  - On any error, panic or refused stream the slice is decoded by the engine. CI decodes the test clips
-    with both and requires identical output.
-  - The assembly of `gen2brain/h265` must be excluded. Its `noasm` build tag is global:
-    `klauspost/reedsolomon` and `klauspost/compress` also honour it. The mechanism is decided in M1,
-    which first measures the whole release built with `-tags noasm` and accepts that only if
-    Reed-Solomon and zstd each stay above about 50 MB/s per core; otherwise a package-specific tag
-    upstream or a vendored copy without the assembly files. No release ships until it is in place.
+  Every codec, HEVC included, is decoded by the embedded engine inside the sandbox. That is the
+  owner's decision for version 1.
+  - *Engine speed at 4K HEVC* (spike S1, one instance, luma only, medians of five runs): 8-bit 3.9 fps,
+    or 4.5 with `-skip_loop_filter all`; 10-bit 3.6 fps, or 3.35 with it. The 4 fps target is not met
+    without skipping the loop filter; with it, it is met for 8-bit only, narrowly (3.8-4.7). Skipping
+    the loop filter stays off by default until the S2 or G1 recordings show it costs no cells.
+  - *HEVC fast path, opt-in.* With the HEVC fast-path flag (named in M1), HEVC is decoded instead by
+    `github.com/gen2brain/h265` (v0.2.5) in the qrvt process, outside the sandbox: 4.7 fps (8-bit) and
+    5.0 fps (10-bit) per core at 4K without its assembly, with luma byte-identical to the engine's. It
+    is in the same trust class as `--ffmpeg system`; the help text, section 13 and SECURITY.md say that
+    it is for recordings the user made themselves, that it runs outside the sandbox, and that its
+    memory is not bounded against a crafted stream: the decoder never checks a slice's reference
+    picture set against `sps_max_dec_pic_buffering_minus1`, and for every reference the set names that
+    is missing, `generateUnavailable` (`hevc/dpb.go`) allocates a full-size picture, up to 16 + 16
+    short-term and 32 long-term, about 6.5 GB at 7680 x 4320 or 1.6 GB at 3840 x 2160 (10 bits).
+  - *Protections of the fast path.* They reduce risk; they do not establish a bound. For version 1
+    there is no patch, no vendored copy and no slice-header parser.
+    - Exactly `Threads(1)`. With any other value, including 0, which means GOMAXPROCS, the decoder runs
+      wavefront rows and loop-filter bands on goroutines it starts itself, whose panics no caller can
+      recover. Parallelism comes only from qrvt's own time slices, each inside its own `recover`
+      boundary.
+    - Before decoding, every sequence parameter set is checked, and the slice goes to the engine unless
+      the stream is 4:2:0 (`hevc.SPSFormat`) at 8 or 10 bits, at most 7680 x 4320 luma samples (also
+      set as `FrameSizeLimit`), and `sps_max_dec_pic_buffering_minus1[i] + 1 <= 6` for every sub-layer
+      i, parsed by qrvt (the decoder keeps only the last sub-layer's value). Six is the HEVC maximum
+      (Annex A.4.2, `maxDpbPicBuf`) for any picture larger than three quarters of its level's
+      `MaxLumaPs`, which covers phone recordings: 3840 x 2160 at level 5.1 (8,294,400 > 6,684,672
+      samples), 7680 x 4320 at level 6.2 (33,177,600 > 26,738,688) and 1920 x 1080 at level 4.1
+      (2,073,600 > 1,671,168). The x265 test clips have one sub-layer with
+      `sps_max_dec_pic_buffering_minus1[0] = 4`, a buffer of 5. A change of picture size, bit depth or
+      chroma format starts a new decoder.
+    - The engine's `-c copy` of the slice to an Annex B stream runs before decoding, as its own engine
+      instance writing to the temporary directory, and finishes before the decoder starts, so a worker
+      never holds both; its memory counts as an engine instance.
+    - 10 s per picture. The decoder cannot be cancelled, so at the first picture that exceeds it the
+      whole decode stops with an error naming the limit; no abandoned decoder is left running while work
+      continues.
+    - On any error, panic or refused stream the slice is decoded by the engine. CI decodes the test
+      clips with both and requires identical output.
+    - The decoder's assembly is excluded. Its `noasm` build tag is global: `klauspost/reedsolomon` and
+      `klauspost/compress` also honour it. M1 measures the whole release built with `-tags noasm` and
+      accepts it only if Reed-Solomon and zstd each stay above about 50 MB/s per core; otherwise the
+      fast path needs a package-specific tag upstream. This concerns the fast path and those
+      libraries only, not the default path's safety.
 - **Backends.** One interface with three implementations: embedded (default), an external `ffmpeg`
   process for `--ffmpeg system`, and a raw-frame file backend for tests.
 - **Start-up.** The compiled module is cached on disk, so only the first run pays for compilation
@@ -485,9 +507,10 @@ Fallbacks if the spike shows the embedded engine is too slow:
 - *Encode*: a small in-repository H.264 writer. Because every cell is exactly one 4x4 block of constant
   value, only DC coefficients are needed. `Eyevinn/hi264` demonstrates the approach for 8- and 16-pixel
   blocks.
-- *Decode*: `gen2brain/h265`, a pure-Go HEVC decoder with outside contributors and conformance tests,
-  is now the HEVC path (see "Reading"). If it proves unreliable, the embedded engine decodes HEVC at
-  3.1-3.9 fps per instance at 4K (spike S1), below the 4 fps target.
+- *Decode*: `gen2brain/h265`, a pure-Go HEVC decoder with outside contributors and conformance tests.
+  Measured faster than the engine but not bounded in memory, it is only the opt-in HEVC fast path (see
+  "Reading"). The engine decodes HEVC at 3.1-3.9 fps per instance at 4K (spike S1), below the 4 fps
+  target, and that is accepted for version 1.
 
 ## 13. Command line
 
@@ -520,7 +543,8 @@ qrvt profiles | version | completion | man
 | `--overwrite` | decode | off | Allow existing files in the output folder to be replaced |
 | `--state-dir` | decode | none | Keep progress for resuming and merging |
 | `--report` | decode | none | Write a JSON report of the decode |
-| `--ffmpeg` | all | `embedded` | `embedded`, `system` or a path |
+| `--ffmpeg` | all | `embedded` | `embedded`, `system` or a path. `system` runs outside the sandbox: for recordings the user made themselves |
+| HEVC fast-path flag (named in M1) | decode, inspect | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three |
 | `--jobs` | all | CPU count | Worker count |
 | `--json`, `--plain`, `--quiet`, `--verbose` | all | | Output style |
 
@@ -910,3 +934,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 review: section 16 says Go comes from the pinned go.dev archive (SHA-256 checked) rather than a package manager, and wasmtime from its release archive; section 14 gains `Plan.CheckFrames` and `fec.MaxFrames`, by which an encoder refuses more than 4,194,300 frames (`Frames` is unchanged) |
 | 2026-11-13 | M0 spikes S1 and S3: section 3 records the wazero against wasmtime outcome (1.22-1.30x, continue in Go) and that HEVC is decoded outside the sandbox; section 4 (F3) says which x264 settings give 8.4 bits per cell; section 5 records the HDR output measurements (libaom AV1 10-bit unusable, H.264 High 10 the candidate, choice in M6); section 8 records the LDPC decoder as built and its measured speed (threshold not met), forbids Go experiments and amd64-only packages in release builds, and sizes the default worker count on the worst measured engine memory; section 12 gives the tuned x264 settings, even-length encode runs, the pure-Go HEVC path with its recover boundary, limits, engine fallback and the `noasm` tag problem, lazy module loading, and reserved linear memory |
 | 2026-11-13 | M0 review: section 12 runs the HEVC decoder with `Threads(1)` inside per-slice recover boundaries, checks parameter sets before decoding (4:2:0, 8 or 10 bits, at most 7680 x 4320, a buffer of at most 6 pictures, justified from HEVC Annex A.4.2), states the 10 s limit abandons rather than stops a decode, and plans the M1 measurement for the `noasm` tag; the engine reservation is 512 MiB and equals its ceiling; section 8 sizes workers on the larger worst case, 920 MB |
+| 2026-11-13 | M0 review round 2 and the owner's decision for version 1: every codec, HEVC included, is decoded by the sandboxed engine; the pure-Go `gen2brain/h265` is only an opt-in HEVC fast path, because it allocates a full picture for every missing reference a slice names (about 6.5 GB at 8K), so the 720 MB bound is withdrawn. Section 3 records this; section 8 does not count the fast path; section 11 gives the default decode time (about 2.8-3.6 times the duration for 4K60 on 8 cores, 25-40% slower per core than the fast path) and the two speed-ups; section 12 gives the engine's 4K HEVC figures, keeps skipping the loop filter off, and lists the fast path's protections (exactly `Threads(1)`, the per-sub-layer `sps_max_dec_pic_buffering_minus1 + 1 <= 6` check, `-c copy` before decoding, a stop at the first abandoned decode) as reducing risk, not bounding it; section 13 adds the fast-path flag |
