@@ -13,19 +13,20 @@ once the vision code exists (after milestone M2).
 ## Files to play
 
 They are in `recordings/patterns/` in the repository folder. Pick the one that matches the monitor's
-native resolution.
+native resolution: 1920x1080, 2560x1440, 3200x2000 or 3840x2160.
 The files are produced in `spikes/pattern/out/` and copied to `recordings/patterns/` for playing.
 
 | File | Size | Length | SHA-256 |
 | --- | --- | --- | --- |
 | `pattern-1920x1080.mp4` | 660 MB | 108 s | `2e59ff2546610169155527ce6a56de83a6353529b52fcd73894ec34aaad2b037` |
 | `pattern-2560x1440.mp4` | 957 MB | 72 s | `6e7850ba6b47770db2b0183a73fca9ef42c5862cf9c4e246d39c3d1fae9b30d9` |
+| `pattern-3200x2000.mp4` | 1.63 GB (1,631,897,386 bytes) | 72 s | `28cd60445310c66fd7f1b0c4375f2a51ee5d937a7874c6880cbd891b9a998429` |
 | `pattern-3840x2160.mp4` | 2.6 GB | 108 s | `b367a6b0b7061d39b026942224487aa2906ba5ffae176e0900aeb61f64099d4d` |
 
 - **What the pattern shows:** each file plays at 60 fps. It is a series of 4-second segments that step
   through:
   - display rates of 12, 30 and 60 code frames per second;
-  - cells of 4, 8 and 12 pixels (12 is skipped at 2560x1440);
+  - cells of 4, 8 and 12 pixels (12 is skipped at 2560x1440 and 3200x2000);
   - the modulations black-and-white, four greys and eight colours.
 - **Segment tables:** `pattern-<W>x<H>.json`, next to each video.
 - **Bitrate:** the 4K file runs at about 193 Mbit/s. Play it from a local disk with a player that can
