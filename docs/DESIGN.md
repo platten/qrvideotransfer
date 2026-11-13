@@ -1071,8 +1071,11 @@ by GoReleaser).
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
   alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice until then.
 - **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
-  Dependabot for Go modules and actions; govulncheck over the default build (the action, on all six
-  runners) and over the release build (`tools/dev vulncheck`, for linux, darwin and windows). Every action is pinned by a full commit SHA with a
+  Dependabot for Go modules and actions, except wazero and go-ffmpreg: every engine speed, memory and
+  sandbox figure of spike S1 was measured on their pinned versions, so they are updated by hand, with
+  stream D re-running the S1 measurements, no later than M7; govulncheck over the default build (the
+  action, on all six runners) and over the release build (`tools/dev vulncheck`, for linux, darwin and
+  windows). Every action is pinned by a full commit SHA with a
   version comment, every workflow declares top-level permissions (jobs widen them only where needed),
   and nothing runs on `pull_request_target`; a `tools/dev` test enforces this and CI also checks each
   comment's tag against the pinned commit. The licence check (go-licenses) allows only licences whose
@@ -1172,3 +1175,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream B, designer's note on PR #8: section 12 states that Reed-Solomon reconstruction with `noasm` measured 45-49 MB/s per core in the worst case, below the bar of about 50 MB/s, and why the tags are accepted anyway (seconds of Reed-Solomon against hours of video decoding; 30-50 times faster than one core of LDPC) |
 | 2026-11-13 | M1 stream G: section 16 says `install-tools` downloads the pinned tools as release archives with pinned SHA-256 (go-licenses through `go install`) and lists the new `tools/dev` tasks; section 17 names the workflows, the nightly placeholders, the workflow policy and its test, the licence allow-list (GPL-2.0 excluded), release-please being off until the owner enables it, provenance for every checksummed file, and `RELEASE_TAGS` in `.goreleaser.yaml` as the one definition of the release build tags, set to `noasm,nounsafe`, with which CI tests, measures coverage and fuzzes (one runner also tests untagged) |
 | 2026-11-13 | M1 stream G follow-up: section 16 adds the `vulncheck` task and govulncheck v1.9.0; section 17 scans the release build with govulncheck, lints both builds, and runs `setup.sh` in Fedora and Arch Linux containers |
+| 2026-11-13 | M1 stream G follow-up: section 17 says Dependabot ignores wazero and go-ffmpreg, which are updated by hand with the S1 measurements re-run (stream D) no later than M7 |
