@@ -79,6 +79,10 @@ func hostileWorker(mode string) int {
 		_ = writeMsg(os.Stdout, msgProgress, binary.BigEndian.AppendUint64(nil, 1<<62))
 		_ = writeMsg(os.Stdout, msgLog, []byte("\x1b[31mred\x1b[0m"))
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(7, "\x1b]0;title\x07bad"))
+	case "slowload": // compiling the engine on a slow machine: no progress, then the ready message
+		time.Sleep(3 * time.Second)
+		_ = writeMsg(os.Stdout, msgReady, nil)
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
 	case "early":
 	}
 	return 0
@@ -351,5 +355,18 @@ func TestWorkerJob(t *testing.T) {
 	}
 	if _, err := c.Write([]byte("x")); !errors.Is(err, errOutputLimit) {
 		t.Errorf("over the limit: %v", err)
+	}
+}
+
+// TestWorkerSlowLoad: the time a worker spends loading and compiling the engine, before it says it
+// is ready, is not a stall (a first run on a slow machine compiles for longer than the watchdog's
+// limit).
+func TestWorkerSlowLoad(t *testing.T) {
+	t.Parallel()
+	p, _ := testWorkers(t, "slowload")
+	err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
+		timeout: time.Second})
+	if err != nil {
+		t.Fatalf("a slow engine load was taken for a stall: %v", err)
 	}
 }

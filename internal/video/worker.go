@@ -31,6 +31,7 @@ const (
 	msgLog      = 'L' // worker to parent: the program's standard error
 	msgProgress = 'P' // worker to parent: bytes read from the input file so far (uint64)
 	msgExit     = 'X' // worker to parent: exit code (int32), then error text
+	msgReady    = 'R' // worker to parent: the engine is loaded and the program starts
 )
 
 const (
