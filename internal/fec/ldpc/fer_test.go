@@ -1,6 +1,7 @@
 package ldpc
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"os"
@@ -178,5 +179,33 @@ func logCrossing(t *testing.T, name string, newC func() *Code, from float64, fra
 			return
 		}
 		prevE, prevF = e, fer
+	}
+}
+
+// BenchmarkDecode measures one goroutine decoding the `normal` code (as spike S3 did) with early
+// stopping, on 64 noisy codewords at Eb/N0 relative to the net rate 1056/1542. Mbit/s counts sent
+// bits.
+func BenchmarkDecode(b *testing.B) {
+	for _, ebn0 := range []float64{2.5, 3.0, 4.0} {
+		b.Run(fmt.Sprintf("ebn0=%.1f", ebn0), func(b *testing.B) {
+			c := mustNew(b, 2)
+			r := rand.New(rand.NewPCG(1, 2))
+			dst := make([]byte, (c.N()+7)/8)
+			llrs := make([][]int8, 64)
+			for i := range llrs {
+				c.Encode(dst, randomBytes(r, c.ShardSize()))
+				llrs[i] = make([]int8, c.N())
+				channel(r, unpack(dst, c.N()), ebn0, float64(c.info)/float64(c.N()), llrs[i])
+			}
+			shard := make([]byte, c.ShardSize())
+			iters, i := 0, 0
+			for b.Loop() {
+				n, _ := c.Decode(shard, llrs[i%len(llrs)])
+				iters += n
+				i++
+			}
+			b.ReportMetric(float64(iters)/float64(i), "iters/op")
+			b.ReportMetric(float64(c.N())*float64(i)/b.Elapsed().Seconds()/1e6, "Mbit/s")
+		})
 	}
 }

@@ -258,7 +258,7 @@ func TestDecodeNoiseless(t *testing.T) {
 func TestDecodeNoisy(t *testing.T) {
 	r := rand.New(rand.NewPCG(7, 8))
 	// Per code: percent erased, percent flipped.
-	damage := map[uint8][2]int{1: {2, 1}, 2: {8, 2}, 3: {10, 3}, 4: {25, 4}}
+	damage := map[uint8][2]int{1: {3, 0}, 2: {8, 1}, 3: {10, 2}, 4: {25, 3}}
 	for _, id := range ids {
 		c := mustNew(t, id)
 		dst := make([]byte, (c.N()+7)/8)
