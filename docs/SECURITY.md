@@ -100,6 +100,9 @@ Implementation defaults, each a named constant with a test that exceeds it:
 | Unpacked size (`--max-size`) | 16 GiB. No ratio limit is applied, because a legitimate sparse file compresses by more than any sensible ratio |
 | Stream length | Free disk space less 1 GiB, and at most 64 GiB |
 | Manifest | 64 MiB and 1,000,000 entries |
+| scrypt work factor accepted (`ScryptWorkFactor`) | 18, which is 256 MiB of scrypt memory, and the factor the encoder writes. A higher factor in a received stream is refused before scrypt runs |
+| zstd window accepted (`MaxZstdWindow`) | 8 MiB, the window the encoder uses; a frame asking for more, including a single-segment frame with a larger content size, is refused before its buffers are allocated |
+| xz dictionary accepted (`XZDictCap`) | 8 MiB, the dictionary the encoder uses; a block asking for more is refused before the decoder sees its header |
 | Soft-bit store | 256 MB |
 | LDPC iterations per codeword | 25 |
 | Sessions tracked per decode | 1 |
@@ -275,3 +278,4 @@ instruction and states which versions receive fixes.
 | 2026-11-13 | M0 follow-up: section 5 states that `EngineStallTimeout` bounds stalls only, names how progress is measured (the counting `fs.FS` view when probing, output-file growth when copying), and adds `MaxDecodedPixelsPerInputByte` (10,000; checked from the probe and again while decoding; measured 16.6-75.5 on the S1 clips and pattern files); T1 gives the single-file view as an `fs.FS` mount, attaches the raw-frame output to the decoding instance and the output file to the copy instance, and rewords the fast-path sentence; section 9.5 adds the skip-picture test (M1 stream D) |
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc` |
 | 2026-11-13 | M1 stream A: section 6 states the key-file details implemented: canonical padded standard base64, one trailing LF or CRLF, a 4 KiB size limit, `keygen` never replaces a file, and the readable-key warning (any of the bits 0o077; not checked on Windows) |
+| 2026-11-13 | M1 stream A, review of PR 7: section 5 adds the decoder's limits on the scrypt work factor (18), the zstd window (8 MiB) and the xz dictionary (8 MiB). The xz limit is enforced by a guard that reads the xz block headers before the library does, because the library treats its dictionary setting as a minimum. All three are refused before anything is allocated for them |
