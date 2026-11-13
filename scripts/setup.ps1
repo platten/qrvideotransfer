@@ -5,7 +5,7 @@ Prints everything it will install, and asks, before installing anything.
 
 .DESCRIPTION
   scripts/setup.ps1          Go 1.27.4 and git, then `go run ./tools/dev install-tools`
-                             (golangci-lint v2.15.0, GoReleaser v2.20.2)
+                             (golangci-lint, GoReleaser, syft, actionlint, go-licenses)
   scripts/setup.ps1 -Spike   also a native ffmpeg with an HEVC encoder (libx265) and the wasmtime
                              command-line runner, which only spike S1 needs
   -Yes                       do not ask
@@ -90,14 +90,14 @@ if ($Spike) {
 if ($winget.Count -gt 0 -and -not (Have winget)) { throw 'setup: winget is required to install ' + ($winget -join ', ') }
 
 if ($goInstall) {
-    $plan += 'then, if missing: golangci-lint v2.15.0 and GoReleaser v2.20.2 (go install, through tools/dev)'
+    $plan += 'then, if missing, the pinned tools of tools/dev: golangci-lint, GoReleaser, syft and actionlint (release archives, SHA-256 checked) and go-licenses (go install)'
 } else {
     if ($goBin) { $env:PATH = "$goBin;$env:PATH" }
     $tools = & go run ./tools/dev install-tools -dry-run
     if (($tools -join "`n") -match 'Will install') {
         $plan += ($tools | Select-Object -Skip 1 | ForEach-Object { $_.Trim() })
     } else {
-        Write-Host 'ok  Go tools (golangci-lint, GoReleaser)'
+        Write-Host 'ok  pinned tools (golangci-lint, GoReleaser, syft, actionlint, go-licenses)'
     }
 }
 
