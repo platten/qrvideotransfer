@@ -260,10 +260,11 @@ func TestDeepManifestResources(t *testing.T) {
 		t.Fatalf("deep manifest took %v and %d MiB", d, sys>>20)
 	}
 
-	// A real extraction at maximum depth, twice into the same folder (the second time every folder
-	// exists and every file is replaced).
+	// A real extraction of a 2000-deep chain of folders, twice into the same folder (the second time
+	// every folder exists and every file is replaced). Folders cost the same at any depth; each file
+	// costs one resolution of its path, so a few suffice here.
 	start = time.Now()
-	tes := deepManifest(200, 2000)
+	tes := deepManifest(20, 2000)
 	a := archive(t, MarshalManifest(manifestFor(tes...)), tes...)
 	out = t.TempDir()
 	for _, overwrite := range []bool{false, true} {

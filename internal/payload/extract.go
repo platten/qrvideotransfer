@@ -30,7 +30,7 @@ type extractor struct {
 	overwrite bool
 	undo      []func() error  // how to reverse each change commit made, in order
 	placed    map[fileID]bool // files this transfer placed, kept with overwrite
-	created   []Entry         // folder entries commit created, in tree order
+	created   []bool          // by entry index: folders commit created
 	committed bool
 }
 
@@ -64,7 +64,7 @@ func newExtractor(dir string, entries []Entry, overwrite bool) (*extractor, erro
 	var r [8]byte
 	_, _ = rand.Read(r[:]) // never fails
 	x.stage = stagePrefix + hex.EncodeToString(r[:])
-	err = x.walk(x.check)
+	err = x.walk(x.check, nil)
 	if err == nil {
 		err = root.Mkdir(x.stage, 0o700)
 	}
@@ -100,15 +100,44 @@ func commonPrefix(a, b string) int {
 	return n
 }
 
+// visitFunc handles one path component during a walk: parent is the handle of the folder that holds
+// it (nil when that folder does not exist), name the component, p the whole path, and i the entry's
+// index (-1 for a folder that is not an entry). It returns a handle on p when p is now an existing
+// folder whose contents are to be visited, and nil otherwise.
+type visitFunc func(parent *os.Root, name, p string, i int) (*os.Root, error)
+
 // walk visits, in tree order, each folder on the way to an entry once and then the entry itself.
-// visit receives the path, the entry's index (-1 for a folder that is not an entry), and whether the
-// parent is known to be an existing folder; it returns whether the path now is one.
-func (x *extractor) walk(visit func(p string, i int, parent bool) (bool, error)) error {
+// Every operation goes through the handle of the parent folder, so it costs the same at any depth;
+// at most one handle per level of depth is open. leave, if not nil, is called for each component
+// after everything beneath it, again through its parent's handle.
+func (x *extractor) walk(visit visitFunc, leave func(parent *os.Root, name string, i int) error) (err error) {
 	type level struct {
-		end int // the component ends at this byte of the path
-		ok  bool
+		end  int // the component ends at this byte of the path
+		name string
+		i    int
+		dir  *os.Root
 	}
 	var stack []level
+	parent := func() *os.Root {
+		if len(stack) == 0 {
+			return x.root
+		}
+		return stack[len(stack)-1].dir
+	}
+	// unwind pops levels down to k, calling leave while nothing has failed, and closes their handles.
+	unwind := func(k int, err error) error {
+		for len(stack) > k {
+			l := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if err == nil && leave != nil && parent() != nil {
+				err = leave(parent(), l.name, l.i)
+			}
+			if l.dir != nil {
+				_ = l.dir.Close()
+			}
+		}
+		return err
+	}
 	prev := ""
 	for _, i := range x.order {
 		p := x.entries[i].Path
@@ -116,7 +145,9 @@ func (x *extractor) walk(visit func(p string, i int, parent bool) (bool, error))
 		for k < len(stack) && stack[k].end <= c && stack[k].end < len(p) && p[stack[k].end] == '/' {
 			k++
 		}
-		stack = stack[:k]
+		if err := unwind(k, nil); err != nil {
+			return unwind(0, err)
+		}
 		start := 0
 		if k > 0 {
 			start = stack[k-1].end + 1
@@ -128,48 +159,47 @@ func (x *extractor) walk(visit func(p string, i int, parent bool) (bool, error))
 			} else {
 				j = i
 			}
-			parent := len(stack) == 0 || stack[len(stack)-1].ok
-			ok, err := visit(p[:end], j, parent)
+			dir, err := visit(parent(), p[start:end], p[:end], j)
 			if err != nil {
-				return err
+				return unwind(0, err)
 			}
-			stack = append(stack, level{end, ok})
+			stack = append(stack, level{end, p[start:end], j, dir})
 			start = end + 1
 		}
 		prev = p
 	}
-	return nil
+	return unwind(0, nil)
 }
 
 // check refuses a path that exists in a form it may not replace. Below a missing folder nothing is
 // looked up.
-func (x *extractor) check(p string, i int, parent bool) (bool, error) {
-	if !parent {
-		return false, nil
+func (x *extractor) check(parent *os.Root, name, p string, i int) (*os.Root, error) {
+	if parent == nil {
+		return nil, nil
 	}
-	st, err := x.root.Lstat(p)
+	st, err := parent.Lstat(name)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return false, nil
+		return nil, nil
 	case err != nil:
-		return false, &ExistsError{p, fmt.Sprintf("cannot be created: %v", err)}
+		return nil, &ExistsError{p, fmt.Sprintf("cannot be created: %v", err)}
 	case i < 0 && !st.IsDir():
-		return false, &ExistsError{p, "exists and is not a folder"}
+		return nil, &ExistsError{p, "exists and is not a folder"}
 	case i < 0:
-		return true, nil
+		return parent.OpenRoot(name)
 	}
 	e := x.entries[i]
 	switch {
 	case e.Dir && st.IsDir():
-		return true, nil
+		return parent.OpenRoot(name)
 	case e.Dir:
-		return false, &ExistsError{e.Path, "exists and is not a folder"}
+		return nil, &ExistsError{e.Path, "exists and is not a folder"}
 	case !st.Mode().IsRegular():
-		return false, &ExistsError{e.Path, "exists and is not a regular file"}
+		return nil, &ExistsError{e.Path, "exists and is not a regular file"}
 	case !x.overwrite:
-		return false, &ExistsError{e.Path, "already exists (allow overwriting to replace it)"}
+		return nil, &ExistsError{e.Path, "already exists (allow overwriting to replace it)"}
 	}
-	return false, nil
+	return nil, nil
 }
 
 // staged names the staging file of entry i; the staging folder is flat.
@@ -212,7 +242,8 @@ func (s sparseWriter) Write(b []byte) (int, error) {
 // commit creates the folders and places every staged file, then sets folder modes and times, deepest
 // first. If any step fails, every change made so far is reversed.
 func (x *extractor) commit() error {
-	if err := x.walk(x.commitOne); err != nil {
+	x.created = make([]bool, len(x.entries))
+	if err := x.walk(x.commitOne, nil); err != nil {
 		for _, undo := range slices.Backward(x.undo) {
 			_ = undo() // best effort: a folder something else was put into stays
 		}
@@ -220,36 +251,47 @@ func (x *extractor) commit() error {
 	}
 	x.committed = true
 	err := x.root.RemoveAll(x.stage) // with it go the files that overwriting replaced
-	for _, e := range slices.Backward(x.created) {
-		err = errors.Join(err, x.root.Chmod(e.Path, os.FileMode(e.perm())), x.root.Chtimes(e.Path, e.MTime, e.MTime))
+	// A second walk sets the modes and times of the folders it created, after their contents.
+	open := func(parent *os.Root, name, _ string, i int) (*os.Root, error) {
+		if i >= 0 && !x.entries[i].Dir {
+			return nil, nil
+		}
+		return parent.OpenRoot(name)
 	}
-	return err
+	return errors.Join(err, x.walk(open, func(parent *os.Root, name string, i int) error {
+		if i < 0 || !x.created[i] {
+			return nil
+		}
+		e := x.entries[i]
+		return errors.Join(parent.Chmod(name, os.FileMode(e.perm())), parent.Chtimes(name, e.MTime, e.MTime))
+	}))
 }
 
 // commitOne creates a folder or places a file.
-func (x *extractor) commitOne(p string, i int, _ bool) (bool, error) {
+func (x *extractor) commitOne(parent *os.Root, name, p string, i int) (*os.Root, error) {
 	if i >= 0 && !x.entries[i].Dir {
-		return false, x.place(i, x.entries[i])
+		return nil, x.place(i, x.entries[i])
 	}
 	mode := os.FileMode(0o750)
 	if i >= 0 {
 		mode = 0o700 // the entry's mode is set at the end, when nothing more goes into it
 	}
-	err := x.root.Mkdir(p, mode)
+	err := parent.Mkdir(name, mode)
 	switch {
 	case err == nil:
 		x.undo = append(x.undo, func() error { return x.root.Remove(p) })
 		if i >= 0 {
-			x.created = append(x.created, x.entries[i])
+			x.created[i] = true
 		}
-		return true, nil
 	case errors.Is(err, fs.ErrExist):
-		if st, err := x.root.Lstat(p); err != nil || !st.IsDir() {
-			return false, &ExistsError{p, "exists and is not a folder"}
+		if st, err := parent.Lstat(name); err != nil || !st.IsDir() {
+			return nil, &ExistsError{p, "exists and is not a folder"}
 		}
-		return true, nil // an existing folder is merged into, and left as it was
+		// an existing folder is merged into, and left as it was
+	default:
+		return nil, err
 	}
-	return false, err
+	return parent.OpenRoot(name)
 }
 
 // place moves staged file i to its path. Without overwrite it hard-links the staged file there, which
@@ -265,11 +307,11 @@ func (x *extractor) place(i int, e Entry) error {
 		}
 	}
 	// Times, mode and identity are taken on the staged name, which is short to resolve: a hard link
-	// shares them, and a rename keeps them. Only on Windows is the mode set after placing, because a
+	// shares them, and a rename keeps them. A read-only mode is set after placing on Windows, because a
 	// read-only staged name could not be removed there.
 	s := x.staged(i)
 	err := x.root.Chtimes(s, e.MTime, e.MTime)
-	if err == nil && runtime.GOOS != "windows" {
+	if err == nil && !x.modeLater(e) {
 		err = x.root.Chmod(s, os.FileMode(e.perm()))
 	}
 	if err == nil && x.overwrite {
@@ -297,7 +339,7 @@ func (x *extractor) place(i int, e Entry) error {
 			x.undo = append(x.undo, func() error { return x.root.Remove(e.Path) })
 		}
 	}
-	if err == nil && runtime.GOOS == "windows" {
+	if err == nil && x.modeLater(e) {
 		err = x.root.Chmod(e.Path, os.FileMode(e.perm()))
 	}
 	return err
@@ -327,6 +369,12 @@ func (x *extractor) setAside(i int, p string) error {
 	}
 	x.undo = append(x.undo, func() error { return x.root.Rename(backup, p) })
 	return nil
+}
+
+// modeLater reports whether a file's mode must be set after it is placed: on Windows, a read-only
+// staged name could not be removed.
+func (x *extractor) modeLater(e Entry) bool {
+	return runtime.GOOS == "windows" && e.perm()&0o200 == 0
 }
 
 // close removes the staging folder unless commit got past placing the files.
