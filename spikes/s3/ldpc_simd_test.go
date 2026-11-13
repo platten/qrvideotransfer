@@ -3,42 +3,38 @@
 package s3
 
 import (
+	"bytes"
 	"math/rand/v2"
 	"testing"
 	"time"
 )
 
 // TestSimdMatchesScalar checks that the vector decoder, whose arithmetic is
-// the same as the scalar one, fails on the same number of frames.
+// the same as the scalar one, makes the same hard decision on every
+// information bit of every frame, and the same posteriors.
 func TestSimdMatchesScalar(t *testing.T) {
 	c := normal()
 	d, v := NewDecoder(c), NewSimdDecoder(c)
 	rate := float64(c.Info) / float64(c.Sent)
 	rng := rand.New(rand.NewPCG(11, 12))
 	o1, o2 := make([]uint8, c.Info), make([]uint8, c.Info)
-	fe1, fe2 := 0, 0
+	fe := 0
 	for f := 0; f < 1500; f++ {
 		u := randomInfo(rng, c.Info)
 		llr := channel(rng, c.SentBits(c.Encode(u)), 2.25, rate)
 		d.Decode(llr, 10, o1)
 		v.Decode(llr, 10, o2)
-		for i := range u {
-			if o1[i] != u[i] {
-				fe1++
-				break
-			}
+		if !bytes.Equal(o1, o2) {
+			t.Fatalf("frame %d: decisions differ", f)
 		}
-		for i := range u {
-			if o2[i] != u[i] {
-				fe2++
-				break
-			}
+		if d.L != v.L {
+			t.Fatalf("frame %d: posteriors differ", f)
+		}
+		if !bytes.Equal(o1, u) {
+			fe++
 		}
 	}
-	t.Logf("Eb/N0 2.25 dB, 10 iterations, 1500 frames: scalar %d frame errors, simd %d", fe1, fe2)
-	if fe2 != fe1 {
-		t.Fatalf("simd and scalar decoders differ: %d vs %d frame errors", fe2, fe1)
-	}
+	t.Logf("Eb/N0 2.25 dB, 10 iterations, 1500 frames: identical decisions and posteriors; %d frame errors", fe)
 }
 
 func BenchmarkSimdDecode(b *testing.B) {

@@ -92,7 +92,7 @@ func (c *Code) Syndrome(cw []uint8) int {
 	return bad
 }
 
-// Sent returns the sent bits of a mother codeword: info then parity.
+// SentBits returns the sent bits of a mother codeword: info then parity.
 func (c *Code) SentBits(cw []uint8) []uint8 {
 	return append(append([]uint8(nil), cw[:c.Info]...), cw[c.K:]...)
 }
