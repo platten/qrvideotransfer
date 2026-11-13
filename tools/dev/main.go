@@ -24,15 +24,17 @@ import (
 // Pinned versions (IMPLEMENTATION_PROMPT.md section 3).
 const goVersion = "go1.27.4"
 
-// tool is a developer tool installed with go install.
+// tool is a pinned developer tool.
 type tool struct {
 	name, version, pkg string
 	versionArgs        []string
+	asset              func(goos, goarch string) string
+	sha256             map[string]string
 }
 
 var tools = []tool{
-	{"golangci-lint", "2.15.0", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0", []string{"version"}},
-	{"goreleaser", "2.20.2", "github.com/goreleaser/goreleaser/v2@v2.20.2", []string{"--version"}},
+	{name: "golangci-lint", version: "2.15.0", pkg: "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0", versionArgs: []string{"version"}},
+	{name: "goreleaser", version: "2.20.2", pkg: "github.com/goreleaser/goreleaser/v2@v2.20.2", versionArgs: []string{"--version"}},
 }
 
 // targets are the six release targets.

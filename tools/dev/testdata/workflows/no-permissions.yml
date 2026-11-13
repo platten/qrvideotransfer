@@ -1,0 +1,10 @@
+# Violation: permissions only at job level, none at the top.
+name: no-permissions
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - run: "true"

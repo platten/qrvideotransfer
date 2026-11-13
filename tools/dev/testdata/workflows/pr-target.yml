@@ -1,0 +1,12 @@
+# Violation: pull_request_target as an event key.
+name: pr-target
+on:
+  pull_request_target:
+    types: [opened]
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: "true"

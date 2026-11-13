@@ -1,0 +1,9 @@
+# Violation: blanket top-level permissions.
+name: write-all
+on: push
+permissions: write-all
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: "true"
