@@ -9,10 +9,11 @@ version: 2
 project_name: qrvt
 
 env:
-  # RELEASE_TAGS is the one place where the release build's Go build tags are defined (none by
-  # default; for example `noasm`). tools/dev build reads this line too, so local and release builds
-  # agree. A comma-separated list.
-  - RELEASE_TAGS=
+  # RELEASE_TAGS is the one place where the release build's Go build tags are defined, as a
+  # comma-separated list. tools/dev build reads this line too, so local and release builds agree.
+  # `noasm,nounsafe` excludes hand-written assembly and unsafe code from dependencies that honour
+  # the tags (DESIGN.md section 12; measured by M1 stream B).
+  - RELEASE_TAGS=noasm,nounsafe
 
 before:
   hooks:
