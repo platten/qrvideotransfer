@@ -97,7 +97,7 @@ func (l *Layout) structure() []RectQ {
 	rs := b[:]
 	for c := range Corner(4) {
 		rs = append(rs, l.Separator(c),
-			l.mirror(c, RectQ{l.c0 + 11*l.ux/2, l.c0 - 7*l.uy/2, l.c0 + 129*l.ux/2, l.c0 + l.uy/2}),   // header copy
+			l.mirror(c, RectQ{l.c0 + 11*l.ux/2, l.c0 - 7*l.uy/2, l.c0 + 129*l.ux/2, l.c0 + l.uy/2}),    // header copy
 			l.mirror(c, RectQ{l.c0 + 129*l.ux/2, l.c0 - 7*l.uy/2, l.c0 + 161*l.ux/2, l.c0 - 3*l.uy/2}), // palette strip
 		)
 	}
