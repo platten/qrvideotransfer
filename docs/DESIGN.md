@@ -322,11 +322,24 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   Our decoder is within 0.2 dB of every reference (better than [A] and [B] where it runs more
   iterations). A cross-check from Roth et al., IEEE ASSCC 2010, Fig. 5 (Z = 81, 10 iterations of a
   5-bit offset min-sum) gives 2.16 dB and 3.71 dB for rates 1/2 and 5/6.
-- The shortened inner codes reach FER 1e-2 (BPSK, AWGN, same test) at Eb/N0 per information bit
-  (CRC included) of `fast` 3.46 dB, `normal` 2.48 dB, code 3 2.07 dB and `robust` 2.20 dB; per sent
-  bit (Es/N0 = Eb/N0 + 10 log10(net rate)), which is what the noise of a cell sets, that is 2.55,
-  0.70, -0.14 and -2.51 dB. `robust` buys its 2.4 dB over code 3 with 56% of the payload per sent bit: shortening
-  by 428 of 972 bits spends much of the rate-1/2 code's redundancy.
+- The shortened inner codes that ship (ids 1-4) have no published curves, so they are checked against
+  the binary-input AWGN capacity limit for their rate, counted with the CRC: R = (8S + 32) / N sent
+  bits (`TestShortenedErrorRate`, the weaker check). Measured (BPSK, AWGN, same channel as above):
+
+  | Code | R | Capacity limit | FER 1e-2 at Eb/N0 | Gap | Es/N0 at FER 1e-2 |
+  | --- | --- | --- | --- | --- | --- |
+  | 1 `fast` | 0.829 | 2.32 dB | 3.46 dB | 1.14 dB | 2.64 dB |
+  | 2 `normal` | 0.685 | 1.17 dB | 2.48 dB | 1.31 dB | 0.84 dB |
+  | 3 | 0.620 | 0.79 dB | 2.07 dB | 1.28 dB | -0.01 dB |
+  | 4 `robust` | 0.359 | -0.40 dB | 2.20 dB | 2.60 dB | -2.25 dB |
+
+  Es/N0 = Eb/N0 + 10 log10(R) is per sent bit, which is what the noise of a cell sets. The test
+  asserts FER below 1e-2 at the limit plus 2.5 dB for codes 1-3. **`robust` misses that fallback
+  criterion by about 0.1 dB.** The cause is FORMAT.md's frozen shortening of 428 of the rate-1/2 mother
+  code's 972 information bits, not the decoder: the same decoder puts the mother code within 0.01 dB of
+  its published curve and 1.63 dB from its own limit. For `robust` the test is a regression check at
+  the limit plus 2.8 dB, on 10,000 frames because its waterfall is shallow. `robust` buys its 2.24 dB
+  of Es/N0 over code 3 with 56% of the payload per sent bit.
 - Codeword bits are spread over the whole frame by a pseudo-random permutation with a per-frame rotation,
   so glare in one corner costs every codeword a little instead of a few codewords everything.
 - No mature Go library does soft-decision LDPC, so this is written in the repository. The DVB-S2
@@ -348,7 +361,11 @@ through soft-bit summing, which a fountain code would not give.
 
 **Memory.** One Reed-Solomon worker holds one block: at most about 13 MB plus scratch, bounded at 32 MB.
 Shards live in a temporary file of (1 + parity) times the stream size, on both the encode and the decode
-side. qrvt's own memory, not counting engine instances, is targeted at 600 MB at 1080p and 1.5 GB at 4K.
+side. The file (`rs.Store`) adds 8 bytes per shard (a marker and a CRC-32C, so a write torn by a crash
+reads back as absent), is created sparse (on Windows marked sparse with `FSCTL_SET_SPARSE` first, since
+NTFS would otherwise allocate the whole size; on FAT32 it occupies its full size at once), and is
+refused for a plan that holds a stream longer than 64 GiB (`rs.MaxStreamSize`, SECURITY.md section 5).
+`rs.StoreSize` gives its size for the caller's free-space check. qrvt's own memory, not counting engine instances, is targeted at 600 MB at 1080p and 1.5 GB at 4K.
 Each engine instance adds its linear memory, which spike S1 measured at 155 MB (8-bit) and 252 MB
 (10-bit) when decoding 4K HEVC and 140-240 MB when encoding 4K, within a reserved limit of 512 MiB per
 instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of the 21 runs where it
@@ -545,14 +562,18 @@ Costs a user should expect:
       | zstd compress, text, `SpeedBestCompression` | 34 | 35 | 38 | 37 |
       | zstd compress, random, default / best | 1,931 / 338 | 2,117 / 291 | 1,966 / 310 | 1,994 / 293 |
 
-      Decision: **the whole release can be built with `-tags noasm,nounsafe`**, so that no third-party
-      assembly and no third-party `unsafe` runs on decoded data. On the decode side, zstd stays far
-      above the bar (860 MB/s and more), and Reed-Solomon reconstruction of a full block reaches the
-      bar at its edge: 45-49 MB/s per core when a block has lost all M data shards it can, 53-57 MB/s
-      at a tenth of that. That is about 50, and blocks are reconstructed in parallel, one per worker,
-      far faster than a recording delivers shards. The cost is on the encode side: Reed-Solomon
-      encoding falls from about 2 GB/s to about 130 MB/s per core. `nounsafe` costs nothing
-      measurable. Two numbers do not depend on the tags: reconstruction costs at least about 0.5-1 ms per block
+      Decision: **the whole release can be built with `-tags noasm,nounsafe`**. That removes the
+      assembly and `unsafe` of `klauspost/reedsolomon`, `klauspost/compress` (which comes in through
+      `internal/payload`) and `klauspost/cpuid`, and nothing else: wazero (the sandbox itself),
+      `golang.org/x/sys` and go-ffmpreg keep their `unsafe` and assembly whatever the tags, so the
+      claim is only that those three libraries run no assembly or `unsafe` on decoded data. On the
+      decode side zstd stays far above the bar (860 MB/s and more). Reed-Solomon reconstruction of a
+      full block is **marginally below the bar**: 45-49 MB/s per core when a block has lost all the M
+      data shards it can, 53-57 MB/s at a tenth of that. It is accepted on a quantified basis: at
+      45 MB/s one core reconstructs 30-50 times faster than one core decodes LDPC (10-14 Mbit/s of sent
+      bits, about 1 MB/s of shards at the `normal` rate), so Reed-Solomon stays a small part of decode
+      time. The cost is on the encode side: Reed-Solomon encoding falls from about 2 GB/s to about
+      130 MB/s per core. `nounsafe` costs nothing measurable. Two numbers do not depend on the tags: reconstruction costs at least about 0.5-1 ms per block
       whatever its size (part of the work is a transform over the whole GF(2^16) field, so a block of
       100 shards runs at about 20 MB/s; a stream has blocks of fewer than 16,385 shards only when it is
       a single block of under 2-6 MB, so this is about a millisecond per stream), and zstd at `SpeedBestCompression` compresses text at about 35 MB/s per core with or
@@ -1031,3 +1052,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc`; section 14's `DecodeOptions` (and the root package's `AnalyzeOptions` and `InspectOptions`) gain `UnsandboxedHEVC` |
 | 2026-11-13 | M1 stream B: section 8 describes the encoder and the decoder as built (int16 bounds, pinned shortened bits, check before the first iteration), records the production decoder's speed beside the S3 decoder, and records the error-rate test: published FER 1e-2 points for the four 802.11n n = 1944 mother codes with their sources, our measured points (all within 0.2 dB), and the shortened codes' points; section 12 records the `noasm`/`nounsafe` measurement and the decision that the whole release can be built with `-tags noasm,nounsafe` |
+| 2026-11-13 | M1 stream B, review of PR #8: section 8 checks the four shipped inner codes against the binary-input AWGN capacity limit with the rate counted with the CRC (codes 1-3 within 2.5 dB; `robust` 2.60 dB away, missing that criterion by about 0.1 dB because of the frozen shortening), corrects the Es/N0 values for the CRC, and states the shard store's sparse file on Windows and its 64 GiB stream cap; section 12 limits the `noasm,nounsafe` claim to the three `klauspost` libraries and calls Reed-Solomon reconstruction marginally below the bar, accepted because it is 30-50 times faster than LDPC decoding |
