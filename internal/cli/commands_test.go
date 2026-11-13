@@ -233,7 +233,7 @@ func TestPassphraseFileContent(t *testing.T) {
 	for _, tc := range []struct{ path, want string }{
 		{long, "the first line is longer than 4095 bytes"},
 		{exact, "the first line is longer than 4095 bytes"},
-		{write("nul", "pass\x00word\n"), "the first line holds control characters"},
+		{write("zero", "pass\x00word\n"), "the first line holds control characters"},
 		{write("esc", "pass\x1b[2Jword"), "the first line holds control characters"},
 		{write("bin", "\x01\x02\x03"), "the first line holds control characters"},
 		{write("bomonly", "\ufeff\n"), "the first line is empty"},
