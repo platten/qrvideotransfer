@@ -570,13 +570,14 @@ func TestHostileFiles(t *testing.T) {
 
 // TestSkipPictures: a small file of many skip pictures is refused from the probe by
 // MaxDecodedPixelsPerInputByte; the same file in a container that lies about its length is stopped
-// while decoding (SECURITY.md 9.5). Both stay under 1 GiB and finish within 60 s.
+// while decoding (SECURITY.md 9.5). Both stay under 1 GiB and finish within 60 s. Not parallel, so
+// that the process's heap is this decode's: the Go heap peak, which includes the instance's whole
+// 512 MiB reservation, is sampled while it runs.
 func TestSkipPictures(t *testing.T) {
-	t.Parallel()
 	b := embedded(t)
 	_, err := b.NewDecoder(t.Context(), clip("skip.mkv"), DecodeConfig{BrightnessOnly: true})
 	var le *LimitError
-	if !errors.As(err, &le) || le.Limit != "MaxDecodedPixelsPerInputByte" || le.Value < 200_000 || le.Max != 10_000 ||
+	if !errors.As(err, &le) || le.Limit != "MaxDecodedPixelsPerInputByte" || le.Value < 100_000 || le.Max != 10_000 ||
 		!strings.Contains(err.Error(), "trim") {
 		t.Fatalf("probe check: %v", err)
 	}
@@ -594,9 +595,26 @@ func TestSkipPictures(t *testing.T) {
 		t.Fatal(err)
 	}
 	var p peakAlloc
+	runtime.GC()
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	heap0 := ms.HeapAlloc
+	var peak atomic.Uint64
+	stop := make(chan struct{})
+	sampled := make(chan struct{})
+	go func() {
+		defer close(sampled)
+		var m runtime.MemStats
+		for {
+			runtime.ReadMemStats(&m)
+			peak.Store(max(peak.Load(), m.HeapAlloc))
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}()
 	start := time.Now()
 	d, err := b.NewDecoder(withPeak(t.Context(), &p), lying, DecodeConfig{BrightnessOnly: true})
 	if err != nil {
@@ -612,7 +630,8 @@ func TestSkipPictures(t *testing.T) {
 			n++
 		}
 	}
-	runtime.ReadMemStats(&ms)
+	close(stop)
+	<-sampled
 	_ = d.Close()
 	if !errors.As(err, &le) || le.Limit != "MaxDecodedPixelsPerInputByte" {
 		t.Fatalf("decoding the lying file: %v after %d frames", err, n)
@@ -620,10 +639,12 @@ func TestSkipPictures(t *testing.T) {
 	if el := time.Since(start); el > 60*time.Second {
 		t.Errorf("took %v", el)
 	}
-	if used := p.peak.Load() + (ms.HeapAlloc - min(ms.HeapAlloc, heap0)); used > 1<<30 {
-		t.Errorf("peak memory about %d MiB", used>>20)
+	if used := peak.Load() - min(peak.Load(), heap0); used > 1<<30 || p.peak.Load() > EngineMemoryLimit {
+		t.Errorf("peak heap growth %d MiB, linear memory %d MiB", used>>20, p.peak.Load()>>20)
+	} else {
+		t.Logf("peak Go heap growth %d MiB, linear memory included", used>>20)
 	}
-	if n > 70 {
+	if n > 50 {
 		t.Errorf("%d frames decoded before the stop", n)
 	}
 	t.Logf("stopped after %d frames: %v; peak linear memory %d MiB", n, err, p.peak.Load()>>20)

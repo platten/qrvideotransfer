@@ -22,9 +22,9 @@ $FF -f lavfi -i "$SRC,format=yuv420p10le" -frames:v 24 -c:v libx265 -preset fast
 $FF -f lavfi -i "color=gray:s=64x64:r=30,noise=alls=60:allf=t+u,format=yuv444p" -frames:v 4 \
   -c:v libx265 -preset fast -crf 30 -x265-params "log-level=error" hevc444.mp4
 
-# A small file of many skip pictures: 1,800 frames of flat grey at 3840x2160 (one minute at 30 fps)
-# in about 56 KB, refused by MaxDecodedPixelsPerInputByte. Matroska, so that a test can rewrite its
+# A small file of many skip pictures: 600 frames of flat grey at 3840x2160 (20 s at 30 fps)
+# in about 36 KB, refused by MaxDecodedPixelsPerInputByte. Matroska, so that a test can rewrite its
 # Duration element to make the container lie.
-$FF -f lavfi -i "color=gray:s=3840x2160:r=30" -frames:v 1800 -c:v libx264 -preset ultrafast -qp 51 \
+$FF -f lavfi -i "color=gray:s=3840x2160:r=30" -frames:v 600 -c:v libx264 -preset ultrafast -qp 51 \
   -g 100000 -bf 0 skip.mkv
 ls -l hevc8.mp4 hevc10hlg.mp4 hevc444.mp4 skip.mkv
