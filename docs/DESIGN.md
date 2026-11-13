@@ -522,7 +522,7 @@ type EncodeOptions struct {
     Inputs      []string
     Output      string
     Profile     Profile
-    Compression Compression            // Auto, Zstd, XZ, None
+    Compression Compression            // CompressAuto, CompressZstd, CompressXZ, CompressNone
     Passphrase  func() (string, error) // nil: no encryption
     SignKey     []byte                 // nil: unsigned
     DryRun      bool
@@ -548,10 +548,10 @@ type DecodeOptions struct {
 
 type Event struct {
     Time        time.Time
-    Stage       Stage     // Pack, Protect, Render, EncodeVideo, DecodeVideo, Demodulate, Repair, Verify, Unpack
-    Kind        EventKind // Started, Progress, Finished, Stats, Warning
+    Stage       Stage     // StagePack, StageProtect, StageRender, StageEncodeVideo, StageDecodeVideo, StageDemodulate, StageRepair, StageVerify, StageUnpack
+    Kind        EventKind // KindStarted, KindProgress, KindFinished, KindStats, KindWarning
     Done, Total int64
-    Unit        Unit      // Bytes, Frames, Blocks
+    Unit        Unit      // UnitBytes, UnitFrames, UnitBlocks
     Stats       *Stats    // captures, frames seen and total, clean fraction, raw bit error rate, codewords ok, blocks ready
     Warn        *Warning  // code and text: ExposureTooLong, Clipping, FramesDropped, ...
 }
@@ -575,7 +575,7 @@ type InnerCode interface {
 }
 func Shape(streamLen int64, shardSize int) (blocks, k int, err error) // FORMAT.md section 11
 func DefaultM(k, parityPercent int) int
-type Plan struct{ Blocks, K, M, ShardSize int; Packets int64; Seed uint32 }
+type Plan struct{ Blocks, K, M, ShardSize int; Packets int64; Seed uint32 } // and an unexported cache of the shard order
 func NewPlan(streamLen int64, shardSize, m int, seed uint32) (Plan, error)
 func (p Plan) Locate(packet int64) (block, shard int)
 func (p Plan) Frames(codewordsPerFrame int) int
@@ -835,3 +835,9 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | iPhone 4K60 recording size | https://www.idownloadblog.com/?p=532811 | Third-party report |
 | IEEE 802.11n LDPC matrices | IEEE Std 802.11-2020 Annex F; https://github.com/simgunz/802.11n-ldpc | Not opened; the build plan requires two sources that agree |
 | Memory-safe language guidance | https://www.nsa.gov/Press-Room/Press-Releases-Statements/Press-Release-View/Article/4223298/ | Verified through secondary coverage |
+
+## Change log
+
+| Date | Change |
+| --- | --- |
+| 2026-11-13 | M0: section 14 names the enum constants with a prefix (`StagePack`, `KindStats`, `UnitBytes`, `CompressAuto`, ...) because `Stats` and `Warning` are also type names; `Plan` caches its shard order in an unexported field so that `Locate` is O(1) |

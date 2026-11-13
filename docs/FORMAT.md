@@ -60,6 +60,8 @@ MP4 must reproduce every cell exactly.
 
 GridX = W / P and GridY = H / P. The grid origin is the frame origin. Limits: GridX and GridY at most
 2047; H at least 480. An encoder must not produce a video whose width or height is not a multiple of P.
+Since P is at most 16, GridY is at least 30, and section 4 needs Dx > 0, that is 15 GridX > GridY. A
+decoder must reject a header whose grid breaks any of these limits.
 (The command line reduces a requested size to the nearest lower multiples of P and reports the size used.)
 
 | Preset | W x H | Grid at P = 4 |
@@ -360,6 +362,10 @@ The encoder default for M is `max(1, ceil(K * parity / 100))` with parity = 20.
 
 Packets beyond T-1 wrap to the start, so the last frames repeat some early packets.
 
+B travels in 3 bytes and F in 22 bits, so B is at most 16,777,215 and F at most 4,194,300. An encoder
+must refuse a stream, shard size, M and C for which either is exceeded. (The block limit is reached
+first only beyond about 32 TiB at 64-byte shards; the frame limit is the practical one.)
+
 ## 12. Stream
 
 The stream is what the outer code protects. Its length L includes every field below.
@@ -454,7 +460,7 @@ the interleaver rows were also reproduced independently by a reviewer.
 | SplitMix64 | state 0, first four outputs | `e220a8397b1dcdaf`, `6e789e6aa1b965f4`, `06c45d188009454f`, `f88bb8a8724c81ec` |
 | Shuffle | N = 10, seed = 1 | 9, 0, 1, 4, 8, 2, 3, 7, 6, 5 |
 | CRC-16 | ASCII `123456789` | `29b1` |
-| Header fields | version 1, session `1234`, frame index 5, F 656, grid 480 x 270, modulation 2, inner code 2 | bytes `11 23 40 00 01 40 02 90 3c 04 39 20`, CRC-16 `03c7` |
+| Header fields | version 1, session `0x1234`, frame index 5, F 656, grid 480 x 270, modulation 2, inner code 2 | bytes `11 23 40 00 01 40 02 90 3c 04 39 20`, CRC-16 `03c7` |
 | Interleave seed | session 0, grid 480 x 270, modulation 2, inner code 2 | input bytes `00 00 01 e0 01 0e 02 02`, Seed `6eca5aab84a46a75` |
 | Position, frame 0 | codeword 1, sent bit 0 | rho 0, q = 1,885 (data cell 942, second bit), scramble bit 1 |
 | Position, frame 1 | codeword 1, sent bit 0 | rho 209,393, q = 138,625 (data cell 69,312, second bit), scramble bit 0 |
@@ -476,3 +482,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | Date | Change |
 | --- | --- |
 | 2026-11-13 | First draft |
+| 2026-11-13 | M0: section 3 states the grid limits a decoder enforces (GridY at least 30, 15 GridX > GridY); section 11 states the limits on B and F; section 13 writes the example session as `0x1234`. All numbers of sections 5.3 and 13 reproduced by the implementation and by an independent script; no value changed |
