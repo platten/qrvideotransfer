@@ -494,16 +494,21 @@ Costs a user should expect:
   `WithMemoryCapacityFromMax`, never grown by reallocation, since otherwise the discarded copies double
   the resident memory (spike S1). A 1 GiB reservation raised the worst-case process memory from 920 MB
   to 1,434 MB, so the limit stays at 512 MiB.
-- **Sandbox.** When decoding, the module sees only the input file, read-only, where the runtime allows
-  that, and otherwise the file's directory read-only. When encoding it sees one output directory. The
-  instance that copies an HEVC stream out of its container for the fast path sees the input the same
-  way, read-only, and one temporary directory, writable; nothing else. It has no network and a memory
-  ceiling.
+- **Sandbox.** When decoding, the module sees only the input file, read-only, through an `fs.FS`
+  wrapper mounted with `FSConfig.WithFSMount` that exposes that one file and counts its reads. When
+  encoding it sees one output directory. The instance that copies an HEVC stream out of its container
+  for the fast path sees the input the same way, read-only, and one temporary directory, writable, where
+  its output file goes; nothing else. It has no network and a memory ceiling.
 - **Watchdog.** qrvt creates the wazero runtime and passes it to go-ffmpreg, with
   `RuntimeConfig.WithCloseOnContextDone(true)`: without it, cancelling a context cannot interrupt
-  running Wasm. An instance that makes no progress for 30 s (no output frame when decoding; no output
-  or input consumed when probing or copying) is cancelled and the decode stops with an error naming
-  the limit (SECURITY.md section 5, `EngineStallTimeout`). The option adds periodic checks to the
+  running Wasm. An instance that makes no progress for 30 s is cancelled and the decode stops with an
+  error naming the limit (SECURITY.md section 5, `EngineStallTimeout`). Progress is an output frame
+  when decoding; input read through the counting `fs.FS` view when probing, so one mechanism gives both
+  the narrow view and the progress signal; and growth of the output file when copying. The watchdog
+  bounds stalls, not total time: `MaxDecodedPixelsPerInputByte` (10,000) refuses a file whose probe
+  promises more decoded pixels per input byte than that, before decoding starts, and stops a decode
+  that exceeds it later in case the probe was lied to. Spike S1 measured at most 75.5 pixels per byte
+  on its clips and the S2 pattern files. The option adds periodic checks to the
   compiled code, so M1 stream D re-runs the S1 decode and encode figures with it on and records both;
   a cost above about 10% goes to the owner. The implementation and its test are M1 stream D work.
 
@@ -946,3 +951,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M0 review: section 12 runs the HEVC decoder with `Threads(1)` inside per-slice recover boundaries, checks parameter sets before decoding (4:2:0, 8 or 10 bits, at most 7680 x 4320, a buffer of at most 6 pictures, justified from HEVC Annex A.4.2), states the 10 s limit abandons rather than stops a decode, and plans the M1 measurement for the `noasm` tag; the engine reservation is 512 MiB and equals its ceiling; section 8 sizes workers on the larger worst case, 920 MB |
 | 2026-11-13 | M0 review round 2 and the owner's decision for version 1: every codec, HEVC included, is decoded by the sandboxed engine; the pure-Go `gen2brain/h265` is only an opt-in HEVC fast path, because it allocates a full picture for every missing reference a slice names (about 6.5 GB at 8K), so the 720 MB bound is withdrawn. Section 3 records this; section 8 does not count the fast path; section 11 gives the default decode time (about 2.8-3.6 times the duration for 4K60 on 8 cores, 25-40% slower per core than the fast path) and the two speed-ups; section 12 gives the engine's 4K HEVC figures, keeps skipping the loop filter off, and lists the fast path's protections (exactly `Threads(1)`, the per-sub-layer `sps_max_dec_pic_buffering_minus1 + 1 <= 6` check, `-c copy` before decoding, a stop at the first abandoned decode) as reducing risk, not bounding it; section 13 adds the fast-path flag |
 | 2026-11-13 | M0 review round 3: section 12 requires `WithCloseOnContextDone(true)` on the runtime qrvt creates, adds the 30 s no-progress watchdog with the M1 stream D cost measurement, gives the stream-copy instance's mounts, and states that the HEVC fast-path flag does not ship until the decoder's assembly can be excluded |
+| 2026-11-13 | M0 follow-up: section 12 gives the single-file read-only view as an `fs.FS` mount that counts reads, the copy instance's output directory, how the watchdog measures progress for probing (reads) and copying (output-file growth), and the `MaxDecodedPixelsPerInputByte` limit (M1 stream D) |
