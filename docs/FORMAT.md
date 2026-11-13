@@ -46,7 +46,7 @@ An encoder must produce:
 | Property | Value |
 | --- | --- |
 | Container | MP4 (ISO base media), one video track, no audio, no edit list |
-| Codec | H.264 High profile, progressive, 8-bit 4:2:0, CABAC |
+| Codec | H.264 Main or High profile, progressive, 8-bit 4:2:0, CABAC |
 | Frame types | Every frame is an IDR frame |
 | Colour tags | BT.709 primaries, transfer and matrix; limited range |
 | Pixel aspect | 1:1 |
@@ -474,8 +474,10 @@ the interleaver rows were also reproduced independently by a reviewer.
   with an error naming the value; it must not guess.
 - Changing a default (levels, quantiser, parity) is not a format change. Changing anything a decoder
   relies on is.
-- Open in this draft: the video codec and tags for modulation 4 (decided by spike S1), and whether
-  modulation 2 remains the default (decided by step S2).
+- Open in this draft: the video codec and tags for modulation 4, and whether modulation 2 remains the
+  default (decided by step S2). Spike S1 found the embedded libaom too slow for 10-bit AV1 (0.07-0.33
+  fps at 1080p); 10-bit H.264 (High 10) is the measured candidate, but many stock players and hardware
+  decoders lack High 10. The choice is made in M6.
 
 ## 15. Change log
 
@@ -483,3 +485,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | --- | --- |
 | 2026-11-13 | First draft |
 | 2026-11-13 | M0: section 3 states the grid limits a decoder enforces (GridY at least 30, 15 GridX > GridY); section 11 states the limits on B and F; section 13 writes the example session as `0x1234`. All numbers of sections 5.3 and 13 reproduced by the implementation and by an independent script; no value changed |
+| 2026-11-13 | M0 spikes: section 3 allows H.264 Main as well as High profile (the encoder's fastest settings turn off the 8x8 transform, so x264 signals Main, a subset of High); section 14 records the S1 result for the modulation 4 codec. No value a decoder relies on changed |

@@ -33,7 +33,8 @@ open is for the receiver and their operating system to judge.
 ## 3. Trust boundaries
 
 ```
-recording file --> [ ffmpeg in WebAssembly sandbox ] --> raw frames
+recording file --> [ ffmpeg in WebAssembly sandbox ] --> raw frames (H.264), or HEVC elementary stream
+HEVC stream    --> [ pure-Go HEVC decoder, unsandboxed ] --> raw frames
 raw frames     --> [ vision, header, descriptor ]    --> soft bits, parameters
 soft bits      --> [ LDPC, Reed-Solomon ]            --> stream
 stream         --> [ hash, signature ]               --> body          <- authenticity is decided here
@@ -47,7 +48,7 @@ Each arrow carries attacker-controlled data. Each box must hold when its input i
 
 | # | Threat | Defence |
 | --- | --- | --- |
-| T1 | A malformed container or bitstream exploits the video decoder | ffmpeg runs inside the wazero WebAssembly sandbox. It is given a read-only view of the single input file where the runtime allows, otherwise of the file's directory; no network; a memory ceiling; and it is cancelled with the command's context. Its only output is raw frames on a pipe, which are length-checked |
+| T1 | A malformed container or bitstream exploits the video decoder | **Sandboxed:** ffmpeg runs inside the wazero WebAssembly sandbox and parses every container, and every H.264 bitstream. It is given a read-only view of the single input file where the runtime allows, otherwise of the file's directory; no network; a memory ceiling; and it is cancelled with the command's context. Its outputs are raw frames, or for HEVC the stream copied out of the container, on a pipe, length-checked. **Not sandboxed:** HEVC bitstreams are decoded by `gen2brain/h265` in its pure-Go form, without its assembly, in the qrvt process (DESIGN.md section 12). There it relies on Go's memory safety (bounds-checked, no `unsafe` on that path), a `recover` boundary per decode, the limits of section 5 and a fuzz target (section 9.1); a panic, error or exceeded limit falls back to the sandboxed engine for that slice. A data race or a logic bug in that decoder is not contained by a sandbox |
 | T2 | A lying header or descriptor drives huge allocations or loops | Every field is used only after its CRC passes and its value is checked against section 5. Parameters derived from the stream length are recomputed and must match (FORMAT.md section 10). A decode locks onto the first valid session; frames from any other session are counted and ignored |
 | T3 | Soft-bit or shard floods exhaust memory or disk | The soft-bit store is capped and evicts. The shard store is a file whose size is fixed by the validated descriptor, and free disk space is checked before it is created |
 | T4 | A decompression bomb | Decompression is streaming and stops at the archive length declared in the stream header. That length must not exceed `--max-size` or the free space on disk |
@@ -80,7 +81,8 @@ Implementation defaults, each a named constant with a test that exceeds it:
 | LDPC iterations per codeword | 25 |
 | Sessions tracked per decode | 1 |
 | Engine memory per instance | 1 GiB decoding, 1.5 GiB encoding |
-| Capture size accepted from the engine | 8,192 x 8,192 pixels |
+| Capture size accepted from the engine or the HEVC decoder | 8,192 x 8,192 pixels |
+| HEVC decoder (unsandboxed) | Picture size refused above the capture size before allocation (`FrameSizeLimit`), which with the decoded picture buffer (at most 16 pictures) bounds its memory; 10 s per picture, after which the slice falls back to the engine |
 
 A decode that reaches a limit stops with an error that names the limit and, where one exists, the flag
 that raises it. Only the unpacked size has a flag in version 1.
@@ -144,6 +146,7 @@ Each runs briefly on every pull request and for longer nightly, with its corpus 
 | Stream header, manifest and key-file parsing | No panic; rejects everything FORMAT.md forbids |
 | Unpacking arbitrary archive bytes into a temporary root | No file created outside the root; no panic |
 | Finder detection and mesh fitting on arbitrary images | No panic; time bounded by image size |
+| HEVC decoding (`gen2brain/h265`, pure Go) of arbitrary NAL units, seeded with the test clips and the HEVC conformance streams | No panic escapes the recover boundary; no picture larger than the capture limit is allocated; time bounded per picture |
 | Whole decode from arbitrary raw frames, seeded with valid and near-valid frames | No panic; reports success only when the recovered stream matches the descriptor's hash; writes nothing outside the root |
 
 ### 9.2 Hostile corpus
@@ -169,6 +172,8 @@ Windows:
 - The embedded engine, asked to write during a decode, fails.
 - An engine instance that exceeds its memory ceiling is stopped and reported, and the process survives.
 - Cancelling the command stops every engine instance promptly.
+- The pure-Go HEVC decoder and the engine give identical frames on the test clips; a panic injected into
+  the HEVC decoder is recovered and the slice is decoded by the engine instead.
 
 ### 9.4 Authenticity tests
 
@@ -216,3 +221,9 @@ breaking a guarantee, or is a denial of service that stays within the limits; *l
 Report privately through the repository's "Report a vulnerability" page (GitHub private vulnerability
 reporting), not in a public issue. The root `SECURITY.md` created in milestone M7 repeats this
 instruction and states which versions receive fixes.
+
+## Change log
+
+| Date | Change |
+| --- | --- |
+| 2026-11-13 | M0 spikes: HEVC is decoded by the pure-Go `gen2brain/h265` outside the sandbox (spike S1). Section 3 shows the new boundary; T1 states what is and is not sandboxed; section 5 adds the HEVC decoder's limits; section 9.1 adds its fuzz target and section 9.3 its comparison and fallback tests |
