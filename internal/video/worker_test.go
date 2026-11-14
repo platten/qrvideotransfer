@@ -506,6 +506,82 @@ func TestWorkerCount(t *testing.T) {
 	}
 }
 
+// TestWorkerCountGOMAXPROCS: the cap counts the CPUs this process may use (GOMAXPROCS, which honours
+// a container's CPU quota), not the machine's: a test binary started with GOMAXPROCS=2 caps at most
+// 2 workers.
+func TestWorkerCountGOMAXPROCS(t *testing.T) {
+	t.Parallel()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestWorkerCountChild$", "-test.count=1") //nolint:gosec // the test binary
+	cmd.Env = append(os.Environ(), "GOMAXPROCS=2", "QRVT_WORKER_COUNT_CHILD=1")
+	var out []byte
+	var err error
+	within(t, time.Minute, "the child test", func() { out, err = cmd.CombinedOutput() })
+	if err != nil {
+		t.Errorf("with GOMAXPROCS=2: %v\n%s", err, out)
+	}
+}
+
+// TestWorkerCountChild runs only as TestWorkerCountGOMAXPROCS's child.
+func TestWorkerCountChild(t *testing.T) {
+	if os.Getenv("QRVT_WORKER_COUNT_CHILD") == "" {
+		t.Skip("run by TestWorkerCountGOMAXPROCS")
+	}
+	if n := WorkerProcesses(); n > 2 {
+		t.Errorf("WorkerProcesses() = %d with GOMAXPROCS=2", n)
+	}
+}
+
+// TestSlotTokensReturnHome: a job returns its token to the channel it took it from, even if the
+// channel is replaced meanwhile (as tests do), for worker processes and in-process instances alike.
+// Not parallel: it replaces both channels.
+func TestSlotTokensReturnHome(t *testing.T) {
+	oldW, oldS := workerSlots, slots
+	defer func() { workerSlots, slots = oldW, oldS }()
+	first := make(chan struct{}, 1)
+	workerSlots, slots = first, first
+	for _, c := range []struct {
+		name string
+		r    runner
+		job  job
+	}{
+		{"worker", workerRunnerOf(t, "readyhang"), job{prog: "ffmpeg", args: func(string, string) []string { return nil }}},
+		{"in process", engineFor(t), job{prog: "ffmpeg", args: func(string, string) []string { return spin }}},
+	} {
+		workerSlots, slots = first, first
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- run(ctx, c.r, c.job) }()
+		within(t, time.Minute, c.name+": taking the token", func() {
+			for len(first) == 0 {
+				time.Sleep(10 * time.Millisecond)
+			}
+		})
+		workerSlots, slots = make(chan struct{}, 1), make(chan struct{}, 1) // replaced while the token is out
+		cancel()
+		within(t, time.Minute, c.name+": the job's end", func() { <-done })
+		if len(first) != 0 {
+			t.Errorf("%s: the token did not return to its channel", c.name)
+		}
+	}
+}
+
+// TestEngineProbeTime: the probe's time bound is 60 s, about four times the slowest legitimate probe
+// seen (13 s of active time, on the macos-26-intel CI runner under the full test load), and builds
+// with the race detector use the same bound (SECURITY.md section 5).
+func TestEngineProbeTime(t *testing.T) {
+	t.Parallel()
+	if EngineProbeTime != 60*time.Second || probeTime != EngineProbeTime {
+		t.Errorf("EngineProbeTime %v, probe bound in this build %v", EngineProbeTime, probeTime)
+	}
+}
+
+// workerRunnerOf is a worker runner whose workers misbehave in the way named.
+func workerRunnerOf(t *testing.T, mode string) runner {
+	t.Helper()
+	p, _ := testWorkers(t, mode)
+	return workerRunner{p}
+}
+
 // TestWorkerCap: with every worker slot taken, the next job waits for one, starting no process,
 // and the wait counts against neither the stall watchdog nor a probe's time bound; it ends only
 // with its context. Once the slot is free a job runs. Not parallel: it runs with a single slot.

@@ -10,3 +10,6 @@ func physicalMemory() uint64 {
 	}
 	return uint64(si.Totalram) * uint64(si.Unit) //nolint:unconvert // the field types differ by architecture
 }
+
+// limitMemory is a stub for the test commit.
+func limitMemory(sys uint64, _, _ string) uint64 { return sys }
