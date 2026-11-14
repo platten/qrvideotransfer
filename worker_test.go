@@ -26,6 +26,9 @@ func TestEngineWorker(t *testing.T) {
 	if code != 2 {
 		t.Errorf("worker with no job exited %d", code)
 	}
+	if WarnEngineInProcess != "EngineInProcess" {
+		t.Errorf("warning code %q", WarnEngineInProcess)
+	}
 	code = -1
 	engineWorker([]string{"decode"}, strings.NewReader(""), io.Discard, func(c int) { code = c })
 	if code != -1 {
