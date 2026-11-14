@@ -1056,10 +1056,11 @@ anything. The build and test scripts are thin wrappers around
 `go run ./tools/dev <task>`, so that logic exists once. CI calls the same scripts on all three systems.
 
 `install-tools` downloads golangci-lint, GoReleaser, syft (the SBOM generator) and actionlint as
-release archives whose SHA-256 is pinned in `tools/dev/tools.go`, and builds go-licenses, which
-publishes no binaries, with `go install`; `-only` installs a subset. Building golangci-lint and
+release archives whose SHA-256 is pinned in `tools/dev/tools.go`, and builds go-licenses and
+govulncheck, which publish no binaries, with `go install`; `-only` installs a subset. Building golangci-lint and
 GoReleaser from source took 2-5 minutes per CI runner and once hung for 55 minutes; a checked download
-takes seconds. Other `tools/dev` tasks: `licenses` (licence compatibility), `check-workflows` (the
+takes seconds. Other `tools/dev` tasks: `licenses` (licence compatibility), `vulncheck` (govulncheck
+over the release build), `check-workflows` (the
 action-pinning and permissions policy, then actionlint), `release-snapshot` (the whole release without
 publishing, then a check that every target and package format was produced) and `sign-windows` (called
 by GoReleaser).
@@ -1073,13 +1074,19 @@ by GoReleaser).
   detector needs cgo on most systems and does not support windows/arm64, so race tests run with cgo on
   the other five runners. Tests, the coverage gate, race tests and fuzzing are built with the release
   build tags (`RELEASE_TAGS`), so CI tests what ships; one amd64 runner also tests the untagged build.
-  Every job and every long step has a timeout.
+  Lint runs on both builds. The setup scripts run with `--spike` on Linux, macOS and Windows runners,
+  and `setup.sh` without it in Fedora and Arch Linux containers (images pinned by digest), so that every
+  package-manager path and the Go download are exercised. Every job and every long step has a timeout.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
   alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice until then.
 - **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
-  Dependabot for Go modules and actions; govulncheck. Every action is pinned by a full commit SHA with a
+  Dependabot for Go modules and actions, except wazero and go-ffmpreg: every engine speed, memory and
+  sandbox figure of spike S1 was measured on their pinned versions, so they are updated by hand, with
+  stream D re-running the S1 measurements, no later than M7; govulncheck over the default build (the
+  action, on all six runners) and over the release build (`tools/dev vulncheck`, for linux, darwin and
+  windows). Every action is pinned by a full commit SHA with a
   version comment, every workflow declares top-level permissions (jobs widen them only where needed),
   and nothing runs on `pull_request_target`; a `tools/dev` test enforces this and CI also checks each
   comment's tag against the pinned commit. The licence check (go-licenses) allows only licences whose
@@ -1178,5 +1185,7 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream B, designer's follow-up on PR #8: section 8 compares the shipped decoder with a test-only sum-product reference and min-sum variants on the four inner codes, and corrects the cause of `robust`'s capacity gap: the decoder (integer truncation about 0.3 dB, normalisation x0.75 about 0.6 dB), not the shortening; the shipped decoder is unchanged pending the designer's decision |
 | 2026-11-13 | M1 stream B, designer's note on PR #8: section 12 states that Reed-Solomon reconstruction with `noasm` measured 45-49 MB/s per core in the worst case, below the bar of about 50 MB/s, and why the tags are accepted anyway (seconds of Reed-Solomon against hours of video decoding; 30-50 times faster than one core of LDPC) |
 | 2026-11-13 | M1 stream G: section 16 says `install-tools` downloads the pinned tools as release archives with pinned SHA-256 (go-licenses through `go install`) and lists the new `tools/dev` tasks; section 17 names the workflows, the nightly placeholders, the workflow policy and its test, the licence allow-list (GPL-2.0 excluded), release-please being off until the owner enables it, provenance for every checksummed file, and `RELEASE_TAGS` in `.goreleaser.yaml` as the one definition of the release build tags, set to `noasm,nounsafe`, with which CI tests, measures coverage and fuzzes (one runner also tests untagged) |
+| 2026-11-13 | M1 stream G follow-up: section 16 adds the `vulncheck` task and govulncheck v1.9.0; section 17 scans the release build with govulncheck, lints both builds, and runs `setup.sh` in Fedora and Arch Linux containers |
+| 2026-11-13 | M1 stream G follow-up: section 17 says Dependabot ignores wazero and go-ffmpreg, which are updated by hand with the S1 measurements re-run (stream D) no later than M7 |
 | 2026-11-13 | M1 stream F: section 13 resolves what the command line left open: the `--resolution` presets (with `2160p` as another name for `4k`) and its use by `calibrate make` for the monitor resolution; ranges for `--fps` (1-240) and `--jobs` (0-1024, 0 the CPU count); `--hdr` replaces `--mode`; `--passphrase-file` reads the first line and needs `--encrypt` on encode; `--verify-key` takes a key file or a key line; the `--max-size` units; which output flags exclude each other; where plain, summary and JSON output go and the JSON schema; the hidden `demo` command; required `-o`; and the exit codes |
 | 2026-11-13 | M1 stream F, PR #11 review: section 13 says that with `--json` nothing goes to standard error, that a failure before the job starts is a single error line, and that warnings are events |
