@@ -19,7 +19,8 @@ const (
 
 // rule is the check-node update of the min-sum family: the two smallest input magnitudes m become
 // min(max(floor(scale m / 16) - offset, 0), rMax), and soft bits enter the decoder multiplied by
-// 1 << shift.
+// 1 << shift. The int16 arithmetic of apply requires 0 <= scale <= 16 and offset >= 0, and shift
+// at most 3 keeps every soft bit within the posterior clamp (TestRule).
 type rule struct {
 	scale, offset int16
 	shift         uint

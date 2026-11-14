@@ -405,9 +405,24 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   rates, 5-7 per scale for every min-sum decoder including M1 and B (0 for A3 at scale 0.5), and 0-1 for sum-product.
 
   **Choice: B, one factor for all codes.** At scale 1 it keeps codes 1-3 within 0.02 dB of M1 at FER
-  1e-2 and is no slower (above). At FER 1e-3 it is better than M1 on `fast` and `normal` and 0.01 dB
-  behind on code 3 (2.278 against 2.270 dB in a 100,000-frame check, below the resolution of the
-  measurement). It improves `robust` by 0.87 dB at scale 1 and has the smallest worst case over the
+  1e-2 and is no slower (above). **It does not meet the hard requirement "no worse than M1 at FER
+  1e-3" strictly.** A paired comparison (`TestPairedM1B`, the same 400,000 frames through both
+  decoders, McNemar's z over the frames only one of them gets wrong, positive meaning B worse) gives:
+
+  | Code | Eb/N0 | M1 FER | B FER | Only M1 wrong | Only B wrong | z |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | `robust` | 1.7 dB | 8.62e-2 | 1.42e-3 | 33,925 | 5 | -184.1 |
+  | `robust` | 1.9 dB | 4.10e-2 | 4.38e-4 | 16,236 | 0 | -127.4 |
+  | 3 | 2.2 dB | 2.39e-3 | 2.71e-3 | 283 | 411 | +4.9 |
+  | 3 | 2.3 dB | 7.60e-4 | 7.72e-4 | 113 | 118 | +0.3 |
+  | `normal` | 2.6 dB | 2.43e-3 | 2.79e-3 | 196 | 338 | +6.1 |
+  | `normal` | 2.7 dB | 7.10e-4 | 7.88e-4 | 67 | 98 | +2.4 |
+  | `fast` | 3.6 dB | 2.85e-3 | 2.22e-3 | 324 | 75 | -12.5 |
+  | `fast` | 3.7 dB | 9.45e-4 | 6.75e-4 | 137 | 29 | -8.4 |
+
+  Near FER 1e-3, B is significantly behind M1 on code 3 and on `normal`, by about 0.01 dB, and
+  clearly better on `fast` and on `robust`. Whether a tolerance of that size is accepted is the
+  designer's decision, pending. It improves `robust` by 0.87 dB at scale 1 and has the smallest worst case over the
   three scales (1.47 dB, against 1.50 for A1, which also fails code 2 by 0.11 dB, 2.20 for A2 and 3.16
   for A3): offset min-sum depends on the soft-bit scale, normalised min-sum does not. `robust` buys its
   3.1 dB of Es/N0 over code 3 with 56% of the payload per sent bit.
@@ -1214,3 +1229,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream B, designer's note on PR #8: section 12 states that Reed-Solomon reconstruction with `noasm` measured 45-49 MB/s per core in the worst case, below the bar of about 50 MB/s, and why the tags are accepted anyway (seconds of Reed-Solomon against hours of video decoding; 30-50 times faster than one core of LDPC) |
 | 2026-11-13 | M1 stream G: section 16 says `install-tools` downloads the pinned tools as release archives with pinned SHA-256 (go-licenses through `go install`) and lists the new `tools/dev` tasks; section 17 names the workflows, the nightly placeholders, the workflow policy and its test, the licence allow-list (GPL-2.0 excluded), release-please being off until the owner enables it, provenance for every checksummed file, and `RELEASE_TAGS` in `.goreleaser.yaml` as the one definition of the release build tags, set to `noasm,nounsafe`, with which CI tests, measures coverage and fuzzes (one runner also tests untagged) |
 | 2026-11-13 | Decoder follow-up to M1 stream B (designer's decision): section 8 records the measured candidates (offset min-sum 1-3 steps, normalised x13/16 with soft bits x4 inside, M1 and sum-product) at soft-bit scales 0.5, 1 and 2, FER 1e-2 and 1e-3, wrong-codeword counts and the choice of x13/16 for all codes; the decoder description, the measured points of the mother and shortened codes (`robust` now 1.75 dB from capacity, meeting the 2.5 dB criterion) and the speed are updated. No format bit changes |
+| 2026-11-14 | Review of PR #14: section 8 replaces the FER 1e-3 statement with the paired comparison (`TestPairedM1B`, 400,000 frames per point): B is significantly behind M1 near FER 1e-3 on code 3 and `normal` (about 0.01 dB, z up to +6.1) and better on `fast` and `robust`; the tolerance is the designer's decision, pending |
