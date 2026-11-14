@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -887,6 +888,20 @@ func TestCaptureLimits(t *testing.T) {
 // while decoding (SECURITY.md 9.5). Both stay under 1 GiB and finish within 60 s. Not parallel, so
 // that the process's heap is this decode's: the Go heap peak, which includes the instance's whole
 // 512 MiB reservation, is sampled while it runs.
+// raceEnabled reports whether the test binary was built with the race detector.
+func raceEnabled() bool {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return false
+	}
+	for _, s := range bi.Settings {
+		if s.Key == "-race" {
+			return s.Value == "true"
+		}
+	}
+	return false
+}
+
 func TestSkipPictures(t *testing.T) {
 	b := embedded(t)
 	_, err := b.NewDecoder(t.Context(), clip("skip.mkv"), DecodeConfig{BrightnessOnly: true})
@@ -897,8 +912,11 @@ func TestSkipPictures(t *testing.T) {
 	}
 	t.Log(err)
 
-	// Rewrite the Matroska Duration (60,000 ms) to 100 ms: the probe then promises 3 frames.
-	data, _ := os.ReadFile(clip("skip.mkv"))
+	// The decode-time check uses a smaller clip of the same kind, 100 frames at 1080p in about 9 KB:
+	// the work before the stop is the limit times the file size, so the 36 KB 4K clip would cost
+	// four times as much decoding for the same property (111 s under the race detector on the
+	// slowest runner). Rewrite its Matroska Duration to 100 ms: the probe then promises 3 frames.
+	data, _ := os.ReadFile(clip("skip1080.mkv"))
 	i := bytes.Index(data, []byte{0x44, 0x89, 0x88})
 	if i < 0 {
 		t.Fatal("no Duration element")
@@ -950,8 +968,16 @@ func TestSkipPictures(t *testing.T) {
 	if !errors.As(err, &le) || le.Limit != "MaxDecodedPixelsPerInputByte" {
 		t.Fatalf("decoding the lying file: %v after %d frames", err, n)
 	}
-	if el := time.Since(start); el > 60*time.Second {
-		t.Errorf("took %v", el)
+	// The race detector slows the frame copies several times over; the non-race run on the same
+	// runners keeps the 60 s bound.
+	bound := 60 * time.Second
+	if raceEnabled() {
+		bound *= 5
+	}
+	el := time.Since(start)
+	t.Logf("decoding took %v", el)
+	if el > bound {
+		t.Errorf("took %v, more than %v", el, bound)
 	}
 	if used := peak.Load() - min(peak.Load(), heap0); used > 1<<30 || p.peak.Load() > EngineMemoryLimit {
 		t.Errorf("peak heap growth %d MiB, linear memory %d MiB", used>>20, p.peak.Load()>>20)
