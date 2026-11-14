@@ -2,6 +2,8 @@ package video
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"sync/atomic"
 	"time"
@@ -19,18 +21,63 @@ type meter struct {
 	blocked atomic.Int32
 	extra   func() int64 // further progress, such as an output file's size; may be nil
 
-	// For a time-bound error's breakdown (stubs in the test commit).
+	// For a time-bound error's breakdown, as Unix nanoseconds (0: not yet): when run started the
+	// job, when the instance was ready (a worker's ready message, or an in-process instance's turn),
+	// its first read of the input, and the last progress the watchdog saw; and the input's read
+	// calls and bytes. Kept with a few atomic operations; the text is built only for an error.
 	start, readyAt, firstIn, progressAt atomic.Int64
 	inCalls, inBytes                    atomic.Int64
 }
 
-// breakdown is a stub for the test commit.
-func (m *meter) breakdown(time.Time) string { return "" }
+// ready records that the instance is ready to run.
+func (m *meter) ready() { m.readyAt.CompareAndSwap(0, time.Now().UnixNano()) }
 
-// withBreakdown is a stub for the test commit.
-func withBreakdown(err error, _ *meter) error { return err }
+// input records a read of n bytes from the input file.
+func (m *meter) input(n int) {
+	if m.inCalls.Add(1) == 1 {
+		m.firstIn.CompareAndSwap(0, time.Now().UnixNano())
+	}
+	m.inBytes.Add(int64(n))
+}
 
-// progressLen is a stub for the test commit.
+// breakdown says where an instance's time went, at now.
+func (m *meter) breakdown(now time.Time) string {
+	at := func(v *atomic.Int64) time.Time { return time.Unix(0, v.Load()) }
+	secs := func(d time.Duration) string { return fmt.Sprintf("%.1f s", d.Seconds()) }
+	s := "wall " + secs(now.Sub(at(&m.start)))
+	if m.readyAt.Load() == 0 {
+		s += ", never ready"
+	} else {
+		s += ", start to ready " + secs(at(&m.readyAt).Sub(at(&m.start)))
+	}
+	if m.firstIn.Load() == 0 || m.readyAt.Load() == 0 {
+		s += ", no read after ready"
+	} else {
+		s += ", ready to first read " + secs(at(&m.firstIn).Sub(at(&m.readyAt)))
+	}
+	s += fmt.Sprintf(", %d reads, %d bytes", m.inCalls.Load(), m.inBytes.Load())
+	if m.progressAt.Load() != 0 {
+		s += ", " + secs(now.Sub(at(&m.progressAt))) + " since last progress"
+	}
+	return s + fmt.Sprintf(", %d of %d worker processes running, %d of %d in-process instances running",
+		len(workerSlots), cap(workerSlots), len(slots), cap(slots))
+}
+
+// timeBound names the limits on time whose errors carry a breakdown.
+var timeBound = map[string]bool{"EngineStallTimeout": true, "EngineProbeTime": true, "EngineLoadLimit": true}
+
+// withBreakdown adds m's breakdown to err when it is a time-bound LimitError without one.
+func withBreakdown(err error, m *meter) error {
+	var le *LimitError
+	if errors.As(err, &le) && timeBound[le.Limit] && le.Detail == "" {
+		le.Detail = m.breakdown(time.Now())
+	}
+	return err
+}
+
+// progressLen is the size of a worker's progress message: bytes read counted as progress (probing),
+// input bytes, input read calls, and nanoseconds from its ready message to its first read (-1: none
+// yet), each a big-endian uint64.
 const progressLen = 32
 
 func (m *meter) value() int64 {
@@ -67,6 +114,9 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 				}
 			}
 			if v := m.value(); v != last || waiting {
+				if v != last {
+					m.progressAt.Store(now.UnixNano())
+				}
 				last, since = v, now
 			} else if now.Sub(since) >= timeout {
 				cancel(stallError(timeout))

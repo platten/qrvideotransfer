@@ -199,14 +199,16 @@ func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 		case msgLog:
 			_, _ = j.stderr.Write(buf)
 		case msgProgress:
-			if len(buf) != 8 {
+			if len(buf) != progressLen {
 				return 0, fmt.Errorf("%w: worker protocol: progress of %d bytes", ErrEngine, len(buf))
 			}
 			if v := int64(binary.BigEndian.Uint64(buf)); v > reads { //nolint:gosec // compared, not trusted
 				m.reads.Add(min(v-reads, 1<<40))
 				reads = v
 			}
+			workerInput(m, buf)
 		case msgReady:
+			m.ready()
 			loaded()
 			ready = true
 			degraded.Store(nil) // a worker reached ready: workers work again
@@ -223,6 +225,22 @@ func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 			}
 			return rc, nil
 		}
+	}
+}
+
+// workerInput takes a progress message's input counts into m, for a time-bound error's breakdown.
+// They are the worker's word, so they only ever grow and are clamped, and the first read is placed
+// at most a day after readiness.
+func workerInput(m *meter, b []byte) {
+	get := func(i int) int64 { return int64(min(binary.BigEndian.Uint64(b[8*i:]), 1<<62)) }
+	if v := get(1); v > m.inBytes.Load() {
+		m.inBytes.Store(v)
+	}
+	if v := get(2); v > m.inCalls.Load() {
+		m.inCalls.Store(v)
+	}
+	if first := int64(binary.BigEndian.Uint64(b[24:])); first >= 0 && m.readyAt.Load() != 0 { //nolint:gosec // -1: none yet
+		m.firstIn.CompareAndSwap(0, m.readyAt.Load()+min(first, int64(24*time.Hour)))
 	}
 }
 

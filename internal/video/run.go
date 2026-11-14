@@ -102,6 +102,7 @@ func run(ctx context.Context, r runner, j job) error {
 	if j.progress == progFiles {
 		m.extra = func() int64 { return dirSize(j.outDir) }
 	}
+	parent := ctx
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	done := make(chan struct{})
@@ -110,13 +111,21 @@ func run(ctx context.Context, r runner, j job) error {
 	if timeout == 0 {
 		timeout = stallTimeout
 	}
+	now := time.Now().UnixNano()
+	m.start.Store(now)
+	m.progressAt.Store(now)
 	go watch(m, timeout, j.check, cancel, done)
 	rc, err := r.exec(ctx, &j, m)
+	// The caller's cancellation wins, whatever the instance reported: an input closed on cancellation
+	// (an encoder's, Concat's) can end the instance before the cancellation reaches ctx.
+	if parent.Err() != nil {
+		return context.Cause(parent)
+	}
 	if cause := context.Cause(ctx); cause != nil && ctx.Err() != nil {
-		return cause
+		return withBreakdown(cause, m)
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %s: %w", ErrEngine, j.prog, err)
+		return fmt.Errorf("%w: %s: %w", ErrEngine, j.prog, withBreakdown(err, m))
 	}
 	if rc != 0 {
 		return fmt.Errorf("%w: %s exit status %d: %s", ErrEngine, j.prog, rc, log.String())

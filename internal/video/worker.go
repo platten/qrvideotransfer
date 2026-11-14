@@ -51,7 +51,7 @@ func parentLimit(t byte) int {
 	case msgLog:
 		return maxLogMsg
 	case msgProgress:
-		return 8
+		return progressLen
 	case msgExit:
 		return maxExitMsg
 	case msgReady:
@@ -95,7 +95,7 @@ type workerJob struct {
 
 // protocolVersion is the version of the worker protocol (message types, their bounds, the job's
 // fields); a change to any of them raises it. Tests change the parent's.
-var protocolVersion = 1
+var protocolVersion = 2
 
 // exitVersion is the exit code with which a worker refuses a job of another protocol version. As a
 // worker's first message, the parent takes it for a failure to start and runs the job in process.
@@ -316,24 +316,7 @@ func runJob(j *workerJob, stdin io.Reader, w *msgWriter) (int, error) {
 	m := &meter{}
 	done := make(chan struct{})
 	defer close(done)
-	if j.Reads {
-		go func() {
-			last := int64(-1)
-			t := time.NewTicker(progressTick)
-			defer t.Stop()
-			for {
-				select {
-				case <-done:
-					return
-				case <-t.C:
-					if v := m.reads.Load(); v != last {
-						last = v
-						_ = w.send(msgProgress, binary.BigEndian.AppendUint64(nil, uint64(v))) //nolint:gosec // non-negative
-					}
-				}
-			}
-		}()
-	}
+	go reportProgress(m, w, done)
 	args := j.Args
 	wj := &job{prog: j.Prog, args: func(string, string) []string { return args }, input: j.Input, outDir: j.OutDir,
 		stdin: stdin, stdout: &chunked{w: w, typ: msgOut, size: maxChunk, limit: j.MaxOutput},
@@ -342,6 +325,34 @@ func runJob(j *workerJob, stdin io.Reader, w *msgWriter) (int, error) {
 		wj.progress = progReads
 	}
 	return e.exec(ctx, wj, m)
+}
+
+// reportProgress sends m's reads to the parent every progressTick while they change, until done:
+// the bytes counted as progress (probing), the input's bytes and read calls, and the time from the
+// instance's readiness to its first read (progressLen).
+func reportProgress(m *meter, w *msgWriter, done <-chan struct{}) {
+	var last [progressLen]byte
+	t := time.NewTicker(progressTick)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+			first := int64(-1)
+			if f, r := m.firstIn.Load(), m.readyAt.Load(); f != 0 && r != 0 {
+				first = max(0, f-r)
+			}
+			var b [progressLen]byte
+			for i, v := range []int64{m.reads.Load(), m.inBytes.Load(), m.inCalls.Load(), first} {
+				binary.BigEndian.PutUint64(b[8*i:], uint64(v)) //nolint:gosec // -1 is sent as its two's complement
+			}
+			if b != last {
+				last = b
+				_ = w.send(msgProgress, b[:])
+			}
+		}
+	}
 }
 
 // Engine workers for this process: the runner, or why there is none.

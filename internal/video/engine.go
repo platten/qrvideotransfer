@@ -168,6 +168,7 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 		return 0, ctx.Err()
 	}
 	defer func() { <-tokens }()
+	m.ready()
 	var in string
 	reads := &atomic.Int64{}
 	if j.progress == progReads {
@@ -177,7 +178,7 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	if j.input != "" {
 		name := inputName(j.input)
 		in = "/in/" + name
-		fsc = fsc.WithFSMount(inputFS{path: j.input, name: name, reads: reads}, "/in")
+		fsc = fsc.WithFSMount(inputFS{path: j.input, name: name, reads: reads, m: m}, "/in")
 	}
 	if j.outDir != "" {
 		fsc = fsc.WithDirMount(j.outDir, "/out")

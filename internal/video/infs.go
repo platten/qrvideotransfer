@@ -17,6 +17,7 @@ type inputFS struct {
 	path  string // host path
 	name  string // the only name the guest can open
 	reads *atomic.Int64
+	m     *meter // when set, told of every read (for a time-bound error's breakdown)
 }
 
 // Open implements fs.FS.
@@ -29,7 +30,7 @@ func (v inputFS) Open(name string) (fs.File, error) {
 		if err != nil {
 			return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 		}
-		return &inputFile{f: f, name: v.name, reads: v.reads}, nil
+		return &inputFile{f: f, name: v.name, reads: v.reads, m: v.m}, nil
 	}
 	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 }
@@ -39,17 +40,24 @@ type inputFile struct {
 	f     *os.File
 	name  string
 	reads *atomic.Int64
+	m     *meter
 }
 
 func (f *inputFile) Read(b []byte) (int, error) {
 	n, err := f.f.Read(b)
 	f.reads.Add(int64(n))
+	if f.m != nil {
+		f.m.input(n)
+	}
 	return n, err
 }
 
 func (f *inputFile) ReadAt(b []byte, off int64) (int, error) {
 	n, err := f.f.ReadAt(b, off)
 	f.reads.Add(int64(n))
+	if f.m != nil {
+		f.m.input(n)
+	}
 	return n, err
 }
 

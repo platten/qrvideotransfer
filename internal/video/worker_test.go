@@ -745,7 +745,7 @@ func TestWorkerJob(t *testing.T) {
 	// The worker refuses a bad job with a message, and a malformed one without.
 	var out bytes.Buffer
 	in := &bytes.Buffer{}
-	_ = writeMsg(in, msgJob, []byte(`{"prog":"sh","version":1}`))
+	_ = writeMsg(in, msgJob, []byte(fmt.Sprintf(`{"prog":"sh","version":%d}`, protocolVersion)))
 	if code := serveWorker(in, &out, func(int) {}); code != 2 {
 		t.Errorf("bad job: exit %d", code)
 	}
