@@ -430,7 +430,11 @@ The stream is what the outer code protects. Its length L includes every field be
   with compression 0 unless that sample shrinks by at least 2%, and with zstd otherwise. zstd uses a
   window of 8 MiB and xz a dictionary of 8 MiB; age uses scrypt work factor 18. These are also the
   largest values a decoder accepts (below). An xz body is exactly one xz stream, with no stream
-  padding, whose blocks each have the single filter LZMA2.
+  padding, holding exactly one block whose single filter is LZMA2. Within the block, the first LZMA2
+  chunk resets the dictionary, no later chunk does, and only the first LZMA chunk sets the
+  properties, with lc + lp and pb at most 4. One block is what every encoder writes for a single
+  archive unless asked to split it; accepting more let a stream make a decoder allocate a new
+  dictionary for every few bytes of input.
 
 **What a decoder rejects.** A wrong magic or stream version; an unknown compression value; any flag bit
 other than 0x01 and 0x02; a non-zero reserved byte; a stream whose length L is not exactly `24 + Lb`,
@@ -442,7 +446,8 @@ the same type and size, or that follows the last one; a file whose SHA-256 diffe
 It also rejects, before allocating for them: a zstd frame whose window (or, for a single-segment
 frame, content size) exceeds 8 MiB; an xz block whose filter is not LZMA2 alone or whose dictionary
 exceeds 8 MiB; an xz body with anything after its one stream (a second stream, stream padding or
-other bytes); an xz LZMA2 chunk whose data the LZMA decoder does not consume exactly (a chunk that
+other bytes); an xz body with a second block, refused at its block header; an LZMA2 chunk that
+breaks the chunk rules above; an xz LZMA2 chunk whose data the LZMA decoder does not consume exactly (a chunk that
 declares more compressed bytes than its decoder uses, or fewer than it needs); an xz block whose
 check, padding or declared sizes are wrong, or an index or footer that does not match the blocks;
 an age header whose scrypt work factor exceeds 18. Any conforming pax tar is accepted;
@@ -540,3 +545,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-13 | M1 stream A, review of PR 7 round 2: section 12 says an xz body is exactly one xz stream, with no stream padding, whose blocks each have the single filter LZMA2. The decoder rejects anything after that stream: a second stream, stream padding or other bytes |
 | 2026-11-13 | M1 stream A, PR 7, path depth: section 12 adds the path rule "at most 64 components", with its two reasons (time per component grows with depth on macOS and partly on Windows; a tree far deeper than shells handle is a nuisance payload), and says the encoder's refusal lists every path that breaks a rule with the rule it breaks. Section 13: `stream.json` gains a refused manifest at 65 components and a list of manifests that must be accepted, with one at exactly 64; the "path over 4096 bytes" vector now has 17 components so that it breaks only the length rule. The frozen streams did not change |
 | 2026-11-14 | M1 stream A, second independent review of PR 7: section 12 says the decoder rejects an xz LZMA2 chunk whose data the LZMA decoder does not consume exactly, and a block whose check, padding or declared sizes are wrong, or an index or footer that does not match the blocks (the reference decoder now parses the xz container itself). `COM0` and `LPT0` are device names too; section 13's `stream.json` gains their refused manifests. The frozen streams did not change |
+| 2026-11-14 | M1 stream A, third independent review of PR 7: section 12 says an xz body holds exactly one block (the encoder always wrote one), refused at a second block header, and states the chunk rules: the first chunk resets the dictionary, no later chunk does, only the first LZMA chunk sets properties, and lc + lp and pb are at most 4. The reason: accepting many blocks let a small stream make a decoder allocate a new 8 MiB dictionary per block. XZ Utils output with several blocks (multithreaded, `--block-size`, `--block-list`) is no longer accepted. The frozen streams did not change |
