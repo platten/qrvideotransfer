@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	mcobra "github.com/muesli/mango-cobra"
-	"github.com/muesli/roff"
 	qrvt "github.com/platten/qrvideotransfer"
 	"github.com/platten/qrvideotransfer/internal/cli/ui"
 	"github.com/platten/qrvideotransfer/internal/frame"
@@ -310,11 +308,11 @@ func (a *app) manCmd() *cobra.Command {
 			"qrvt man | man -l -",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			page, err := mcobra.NewManPage(1, cmd.Root())
+			page, err := manPage(cmd.Root())
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprint(a.env.Out, page.Build(roff.NewDocument()))
+			_, err = fmt.Fprint(a.env.Out, page)
 			return err
 		},
 	}
