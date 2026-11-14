@@ -48,6 +48,9 @@ func NewEmbedded(o Options) (*Embedded, error) {
 	return &Embedded{ff{r: lazyEngine{cacheDir: dir}, fast: o.UnsandboxedHEVC}}, nil
 }
 
+// InProcess is a stub for the test commit.
+func (*Embedded) InProcess() error { return nil }
+
 // lazyEngine runs each job in an engine worker process (see ServeWorker). When there is none, or
 // one cannot be started, it runs the job in this process with close-on-cancel instead, which is
 // slower but keeps every guarantee; WorkerStatus says so. While the engine is compiled the instance

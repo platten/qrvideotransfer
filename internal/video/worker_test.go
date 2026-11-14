@@ -420,6 +420,39 @@ func TestWorkerStartFailures(t *testing.T) {
 	}
 }
 
+// TestWorkerStatusRecovers: after a worker fails to start, WorkerStatus reports the fallback until a
+// worker next reaches ready, and then reports nothing; the backend whose job fell back keeps saying
+// so (InProcess), for its one warning, and a backend whose jobs all ran in workers says nothing. Not
+// parallel: it replaces the process's workers.
+func TestWorkerStatusRecovers(t *testing.T) {
+	ctx := testCtx(t, 3*time.Minute)
+	w, _ := currentWorkers()
+	defer func() { setWorkers(w, nil); degraded.Store(nil) }()
+	p, _ := testWorkers(t, "pre-garbage")
+	setWorkers(p, nil)
+	hit := embedded(t)
+	if _, err := hit.Probe(ctx, clip("hevc8.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	if WorkerStatus() == nil || hit.InProcess() == nil {
+		t.Fatalf("after a failed start: status %v, backend %v", WorkerStatus(), hit.InProcess())
+	}
+	setWorkers(w, nil)
+	clean := embedded(t)
+	if _, err := clean.Probe(ctx, clip("hevc8.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	if err := WorkerStatus(); err != nil {
+		t.Errorf("after a worker reached ready: %v", err)
+	}
+	if err := clean.InProcess(); err != nil {
+		t.Errorf("a backend whose jobs ran in workers: %v", err)
+	}
+	if hit.InProcess() == nil {
+		t.Error("the backend whose job fell back forgot it")
+	}
+}
+
 // testCtx is the test's context with a deadline, so that a hang fails the test by name instead of
 // running into go test's timeout.
 func testCtx(t *testing.T, d time.Duration) context.Context {

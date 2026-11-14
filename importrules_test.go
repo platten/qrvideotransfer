@@ -106,6 +106,8 @@ func TestImportRulesDetects(t *testing.T) {
 		"internal/bad/noimport.go selects UnsafePointer",
 		"internal/bad/refl.go selects Pointer",
 		"internal/bad/refl.go selects UnsafeAddr",
+		"internal/bad/shadowlocal.go selects Pointer",
+		"internal/bad/shadowparam.go selects UnsafeAddr",
 		"internal/video/sys/sys.go imports unsafe",
 		"root.go imports os/exec",
 	}
