@@ -10,14 +10,18 @@ import (
 // Limits of docs/SECURITY.md section 5. None of them can be raised by a flag.
 const (
 	// EngineStallTimeout is how long an engine instance may go without progress before it is
-	// cancelled: no output frame when decoding, no input read when probing, no growth of the output
-	// file when copying a stream for the HEVC fast path, no input frame taken when encoding.
+	// cancelled: no complete, timestamped output frame when decoding, no input read when probing, no
+	// growth of the output file when copying a stream for the HEVC fast path, no input frame taken
+	// when encoding.
 	EngineStallTimeout = 30 * time.Second
 
 	// EngineProbeTime bounds a probe's running time, not counting time spent waiting for an instance
-	// slot.
+	// slot. Probes of the test clips and of the S1 and S2 recordings (up to 2.6 GB, 4K H.264 and
+	// HEVC, MP4, MOV, Matroska and MPEG-TS) took at most 1.2 s with close-on-cancel on.
 	EngineProbeTime = 15 * time.Second
-	// MaxProbeReads bounds the bytes a probe reads from its input beyond four times the file's size.
+	// MaxProbeReads bounds the bytes a probe reads from its input: at most probeReadsPerByte times
+	// the file's size plus MaxProbeReads (three times ffprobe's default probe size of 5 MB). The
+	// same probes read at most 1.07 times the file's size (an MPEG-TS file).
 	MaxProbeReads = 16 << 20
 
 	// MaxDecodedPixelsPerInputByte bounds the work a file can demand: decoded luma samples over the
@@ -72,10 +76,30 @@ func num(v float64) string {
 	return fmt.Sprintf("%.1f", v)
 }
 
-// stallError is the cancellation cause the watchdog uses.
-var stallError = &LimitError{
-	Limit: "EngineStallTimeout", Value: EngineStallTimeout.Seconds(), Max: EngineStallTimeout.Seconds(),
-	Hint: "the video engine made no progress for that many seconds and was stopped",
+// probeReadsPerByte is the part of the probe's read bound proportional to the file's size.
+const probeReadsPerByte = 4
+
+// stallError is the cancellation cause the watchdog uses after a stall of d.
+func stallError(d time.Duration) *LimitError {
+	return &LimitError{Limit: "EngineStallTimeout", Value: d.Seconds(), Max: d.Seconds(),
+		Hint: "the video engine made no progress for that many seconds and was stopped"}
+}
+
+// probeLimits returns the probe's bounds for a file of size bytes, for the watchdog's check: at most
+// probeReadsPerByte x size + MaxProbeReads bytes read, and maxTime running (EngineProbeTime).
+func probeLimits(size int64, maxTime time.Duration) func(*meter, time.Duration) error {
+	maxReads := probeReadsPerByte*size + MaxProbeReads
+	return func(m *meter, active time.Duration) error {
+		if r := m.reads.Load(); r > maxReads {
+			return &LimitError{Limit: "MaxProbeReads", Value: float64(r), Max: float64(maxReads),
+				Hint: "the video engine reread the file far more than probing needs and was stopped"}
+		}
+		if active >= maxTime {
+			return &LimitError{Limit: "EngineProbeTime", Value: active.Seconds(), Max: maxTime.Seconds(),
+				Hint: "probing the file took far longer than a video file needs and was stopped"}
+		}
+		return nil
+	}
 }
 
 // ratioHint is the advice given with MaxDecodedPixelsPerInputByte.

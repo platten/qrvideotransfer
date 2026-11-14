@@ -686,14 +686,14 @@ func TestCaptureLimits(t *testing.T) {
 	for i, size := range []int{64, 32} {
 		p := filepath.Join(dir, fmt.Sprintf("run%d.h264", i))
 		encodeCode(t, b, p, size, size, 4, 12, 2)
-		data, err := os.ReadFile(p) //nolint:gosec // test
+		data, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatal(err)
 		}
 		stream = append(stream, data...)
 	}
 	p := filepath.Join(dir, "change.h264")
-	if err := os.WriteFile(p, stream, 0o600); err != nil {
+	if err := os.WriteFile(p, stream, 0o600); err != nil { //nolint:gosec // test
 		t.Fatal(err)
 	}
 	d, err := b.NewDecoder(t.Context(), p, DecodeConfig{})

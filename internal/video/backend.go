@@ -47,11 +47,14 @@ func NewEmbedded(o Options) (*Embedded, error) {
 	return &Embedded{ff{r: lazyEngine{cacheDir: dir}, fast: o.UnsandboxedHEVC}}, nil
 }
 
-// lazyEngine loads the engine when the first job runs.
+// lazyEngine loads the engine when the first job runs. The instance waits on qrvt while the module
+// is compiled, so neither the watchdog nor a probe's time bound counts that time.
 type lazyEngine struct{ cacheDir string }
 
 func (l lazyEngine) exec(ctx context.Context, j *job, m *meter) (int, error) {
+	m.waiting.Add(1)
 	e, err := loadEngine(ctx, l.cacheDir)
+	m.waiting.Add(-1)
 	if err != nil {
 		return 0, err
 	}

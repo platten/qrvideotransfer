@@ -115,15 +115,17 @@ func defaultCacheDir() string {
 	return filepath.Join(d, "qrvt", "wazero")
 }
 
-// slots holds one token per engine instance allowed to run. Compiled Wasm cannot be preempted by
-// the Go scheduler, so instances that spin without calling the host would starve every goroutine,
-// the watchdog's included, if they occupied every P; at most GOMAXPROCS - 1 run at once.
+// slots holds one token per engine instance allowed to run: at most GOMAXPROCS - 1 at once. This is
+// a precaution, not what keeps the watchdog alive: with WithCloseOnContextDone(true) every loop
+// back-edge of the compiled code returns to Go for its check, where the scheduler can preempt it,
+// and GOMAXPROCS + 2 spinning instances without the cap were stopped on time. It would matter for
+// compiled code that never returns to Go, which is what close-on-cancel rules out.
 var slots = make(chan struct{}, max(1, runtime.GOMAXPROCS(0)-1))
 
 // EngineInstances is how many engine instances may run at once: one fewer than GOMAXPROCS at
-// start-up (at least one), so that a P stays free for the watchdog and for qrvt itself. Further
-// instances wait for a turn; the time they wait is not a stall. A caller that keeps more decoders open
-// than this waits on them.
+// start-up (at least one). Further instances wait for a turn; the time they wait is not a stall and
+// has no limit but the context. A caller that keeps this many decoders open without reading them
+// holds every slot, and its next probe or decoder waits until its context ends.
 func EngineInstances() int { return cap(slots) }
 
 // exec implements runner. The instance sees the input file read-only through inputFS at /in, the
@@ -141,7 +143,7 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	var in string
 	reads := &atomic.Int64{}
 	if j.progress == progReads {
-		reads = &m.n
+		reads = &m.reads
 	}
 	fsc := wazero.NewFSConfig()
 	if j.input != "" {

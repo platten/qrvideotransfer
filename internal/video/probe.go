@@ -30,10 +30,10 @@ type probeInfo struct {
 const maxProbeOutput = 1 << 20
 
 func probeArgs(in string) []string {
-	return []string{"-v", "error", "-of", "json", "-select_streams", "v:0", "-show_entries",
+	a := []string{"-v", "error", "-of", "json", "-select_streams", "v:0", "-show_entries",
 		"stream=codec_name,profile,width,height,pix_fmt,r_frame_rate,avg_frame_rate,nb_frames,duration,start_time," +
-			"color_transfer,color_range,bit_rate:stream_tags=rotate:stream_side_data_list:format=format_name,duration,bit_rate",
-		in}
+			"color_transfer,color_range,bit_rate:stream_tags=rotate:stream_side_data_list:format=format_name,duration,bit_rate"}
+	return append(append(a, inputOptions...), in)
 }
 
 // probe runs ffprobe on path through r and validates what it reports.
@@ -50,7 +50,7 @@ func probe(ctx context.Context, r runner, path string) (probeInfo, error) {
 	}
 	out := &capped{max: maxProbeOutput}
 	err = run(ctx, r, job{prog: "ffprobe", args: func(in, _ string) []string { return probeArgs(in) },
-		input: path, stdout: out, progress: progReads})
+		input: path, stdout: out, progress: progReads, check: probeLimits(st.Size(), EngineProbeTime)})
 	if errors.Is(err, ErrEngine) {
 		return probeInfo{}, fmt.Errorf("%w: %w", ErrInvalidVideo, err)
 	}
@@ -128,6 +128,9 @@ func parseProbe(b []byte) (probeInfo, error) {
 	}
 	if err := checkSize(p.Width, p.Height); err != nil {
 		return probeInfo{}, err
+	}
+	if p.Width%2 != 0 || p.Height%2 != 0 {
+		return probeInfo{}, fmt.Errorf("%w: odd picture size %dx%d", ErrUnsupported, p.Width, p.Height)
 	}
 	p.BitDepth = pixFmtDepth(p.PixFmt)
 	p.FPSNum, p.FPSDen = rate(s.AvgFrameRate)

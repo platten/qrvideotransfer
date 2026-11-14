@@ -186,8 +186,11 @@ func TestFastPathTimeLimit(t *testing.T) {
 // slowDecoder takes d over every call and decodes nothing.
 type slowDecoder struct{ d time.Duration }
 
-func (s slowDecoder) DecodeNAL(hevc.NALUnit) ([]*hevc.Picture, error) { time.Sleep(s.d); return nil, nil }
-func (slowDecoder) Flush() []*hevc.Picture                             { return nil }
+func (s slowDecoder) DecodeNAL(hevc.NALUnit) ([]*hevc.Picture, error) {
+	time.Sleep(s.d)
+	return nil, nil
+}
+func (slowDecoder) Flush() []*hevc.Picture { return nil }
 
 // TestFastPathSharedDeadline: the slices of one picture share its time (93b40a6): two slices of
 // 0.6 s each exceed a 1 s limit, although each alone is within it. Not parallel: it shortens the
@@ -413,6 +416,7 @@ func FuzzFastPathNAL(f *testing.F) {
 		}
 		dec, _ := newH265(1)
 		w := startWorker(dec)
+		defer w.stop()
 		r := &nalReader{r: bytes.NewReader(data)}
 		for {
 			b, err := r.next()
