@@ -178,7 +178,10 @@ func unpackArchive(ctx context.Context, r io.Reader, archiveLen int64, o UnpackO
 		return nil, archiveErr(err)
 	}
 	ml, lim := int64(binary.BigEndian.Uint32(lb[:])), manifestLimits(o)
-	if ml > lim.bytes {
+	switch {
+	case ml > MaxManifestBytes: // no --max-entries admits it
+		return nil, &LimitError{"manifest size", ml, lim.bytes, ""}
+	case ml > lim.bytes:
 		return nil, lim.err("manifest size", ml, lim.bytes)
 	}
 	if ml > archiveLen-4 {
