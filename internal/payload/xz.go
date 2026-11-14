@@ -210,6 +210,11 @@ func (x *xzReader) chunk() error {
 	if err := x.full(hdr[1:]); err != nil {
 		return err
 	}
+	// LZMA2 properties: lc + lp at most 4 and pb at most 4. The library allocates literal tables for
+	// lc + lp up to 12 (3 MB) without checking.
+	if p := int(hdr[len(hdr)-1]); len(hdr) == 6 && (p/45 > 4 || p%9+p/9%5 > 4) {
+		return xzErr("bad LZMA2 properties %#x", p)
+	}
 	out := int64(c&0x1f)<<16 | int64(binary.BigEndian.Uint16(hdr[1:3])) + 1
 	chunk := make([]byte, len(hdr)+int(binary.BigEndian.Uint16(hdr[3:5]))+1)
 	copy(chunk, hdr)
