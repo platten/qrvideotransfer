@@ -65,7 +65,7 @@ func Pack(ctx context.Context, dst io.ReadWriteSeeker, o PackOptions) (*PackResu
 	if err != nil {
 		return nil, err
 	}
-	res.Warnings = warns
+	res.Warnings = append(warns, res.Warnings...)
 	return res, nil
 }
 
@@ -194,6 +194,9 @@ func writeStream(ctx context.Context, dst io.ReadWriteSeeker, srcs []source, o P
 	manifest := MarshalManifest(entries)
 	if len(manifest) > MaxManifestBytes {
 		return nil, &LimitError{"manifest size", int64(len(manifest)), MaxManifestBytes, ""}
+	}
+	if w := receiverWarning(len(entries), len(manifest)); w != nil {
+		res.Warnings = append(res.Warnings, *w)
 	}
 	var pass string
 	if o.Passphrase != nil {
@@ -376,5 +379,15 @@ func (c ctxReader) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-// receiverWarning returns a warning when a manifest exceeds the decoder's default limits. Stub.
-func receiverWarning(entries, size int) *Warning { return nil }
+// receiverWarning returns a warning when a manifest of the given entries and size exceeds the
+// decoder's default limits, naming the --max-entries value the receiver needs: enough entries, and
+// enough for N x 64 MiB / 1,000,000 bytes, rounded down, to hold the manifest.
+func receiverWarning(entries, size int) *Warning {
+	if entries <= DefaultMaxEntries && size <= DefaultMaxManifestBytes {
+		return nil
+	}
+	need := max(int64(entries), (int64(size)*MaxManifestEntries+MaxManifestBytes-1)/MaxManifestBytes)
+	return &Warning{WarnReceiverLimit, "", fmt.Sprintf(
+		"the receiver must decode with --max-entries %d: this transfer has %d entries and a manifest of %d bytes, "+
+			"more than the default limits of %d entries and %d bytes", need, entries, size, DefaultMaxEntries, DefaultMaxManifestBytes)}
+}

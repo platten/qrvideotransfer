@@ -72,17 +72,27 @@ func run(a []byte, o UnpackOptions) error {
 }
 
 // TestDefaultEntryLimit: one entry over the default is refused before extraction with the flag that
-// raises it; raised, the manifest is accepted (and the empty tar then refused).
+// raises it; raised, the manifest is accepted (and the empty tar then refused). The limits allow
+// about 67 bytes per entry, less than any file entry takes, so such a manifest reaches the size
+// limit first; the entry limit itself is checked on the parser with a large size limit.
 func TestDefaultEntryLimit(t *testing.T) {
 	a := manifestOnly(flatManifest(DefaultMaxEntries+1, 0))
 	out := t.TempDir()
 	l := limitErr(run(a, UnpackOptions{OutputDir: out}))
-	if l == nil || l.Limit != "manifest entries" || l.Max != DefaultMaxEntries || l.Flag != "--max-entries" {
+	if l == nil || l.Flag != "--max-entries" || (l.Limit != "manifest entries" && l.Limit != "manifest size") {
 		t.Fatalf("over the default: %+v", l)
 	}
 	expectEmpty(t, out)
-	if err := run(a, UnpackOptions{OutputDir: out, MaxEntries: DefaultMaxEntries + 1}); !isUnsafe(err) {
+	if err := run(a, UnpackOptions{OutputDir: out, MaxEntries: 3 * DefaultMaxEntries}); !isUnsafe(err) {
 		t.Fatalf("raised: %v", err)
+	}
+	m := MarshalManifest(flatManifest(11, 0))
+	_, err := parseManifest(m, limits{10, MaxManifestBytes})
+	if l := limitErr(err); l == nil || l.Limit != "manifest entries" || l.Max != 10 || l.Flag != "--max-entries" {
+		t.Fatalf("11 entries over a limit of 10: %v", err)
+	}
+	if _, err := parseManifest(m, limits{11, MaxManifestBytes}); err != nil {
+		t.Fatalf("11 entries at a limit of 11: %v", err)
 	}
 }
 

@@ -103,6 +103,9 @@ type LimitError struct {
 
 // Error implements the error interface.
 func (e *LimitError) Error() string {
+	if e.Flag != "" {
+		return fmt.Sprintf("payload: %s %d exceeds the limit %d (raise it with %s)", e.Limit, e.Value, e.Max, e.Flag)
+	}
 	return fmt.Sprintf("payload: %s %d exceeds the limit %d", e.Limit, e.Value, e.Max)
 }
 

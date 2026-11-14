@@ -71,16 +71,21 @@ func writeString(b *bytes.Buffer, s string) {
 
 // ParseManifest decodes a manifest strictly: valid UTF-8 JSON with exactly the keys of FORMAT.md
 // section 12, each once, integers without fraction or exponent, and version 1. It stops with a
-// [LimitError] beyond [MaxManifestBytes] or [MaxManifestEntries]. It does not apply the path rules;
-// see [ValidateManifest].
+// [LimitError] beyond the format limits [MaxManifestBytes] or [MaxManifestEntries]. It does not
+// apply the path rules; see [ValidateManifest].
 func ParseManifest(b []byte) ([]Entry, error) {
-	if len(b) > MaxManifestBytes {
-		return nil, &LimitError{"manifest size", int64(len(b)), MaxManifestBytes, ""}
+	return parseManifest(b, limits{MaxManifestEntries, MaxManifestBytes})
+}
+
+// parseManifest is ParseManifest within the limits lim.
+func parseManifest(b []byte, lim limits) ([]Entry, error) {
+	if int64(len(b)) > lim.bytes {
+		return nil, lim.err("manifest size", int64(len(b)), lim.bytes)
 	}
 	if !utf8.Valid(b) {
 		return nil, manifestErr("not valid UTF-8")
 	}
-	p := parser{json.NewDecoder(bytes.NewReader(b))}
+	p := parser{json.NewDecoder(bytes.NewReader(b)), lim}
 	p.d.UseNumber()
 	if err := p.delim('{'); err != nil {
 		return nil, err
@@ -129,7 +134,10 @@ func manifestErr(format string, a ...any) error {
 }
 
 // parser reads the manifest token by token, so that key spelling and repetition can be checked.
-type parser struct{ d *json.Decoder }
+type parser struct {
+	d   *json.Decoder
+	lim limits
+}
 
 func (p parser) token() (json.Token, error) {
 	t, err := p.d.Token()
@@ -199,8 +207,8 @@ func (p parser) entries() ([]Entry, error) {
 	}
 	var es []Entry
 	for p.d.More() {
-		if len(es) == MaxManifestEntries {
-			return nil, &LimitError{"manifest entries", MaxManifestEntries + 1, MaxManifestEntries, ""}
+		if int64(len(es)) == p.lim.entries {
+			return nil, p.lim.err("manifest entries", p.lim.entries+1, p.lim.entries)
 		}
 		e, err := p.entry()
 		if err != nil {
@@ -322,7 +330,7 @@ func manifestProblems(entries []Entry, maxSize int64, all bool) ([]*UnsafeArchiv
 			continue
 		}
 		if e.Size > maxSize-total {
-			return probs, &LimitError{"unpacked size", satAdd(total, e.Size), maxSize, ""}
+			return probs, &LimitError{"unpacked size", satAdd(total, e.Size), maxSize, "--max-size"}
 		}
 		total += e.Size
 		k := foldKey(e.Path)
