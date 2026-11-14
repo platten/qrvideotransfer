@@ -81,12 +81,13 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 	if err != nil || len(msg) > maxJobMsg {
 		return 0, fmt.Errorf("%w: job too large", ErrEngine)
 	}
+	tokens := workerSlots // the token goes back where it came from, even if a test swaps the channel
 	select {
-	case workerSlots <- struct{}{}:
+	case tokens <- struct{}{}:
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
-	defer func() { <-workerSlots }()
+	defer func() { <-tokens }()
 	cmd := exec.Command(p.exe, p.args...) //nolint:gosec // qrvt's own executable
 	cmd.Env, cmd.Dir, cmd.WaitDelay = p.env, os.TempDir(), waitDelay
 	tail := &logTail{}
@@ -250,10 +251,10 @@ const waitDelay = 5 * time.Second
 
 // workerSlots holds one token per engine worker process allowed to run in this process: at most
 // WorkerProcesses() at once, whoever starts them. A job waiting for a token is waiting, not stalled,
-// and its wait counts against no bound but its context. Without the cap, parallel callers (the
-// package's own tests on a 4-vCPU CI runner) starved workers of CPU until a probe of a small clip
-// exceeded EngineProbeTime, a bound on wall-clock time.
-var workerSlots = make(chan struct{}, workerCount(runtime.NumCPU(), physicalMemory()))
+// and its wait counts against no bound but its context. The cap keeps this process's own workers
+// from oversubscribing the CPUs it may use; it cannot limit other processes on the machine (DESIGN.md
+// section 8).
+var workerSlots = make(chan struct{}, workerCount(runtime.GOMAXPROCS(0), physicalMemory()))
 
 // workerMemory is what each worker is counted at: the worst process memory measured for one 4K
 // decoding instance, when its whole 512 MiB reservation became resident (DESIGN.md section 8).
@@ -270,8 +271,9 @@ func workerCount(cpus int, mem uint64) int {
 	return n
 }
 
-// WorkerProcesses is how many engine worker processes may run at once in this process: the CPU
-// count, reduced so that each, counted at 920 MB, fits in half the physical memory (at least one).
+// WorkerProcesses is how many engine worker processes may run at once in this process: GOMAXPROCS at
+// start-up (which honours a container's CPU quota), reduced so that each, counted at 920 MB, fits in
+// half the memory this process may use (on Linux, the cgroup's limit when smaller), at least one.
 // Further jobs wait for a turn. As with [EngineInstances], a caller that keeps this many decoders
 // open without reading them holds every turn, and its next probe or decoder waits until its context
 // ends.

@@ -558,7 +558,11 @@ func TestSlotTokensReturnHome(t *testing.T) {
 		})
 		workerSlots, slots = make(chan struct{}, 1), make(chan struct{}, 1) // replaced while the token is out
 		cancel()
-		within(t, time.Minute, c.name+": the job's end", func() { <-done })
+		var err error
+		within(t, time.Minute, c.name+": the job's end", func() { err = <-done })
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("%s: %v", c.name, err)
+		}
 		if len(first) != 0 {
 			t.Errorf("%s: the token did not return to its channel", c.name)
 		}
