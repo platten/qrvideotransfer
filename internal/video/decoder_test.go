@@ -63,7 +63,9 @@ func nextWithin(t *testing.T, d Decoder, limit time.Duration) (time.Duration, er
 	}
 }
 
-// shortStall shortens the watchdog's limit for one test; such tests are not parallel.
+// shortStall shortens the watchdog's limit for one test; such tests are not parallel. Upper bounds on
+// wall time in these tests are generous (several times the limit): they check that a stop happens
+// at all, which before the fixes it did not, and loaded CI runners delay goroutines by seconds.
 func shortStall(t *testing.T, d time.Duration) {
 	t.Helper()
 	stallTimeout = d
@@ -88,7 +90,7 @@ func TestDecoderNoTimestamp(t *testing.T) {
 	d := startDecoder(t.Context(), frameRunner(-1, 0, false), "x", tiny, DecodeConfig{}, "yuv420p")
 	el, err := nextWithin(t, d, 15*time.Second)
 	var le *LimitError
-	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" || el > 5*time.Second {
+	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" || el > 15*time.Second {
 		t.Errorf("got %v after %v", err, el)
 	}
 	_ = d.Close()
@@ -114,7 +116,7 @@ func TestDecoderTrickle(t *testing.T) {
 	d := startDecoder(t.Context(), trickle, "x", tiny, DecodeConfig{}, "yuv420p")
 	el, err := nextWithin(t, d, 15*time.Second)
 	var le *LimitError
-	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" || el > 5*time.Second {
+	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" || el > 15*time.Second {
 		t.Errorf("got %v after %v", err, el)
 	}
 	_ = d.Close()
@@ -124,12 +126,17 @@ func TestDecoderTrickle(t *testing.T) {
 // while the engine is blocked writing a frame nobody reads.
 func TestDecoderCancel(t *testing.T) {
 	t.Parallel()
+	// Prompt means well inside the 30 s stall limit, counted from when the cancel ran: before the fix
+	// neither case returned at all. Wall-clock margins are generous because a loaded CI runner
+	// delayed the goroutines by 3.7 s (macos-26-intel).
+	const prompt = 10 * time.Second
 	ctx, cancel := context.WithCancel(t.Context())
 	d := startDecoder(ctx, frameRunner(-1, 0, false), "x", tiny, DecodeConfig{}, "yuv420p")
-	time.AfterFunc(300*time.Millisecond, cancel)
-	el, err := nextWithin(t, d, 10*time.Second)
-	if !errors.Is(err, context.Canceled) || el > 2*time.Second {
-		t.Errorf("got %v after %v", err, el)
+	cancelled := make(chan time.Time, 1)
+	time.AfterFunc(300*time.Millisecond, func() { cancelled <- time.Now(); cancel() })
+	_, err := nextWithin(t, d, time.Minute)
+	if at := <-cancelled; !errors.Is(err, context.Canceled) || time.Since(at) > prompt {
+		t.Errorf("got %v %v after the cancel", err, time.Since(at))
 	}
 	_ = d.Close()
 
@@ -139,7 +146,7 @@ func TestDecoderCancel(t *testing.T) {
 	cancel()
 	select {
 	case <-d.done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(prompt):
 		t.Fatal("the instance did not stop after the cancel")
 	}
 	_ = d.Close()
@@ -287,7 +294,7 @@ func TestProbeLimits(t *testing.T) {
 		return 0, nil
 	})
 	start := time.Now()
-	if _, err := probe(t.Context(), reread, path); !errors.As(err, &le) || le.Limit != "MaxProbeReads" || time.Since(start) > 5*time.Second {
+	if _, err := probe(t.Context(), reread, path); !errors.As(err, &le) || le.Limit != "MaxProbeReads" || time.Since(start) > 15*time.Second {
 		t.Errorf("rereading probe: %v after %v", err, time.Since(start))
 	}
 	// One that reads slowly for ever is stopped by the time bound; time waiting is not counted.
@@ -303,7 +310,7 @@ func TestProbeLimits(t *testing.T) {
 	})
 	start = time.Now()
 	err := run(t.Context(), slow, job{check: probeLimits(100, 2*time.Second)})
-	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "EngineProbeTime" || el < 4*time.Second || el > 8*time.Second {
+	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "EngineProbeTime" || el < 4*time.Second || el > 20*time.Second {
 		t.Errorf("slow probe: %v after %v", err, el)
 	}
 }

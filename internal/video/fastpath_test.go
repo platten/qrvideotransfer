@@ -204,7 +204,7 @@ func TestFastPathSharedDeadline(t *testing.T) {
 	start := time.Now()
 	err := d.Next(&f)
 	var le *LimitError
-	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "FastPathPictureTime" || el < time.Second || el > 1500*time.Millisecond {
+	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "FastPathPictureTime" || el < time.Second || el > 5*time.Second {
 		t.Errorf("got %v after %v", err, el)
 	}
 	_ = d.Close()
@@ -245,7 +245,7 @@ func TestFastPathRelease(t *testing.T) {
 	if err := d.Next(&fr); err != nil || d.(*fastDecoder).fellBack == nil {
 		t.Fatalf("no fallback: %v", err)
 	}
-	if el := time.Since(start); dec.flushed.Load() || el > 3*time.Second {
+	if el := time.Since(start); dec.flushed.Load() || el > 10*time.Second {
 		t.Errorf("the old decoder was flushed (%v), the first frame took %v", dec.flushed.Load(), el)
 	}
 	_ = d.Close()
@@ -276,7 +276,7 @@ func TestFastPathCopyLimit(t *testing.T) {
 	start := time.Now()
 	_, err := newFastDecoder(ctx, &ff{r: grow, fast: true}, "x", p, DecodeConfig{})
 	var le *LimitError
-	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "FastPathCopySize" || le.Max != 2*1000+FastPathCopySize || el > 5*time.Second {
+	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "FastPathCopySize" || le.Max != 2*1000+FastPathCopySize || el > 15*time.Second {
 		t.Errorf("got %v after %v", err, el)
 	}
 	if a := copyArgs("IN", "OUT", p, DecodeConfig{}); slices.Index(a, "-format_whitelist") > slices.Index(a, "IN") ||

@@ -233,7 +233,7 @@ func TestNativeBackend(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	start := time.Now()
-	if _, err := s.Probe(ctx, hls); !errors.Is(err, ErrInvalidVideo) || time.Since(start) > 5*time.Second {
+	if _, err := s.Probe(ctx, hls); !errors.Is(err, ErrInvalidVideo) || time.Since(start) > 15*time.Second {
 		t.Errorf("HLS playlist: %v after %v", err, time.Since(start))
 	}
 }

@@ -601,7 +601,7 @@ func TestProbeBound(t *testing.T) {
 	err := run(t.Context(), e, job{prog: "ffprobe", input: p, progress: progReads, check: probeLimits(int64(len(hlsPlaylist)), 3*time.Second),
 		args: func(in, _ string) []string { return []string{"-v", "error", "-show_entries", "format=format_name", in} }})
 	var le *LimitError
-	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "EngineProbeTime" || el > 8*time.Second {
+	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "EngineProbeTime" || el > 20*time.Second {
 		t.Errorf("got %v after %v", err, el)
 	}
 }
