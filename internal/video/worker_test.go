@@ -153,11 +153,23 @@ func (w workerRunner) exec(ctx context.Context, j *job, m *meter) (int, error) {
 
 // pids collects the workers a runner starts.
 type pids struct {
-	mu sync.Mutex
-	l  []int
+	mu    sync.Mutex
+	l     []int
+	first time.Time // when the first one started
 }
 
-func (p *pids) add(pid int) { p.mu.Lock(); p.l = append(p.l, pid); p.mu.Unlock() }
+func (p *pids) add(pid int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.l) == 0 {
+		p.first = time.Now()
+	}
+	p.l = append(p.l, pid)
+}
+
+// since is the time since the first worker started: a test's timing excludes waiting for a worker
+// slot.
+func (p *pids) since() time.Duration { p.mu.Lock(); defer p.mu.Unlock(); return time.Since(p.first) }
 
 func (p *pids) all() []int { p.mu.Lock(); defer p.mu.Unlock(); return append([]int(nil), p.l...) }
 
@@ -196,13 +208,12 @@ func TestWorkerSpin(t *testing.T) {
 		t.Skip("takes 30 s")
 	}
 	p, ps := testWorkers(t)
-	start := time.Now()
 	err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil }})
 	var le *LimitError
 	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
 		t.Fatalf("got %v", err)
 	}
-	if el := time.Since(start); el < EngineStallTimeout || el > EngineStallTimeout+5*time.Second {
+	if el := ps.since(); el < EngineStallTimeout || el > EngineStallTimeout+5*time.Second { // from the worker's start, after any wait for a slot
 		t.Errorf("stopped after %v", el)
 	}
 	gone(t, ps.all(), 5*time.Second)
@@ -334,14 +345,13 @@ func TestWorkerLoadLimit(t *testing.T) {
 	p, ps := testWorkers(t, "noready")
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	start := time.Now()
 	err := run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
 		timeout: time.Second})
 	var le *LimitError
 	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" {
 		t.Fatalf("got %v", err)
 	}
-	if el := time.Since(start); el < 2*time.Second || el > 12*time.Second {
+	if el := ps.since(); el < 2*time.Second || el > 12*time.Second {
 		t.Errorf("stopped after %v", el)
 	}
 	gone(t, ps.all(), 5*time.Second)
@@ -450,6 +460,80 @@ func TestWorkerStatusRecovers(t *testing.T) {
 	}
 	if hit.InProcess() == nil {
 		t.Error("the backend whose job fell back forgot it")
+	}
+}
+
+// TestWorkerStatusKeptWithoutReady: only a worker that reaches ready clears WorkerStatus; one
+// cancelled while loading, or one that fails to start, does not. Not parallel: it sets the status.
+func TestWorkerStatusKeptWithoutReady(t *testing.T) {
+	defer degraded.Store(nil)
+	reason := errors.New("an earlier failed start")
+	for _, mode := range []string{"noready", "pre-garbage"} {
+		degraded.Store(&reason)
+		p, ps := testWorkers(t, mode)
+		_ = run(testCtx(t, 2*time.Second), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+		gone(t, ps.all(), 5*time.Second)
+		if WorkerStatus() == nil {
+			t.Errorf("%s: a worker that never reached ready cleared the status", mode)
+		}
+	}
+	degraded.Store(&reason)
+	p, _ := testWorkers(t, "early") // ready, then ends
+	_ = run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+	if err := WorkerStatus(); err != nil {
+		t.Errorf("a worker reached ready: %v", err)
+	}
+}
+
+// TestWorkerCount: worker processes are capped at the CPU count, reduced so that each, counted at
+// 920 MB, fits in half the physical memory (DESIGN.md section 8), at least one; an unknown memory
+// size leaves the CPU count.
+func TestWorkerCount(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		cpus int
+		mem  uint64
+		want int
+	}{{16, 16e9, 8}, {4, 16e9, 4}, {8, 1e9, 1}, {2, 0, 2}, {0, 0, 1}} {
+		if got := workerCount(c.cpus, c.mem); got != c.want {
+			t.Errorf("workerCount(%d, %d) = %d, want %d", c.cpus, c.mem, got, c.want)
+		}
+	}
+	if n := WorkerProcesses(); n < 1 || n > max(1, runtime.NumCPU()) || n != cap(workerSlots) {
+		t.Errorf("WorkerProcesses() = %d with %d CPUs and %d slots", n, runtime.NumCPU(), cap(workerSlots))
+	}
+}
+
+// TestWorkerCap: with every worker slot taken, the next job waits for one, starting no process,
+// and the wait counts against neither the stall watchdog nor a probe's time bound; it ends only
+// with its context. Once the slot is free a job runs. Not parallel: it runs with a single slot.
+func TestWorkerCap(t *testing.T) {
+	old := workerSlots
+	workerSlots = make(chan struct{}, 1)
+	defer func() { workerSlots = old }()
+	p, ps := testWorkers(t, "readyhang")
+	ctx, cancel := context.WithCancel(t.Context())
+	held := make(chan error, 1)
+	go func() {
+		held <- run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+	}()
+	within(t, time.Minute, "the first worker's start", func() {
+		for len(ps.all()) == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
+	q, qs := testWorkers(t, "early")
+	start := time.Now()
+	err := run(testCtx(t, 3*time.Second), workerRunner{q}, job{prog: "ffprobe", args: func(string, string) []string { return nil },
+		timeout: time.Second, check: probeLimits(1, time.Second)})
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) < 3*time.Second || len(qs.all()) != 0 {
+		t.Errorf("waiting for a slot: %v after %v, %d workers started", err, time.Since(start), len(qs.all()))
+	}
+	cancel()
+	within(t, time.Minute, "the held worker's end", func() { <-held })
+	err = run(testCtx(t, time.Minute), workerRunner{q}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+	if len(qs.all()) != 1 || !errors.Is(err, ErrEngine) { // "early" ends without a result
+		t.Errorf("after the slot was freed: %v, %d workers", err, len(qs.all()))
 	}
 }
 

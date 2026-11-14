@@ -246,6 +246,15 @@ func startFailure(typ byte, buf []byte, err error) error {
 // waitDelay bounds how long a killed worker may take to be reaped.
 const waitDelay = 5 * time.Second
 
+// workerSlots is a stub for the test commit: it caps nothing yet.
+var workerSlots = make(chan struct{}, 1<<16)
+
+// workerCount is a stub for the test commit.
+func workerCount(int, uint64) int { return 0 }
+
+// WorkerProcesses is a stub for the test commit.
+func WorkerProcesses() int { return 0 }
+
 // EngineLoadLimit bounds the time from starting an engine worker process to its message that the
 // engine is loaded and the program starts (docs/SECURITY.md section 5). The stall watchdog does not
 // cover that phase, because a first compilation on a slow machine takes longer than
