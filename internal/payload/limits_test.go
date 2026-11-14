@@ -126,6 +126,20 @@ func TestLimitFlags(t *testing.T) {
 	if l := limitErr(run(b.Bytes(), UnpackOptions{MaxEntries: MaxManifestEntries})); l == nil || l.Flag != "" || l.Max != MaxManifestBytes {
 		t.Errorf("manifest over the format limit: %+v", l)
 	}
+	// A declared size above the format limit cannot be admitted by any --max-entries, so even at
+	// lower limits the error names no flag; one below it names the flag.
+	for _, n := range []int64{0, 200_000} {
+		lim := manifestLimits(UnpackOptions{MaxEntries: n})
+		if l := limitErr(run(b.Bytes(), UnpackOptions{MaxEntries: n})); l == nil || l.Flag != "" || l.Max != lim.bytes {
+			t.Errorf("MaxEntries %d, declared size over the format limit: %+v", n, l)
+		}
+		var c bytes.Buffer
+		_ = binary.Write(&c, binary.BigEndian, uint32(MaxManifestBytes))
+		c.Write(make([]byte, 16))
+		if l := limitErr(run(c.Bytes(), UnpackOptions{MaxEntries: n})); l == nil || l.Flag != "--max-entries" {
+			t.Errorf("MaxEntries %d, declared size at the format limit: %+v", n, l)
+		}
+	}
 	if !strings.Contains((&LimitError{"manifest entries", 2, 1, "--max-entries"}).Error(), "--max-entries") {
 		t.Error("the message does not name the flag")
 	}
