@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 
+	qrvt "github.com/platten/qrvideotransfer"
 	"github.com/platten/qrvideotransfer/internal/cli"
 )
 
@@ -13,6 +14,7 @@ import (
 var version = "dev"
 
 func main() {
+	qrvt.EngineWorker() // first: a process started as an engine worker serves its job and exits here
 	err := cli.Execute(context.Background(), cli.NewEnv(version), os.Args[1:])
 	os.Exit(cli.ExitCode(err))
 }

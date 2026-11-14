@@ -823,7 +823,7 @@ Costs a user should expect:
   - *Fallback.* When the host never called the hook, its executable cannot be found or a worker
     cannot be started, the instance runs in qrvt's process with close-on-cancel on, under the
     `EngineInstances()` cap: the same guarantees, 4 to 11 times slower. `video.WorkerStatus` then
-    returns the reason, which the pipeline reports as a warning.
+    returns the reason, which the pipeline reports as a warning (`WarnEngineInProcess`).
   - *Not claimed.* A worker is the same binary with the same privileges as qrvt; worker processes
     bound hangs and memory and keep a stuck engine from blocking qrvt, but they are not an operating
     system sandbox. The WebAssembly sandbox is still what confines the decoder.
