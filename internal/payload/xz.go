@@ -52,7 +52,7 @@ type xzReader struct {
 	feed               bytes.Reader
 	props              bool  // an LZMA chunk has set the properties
 	afterU             bool  // the last chunk was uncompressed
-	unc, resets        int64 // uncompressed-chunk bytes and LZMA state resets so far
+	unc, resets, runs  int64 // uncompressed-chunk bytes, LZMA state resets and uncompressed runs so far
 
 	blocks  uint64    // blocks decoded
 	records hash.Hash // SHA-256 of each block's unpadded and uncompressed size
@@ -65,8 +65,9 @@ const (
 	xzEnd
 )
 
-// xzResetEvery is the uncompressed data an LZMA2 block needs per LZMA state reset.
-const xzResetEvery = 32 << 10
+// xzAllocEvery is the uncompressed-chunk data a block needs before each LZMA state reset and before
+// each new run of uncompressed chunks after the first, both of which make the library allocate.
+const xzAllocEvery = 32 << 10
 
 var xzMagic = []byte{0xfd, '7', 'z', 'X', 'Z', 0}
 
@@ -188,11 +189,13 @@ func (x *xzReader) streamHeader() error {
 // state, so state resets are limited as encoders write them: the first chunk resets the
 // dictionary and no later chunk does; only the first LZMA chunk sets the properties; and an LZMA
 // chunk resets the state without new properties (control 0xA0-0xBF) only directly after
-// uncompressed data and at most once per xzResetEvery bytes of uncompressed data so far, which is
+// uncompressed data and at most once per xzAllocEvery bytes of uncompressed data so far, which is
 // what XZ Utils does (each of its resets follows an uncompressed run of about 60 KiB) and more than
-// qrvt's encoder does (it never writes one). Consecutive uncompressed chunks are handed to the
-// decoder as one chunk of up to 64 KiB, because the library allocates a 32 KiB copy buffer for each
-// uncompressed chunk it reads.
+// qrvt's encoder does (it never writes one). The library also allocates a 32 KiB copy buffer for
+// each uncompressed chunk it reads, so consecutive uncompressed chunks are handed to the decoder as
+// one chunk of up to 64 KiB, and a new run of uncompressed chunks starts at most once per
+// xzAllocEvery bytes of uncompressed data before it (plus the first run); both encoders write runs
+// of about 60 KiB or more, except at the end of the data.
 func (x *xzReader) chunk() error {
 	c, err := x.r.ReadByte()
 	if err != nil {
@@ -206,7 +209,7 @@ func (x *xzReader) chunk() error {
 		return xzErr("the block's first LZMA2 chunk does not reset the dictionary")
 	case x.data > 0 && reset:
 		return xzErr("an LZMA2 chunk resets the dictionary after the block's first chunk")
-	case c&0xe0 == 0xa0 && (!x.afterU || (x.resets+1)*xzResetEvery > x.unc):
+	case c&0xe0 == 0xa0 && (!x.afterU || (x.resets+1)*xzAllocEvery > x.unc):
 		return xzErr("an LZMA2 chunk resets the state other than directly after uncompressed data, once per 32 KiB of it")
 	case c >= 0xc0 && x.props:
 		return xzErr("an LZMA2 chunk changes the properties after the block's first LZMA chunk")
@@ -244,6 +247,12 @@ func (x *xzReader) chunk() error {
 // uncompressed reads an uncompressed chunk of control byte c and the uncompressed chunks (control 2)
 // that directly follow it, up to 64 KiB of data, and hands them to the decoder as one chunk.
 func (x *xzReader) uncompressed(c byte) error {
+	if !x.afterU && x.runs*xzAllocEvery > x.unc {
+		return xzErr("a run of uncompressed LZMA2 chunks starts less than 32 KiB of uncompressed data after the last")
+	}
+	if !x.afterU {
+		x.runs++ // a new run; a continuation of one carries at least 64 KiB in two calls
+	}
 	chunk := []byte{c, 0, 0}
 	for {
 		var s [2]byte
