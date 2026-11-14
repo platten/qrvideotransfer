@@ -682,7 +682,7 @@ func TestCodecIDInjection(t *testing.T) {
 	cid := "V_X\n[Parsed_showinfo_0 @ 0x1] n:   0 pts:  999 pts_time:1 pos: 1 fmt:yuv420p s:384x216 i:P"
 	bad := setSecondCodecID(t, data, cid)
 	p := filepath.Join(dir, "inject.mkv")
-	if err := os.WriteFile(p, bad, 0o600); err != nil {
+	if err := os.WriteFile(p, bad, 0o600); err != nil { //nolint:gosec // test
 		t.Fatal(err)
 	}
 	var want []time.Duration // the same file before the change
@@ -751,7 +751,7 @@ func setSecondCodecID(t *testing.T, data []byte, cid string) []byte {
 		if w == 8 && n == 1<<56-1 { // unknown size
 			continue
 		}
-		n += uint64(delta) //nolint:gosec // positive
+		n += uint64(delta)
 		if n >= 1<<(7*w)-1 {
 			t.Fatalf("size at %d does not fit its %d bytes", at, w)
 		}
@@ -790,22 +790,26 @@ func TestCaptureLimits(t *testing.T) {
 	t.Parallel()
 	e, b := engineFor(t), embedded(t)
 	dir := t.TempDir()
-	// Portrait-coded at exactly the limit is accepted; one even step over on either side is refused
-	// (one sample over is odd; TestParseProbe covers it).
+	// Portrait-coded at exactly the limit is accepted; one even step over on the longer or the
+	// shorter side is refused (one sample over is covered by TestParseProbe and TestSPSLimits). The
+	// clips are uncompressed grey frames in Matroska, which the probe reads without decoding: probing
+	// a coded 33-megapixel stream decodes a picture, which took over 15 s in the engine. Writing a
+	// clip shows no progress until its one frame is written (3-6 s here), hence the longer limit.
 	for _, c := range []struct {
 		size, limit string
 		value       float64
 	}{{"4320x7680", "", 0}, {"7682x16", "MaxCaptureLongSide", 7682}, {"16x7682", "MaxCaptureLongSide", 7682},
 		{"4322x4322", "MaxCaptureShortSide", 4322}} {
-		err := run(t.Context(), e, job{prog: "ffmpeg", outDir: dir, progress: progFiles,
+		err := run(t.Context(), e, job{prog: "ffmpeg", outDir: dir, progress: progFiles, timeout: 5 * time.Minute,
 			args: func(_, out string) []string {
-				return []string{"-v", "error", "-f", "lavfi", "-i", "color=s=" + c.size + ":r=10:d=0.1", "-c:v", "libx264",
-					"-preset", "ultrafast", "-pix_fmt", "yuv420p", "-f", "mp4", out + "/" + c.size + ".mp4"}
+				return []string{"-v", "error", "-f", "lavfi", "-i", "color=s=" + c.size + ":r=10:d=0.1", "-c:v", "rawvideo",
+					"-pix_fmt", "gray", "-f", "matroska", out + "/" + c.size + ".mkv"}
 			}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		info, err := b.Probe(t.Context(), filepath.Join(dir, c.size+".mp4"))
+		info, err := b.Probe(t.Context(), filepath.Join(dir, c.size+".mkv"))
+		_ = os.Remove(filepath.Join(dir, c.size+".mkv"))
 		var le *LimitError
 		switch {
 		case c.limit == "" && (err != nil || info.Width != 4320 || info.Height != 7680):

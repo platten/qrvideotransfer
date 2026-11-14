@@ -14,7 +14,8 @@ import (
 // an instance waiting for its turn is not stalled, and every one is stopped promptly: that is
 // asserted. Without the cap (DESIGN.md section 12) every one must still be stopped by the watchdog,
 // but the time is only logged: on a 16-thread development machine they were stopped on time, while
-// on the macos-26-intel CI runner five took 16.8 s against a 2 s limit, which is why the cap stays.
+// on the macos-26-intel CI runner five took 16.8 s against a 2 s limit (up to 8 times late), which is
+// why the cap is a real defence.
 // Not parallel: it replaces the slots.
 func TestWatchdogUnderLoad(t *testing.T) {
 	e := engineFor(t)
