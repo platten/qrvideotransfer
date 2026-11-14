@@ -28,6 +28,9 @@ func TestManKeepsPercent(t *testing.T) {
 	if strings.Contains(out, "MISSING") || strings.Contains(out, "%!") {
 		t.Errorf("garbled man page:\n%s", out)
 	}
+	if u := sub.Flags().Lookup("level").Usage; u != "A level" {
+		t.Errorf("usage left changed after the man page: %q", u)
+	}
 	if strings.Contains(out, "A switch (default") || strings.Contains(out, "of it; 80%s and %d and %% (default") {
 		t.Error("a default is shown for a flag whose default is false or 0")
 	}
