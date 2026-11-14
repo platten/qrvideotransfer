@@ -73,10 +73,11 @@ type DecodeOptions struct {
 	// Non-empty: the transfer must be signed by one of these.
 	VerifyKeys [][]byte
 	MaxSize    int64 // largest total size that may be unpacked
-	// MaxEntries is the largest number of manifest entries that may be unpacked; the manifest-size
-	// limit is raised in proportion. 0 means the decoder's default, about 100,000; the most is the
-	// format limit of 1,000,000 entries and 64 MiB (flag --max-entries). A manifest over the limit
-	// is a LimitError whose Flag is "--max-entries".
+	// MaxEntries is the largest number of manifest entries that may be unpacked (flag
+	// --max-entries). 0 means DefaultMaxEntries, with a manifest of at most
+	// DefaultMaxManifestBytes. Otherwise it is 1 to 1,000,000, the format limit, and the manifest
+	// may hold at most MaxEntries x 64 MiB / 1,000,000 bytes, capped at 64 MiB. A manifest over
+	// either limit is a LimitError whose Flag is "--max-entries".
 	MaxEntries int
 	Overwrite  bool
 	Report     string // optional path for a JSON report
@@ -88,6 +89,17 @@ type DecodeOptions struct {
 	Workers         int
 	Progress        func(Event)
 }
+
+// Default manifest limits of [Decode], a tenth of the format limits of 1,000,000 entries and
+// 64 MiB (SECURITY.md section 5). DecodeOptions.MaxEntries raises them.
+const (
+	// DefaultMaxEntries is the number of manifest entries a decode accepts when
+	// DecodeOptions.MaxEntries is 0.
+	DefaultMaxEntries = 100000
+	// DefaultMaxManifestBytes is the manifest size, in bytes, a decode accepts when
+	// DecodeOptions.MaxEntries is 0: 64 MiB / 10, rounded down.
+	DefaultMaxManifestBytes = 6710886
+)
 
 // CalibrationOptions are the inputs of [CalibrationVideo].
 type CalibrationOptions struct {
