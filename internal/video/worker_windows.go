@@ -13,11 +13,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// startWorker starts the worker, with job in a Job Object that kills it when the job's last handle
+// startProc starts the worker, with job in a Job Object that kills it when the job's last handle
 // closes, which happens when this process exits for any reason; release closes that handle. The
 // worker's own exit on a closed pipe is the baseline; the job adds the operating system's guarantee.
 // When no job can be made the worker starts without one.
-func startWorker(cmd *exec.Cmd, job bool) (release func(), err error) {
+func startProc(cmd *exec.Cmd, job bool) (release func(), err error) {
 	if !job {
 		return func() {}, cmd.Start()
 	}

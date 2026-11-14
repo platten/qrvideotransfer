@@ -92,7 +92,7 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 	if err != nil {
 		return 0, err
 	}
-	release, err := startWorker(cmd, !p.noJob)
+	release, err := startProc(cmd, !p.noJob)
 	if err != nil {
 		return 0, fmt.Errorf("%w: %w", errWorkerStart, err)
 	}
