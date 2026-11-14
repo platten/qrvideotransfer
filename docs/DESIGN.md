@@ -1064,8 +1064,13 @@ by GoReleaser).
   the other five runners. Tests, the coverage gate, race tests and fuzzing are built with the release
   build tags (`RELEASE_TAGS`), so CI tests what ships; one amd64 runner also tests the untagged build.
   Lint runs on both builds. The setup scripts run with `--spike` on Linux, macOS and Windows runners,
-  and `setup.sh` without it in Fedora and Arch Linux containers (images pinned by digest), so that every
-  package-manager path and the Go download are exercised. Every job and every long step has a timeout.
+  and `setup.sh` without it in Fedora and Arch Linux containers, so that every package-manager path and
+  the Go download are exercised. The container images are pinned by digest and refreshed by hand at the
+  start of each milestone, and Fedora's also when a new release comes out (April and October); the
+  checkout is mounted read-only and the containers run with `no-new-privileges`. One step runs the
+  `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
+  tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
+  others. Every job and every long step has a timeout.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
@@ -1073,7 +1078,9 @@ by GoReleaser).
 - **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
   Dependabot for Go modules and actions, except wazero and go-ffmpreg: every engine speed, memory and
   sandbox figure of spike S1 was measured on their pinned versions, so they are updated by hand, with
-  stream D re-running the S1 measurements, no later than M7; govulncheck over the default build (the
+  stream D re-running the S1 measurements, no later than M7. An advisory for either module, whether
+  from a GitHub alert or from the CI vulnerability scan, is fixed by hand straight away, with the S1
+  measurements re-run. govulncheck over the default build (the
   action, on all six runners) and over the release build (`tools/dev vulncheck`, for linux, darwin and
   windows). Every action is pinned by a full commit SHA with a
   version comment, every workflow declares top-level permissions (jobs widen them only where needed),
@@ -1176,3 +1183,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream G: section 16 says `install-tools` downloads the pinned tools as release archives with pinned SHA-256 (go-licenses through `go install`) and lists the new `tools/dev` tasks; section 17 names the workflows, the nightly placeholders, the workflow policy and its test, the licence allow-list (GPL-2.0 excluded), release-please being off until the owner enables it, provenance for every checksummed file, and `RELEASE_TAGS` in `.goreleaser.yaml` as the one definition of the release build tags, set to `noasm,nounsafe`, with which CI tests, measures coverage and fuzzes (one runner also tests untagged) |
 | 2026-11-13 | M1 stream G follow-up: section 16 adds the `vulncheck` task and govulncheck v1.9.0; section 17 scans the release build with govulncheck, lints both builds, and runs `setup.sh` in Fedora and Arch Linux containers |
 | 2026-11-13 | M1 stream G follow-up: section 17 says Dependabot ignores wazero and go-ffmpreg, which are updated by hand with the S1 measurements re-run (stream D) no later than M7 |
+| 2026-11-14 | M1 stream G follow-up 2: section 17 states that an advisory for wazero or go-ffmpreg (GitHub alert or CI scan) is fixed by hand straight away with S1 re-run, how the Fedora and Arch Linux container digests are refreshed and that the containers run read-only and without new privileges, and adds the HEVC fast-path test step and fuzz tag (stream D, PR #9) |

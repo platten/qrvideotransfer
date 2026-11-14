@@ -184,6 +184,9 @@ jobs:
   # Runs scripts/setup.sh --yes in Fedora and Arch Linux containers (images pinned by digest), which
   # have neither Go nor git, so the dnf and pacman paths install git and the script downloads Go.
   # Without --spike: ffmpeg with libx265 on Fedora needs RPM Fusion, which the script only advises.
+  # The digests are refreshed by hand at the start of each milestone, and for Fedora also when a new
+  # release comes out (April and October); the tag beside each digest names what it was taken from.
+  # The checkout is mounted read-only and the container cannot gain privileges.
   setup-scripts-container:
     name: setup scripts (${{ matrix.distro }})
     strategy:
@@ -205,7 +208,7 @@ jobs:
         timeout-minutes: 25
         shell: bash
         run: |
-          docker run --rm -v "$PWD:/src" -w /src -e GOFLAGS=-buildvcs=false "$IMAGE" sh -euc '
+          docker run --rm --security-opt no-new-privileges -v "$PWD:/src:ro" -w /src -e GOFLAGS=-buildvcs=false "$IMAGE" sh -euc '
             scripts/setup.sh --yes
             export PATH="$HOME/.local/go1.27.4/bin:$PATH"
             test "$(go env GOVERSION)" = go1.27.4
