@@ -1275,8 +1275,13 @@ by GoReleaser).
   the other five runners. Tests, the coverage gate, race tests and fuzzing are built with the release
   build tags (`RELEASE_TAGS`), so CI tests what ships; one amd64 runner also tests the untagged build.
   Lint runs on both builds. The setup scripts run with `--spike` on Linux, macOS and Windows runners,
-  and `setup.sh` without it in Fedora and Arch Linux containers (images pinned by digest), so that every
-  package-manager path and the Go download are exercised. Every job and every long step has a timeout.
+  and `setup.sh` without it in Fedora and Arch Linux containers, so that every package-manager path and
+  the Go download are exercised. The container images are pinned by digest and refreshed by hand at the
+  start of each milestone, and Fedora's also when a new release comes out (spring and autumn); the
+  checkout is mounted read-only and the containers run with `no-new-privileges`. One step runs the
+  `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
+  tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
+  others. Every job and every long step has a timeout.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
@@ -1284,7 +1289,10 @@ by GoReleaser).
 - **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
   Dependabot for Go modules and actions, except wazero and go-ffmpreg: every engine speed, memory and
   sandbox figure of spike S1 was measured on their pinned versions, so they are updated by hand, with
-  stream D re-running the S1 measurements, before the final security pass (M7) so that the pass covers the shipped engine; govulncheck over the default build (the
+  stream D re-running the S1 measurements, before the final security pass (M7) so that the pass
+  covers the shipped engine. An advisory for either module, whether from a GitHub alert or from the CI
+  vulnerability scan, is fixed by hand straight away, with the S1 measurements re-run. govulncheck over
+  the default build (the
   action, on all six runners) and over the release build (`tools/dev vulncheck`, for linux, darwin and
   windows). Every action is pinned by a full commit SHA with a
   version comment, every workflow declares top-level permissions (jobs widen them only where needed),
@@ -1400,4 +1408,5 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, review of PR #9: section 8 calls the instance cap a precaution and states that workers must not hold more decoders open than the cap without reading them. Section 12: how a slice is read adds the anchored `showinfo` match, the refusal of extra timestamp lines and of odd sizes, and reading frames straight into the caller's planes; the sandbox adds the protocol and format whitelists (the HLS playlist that held ffprobe for 8 minutes) and the probe's bounds; the watchdog counts a complete, timestamped frame, does not excuse an instance qrvt is waiting on, closes the pipe on cancellation, and gives the true reason the cap is not needed with close-on-cancel and its hold-and-wait hazard; the fast path's as-built list adds the copy-size bound, the abandon without a flush, the CI step and the fuzz tag |
 | 2026-11-14 | M1 stream D, CI on PR #9: sections 8 and 12 correct the instance cap's description: on the macos-26-intel runner GOMAXPROCS + 1 uncapped spinning instances took 16.8 s against a 2 s limit, so the cap is a mitigation, not a harmless precaution |
 | 2026-11-14 | M1 stream D, round 2 of the review of PR #9: section 8 calls the instance cap a real defence (uncapped, stops were up to 8 times late on a CI runner); section 12 adds the 8K UHD capture limit in either orientation, corrects the `showinfo` injection wording (an unknown Matroska CodecID is logged from the start of a line) and adds the frame-number sequence check and the slice-end count check, and restates the cap's evidence |
+| 2026-11-14 | M1 stream G follow-up 2: section 17 states that an advisory for wazero or go-ffmpreg (GitHub alert or CI scan) is fixed by hand straight away with S1 re-run, how the Fedora and Arch Linux container digests are refreshed and that the containers run read-only and without new privileges, and adds the HEVC fast-path test step and fuzz tag (stream D, PR #9) |
 | 2026-11-13 | M1 stream D, worker processes (owner's decision after the close-on-cancel measurement): section 8 re-derives the worker count for workers (no GOMAXPROCS cap; 920 MB each, measured 190-403 MB) and keeps the cap for instances in qrvt's process; section 12 adds worker processes (protocol, isolation, termination, fallback, what is not claimed, the compile cache) and keeps encoding in process with close-on-cancel off (15% cost through a worker); section 14 adds the `EngineWorker` hook as the one exception to "never exits the process" |
