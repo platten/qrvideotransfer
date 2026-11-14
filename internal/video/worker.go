@@ -366,12 +366,15 @@ func currentWorkers() (*procRunner, error) {
 	return workers.r, workers.reason
 }
 
-// degraded records the last reason the engine ran in process.
+// degraded records the last reason the engine ran in process; a worker that reaches ready clears it.
 var degraded atomic.Pointer[error]
 
-// WorkerStatus is nil while the embedded engine runs in worker processes. Otherwise it says why it
-// runs in this process instead, with close-on-cancel on, which decodes about 4 to 11 times slower
-// (docs/spikes/S1.md section 10); a caller shows it as a warning.
+// WorkerStatus is the process's current state: nil while the embedded engine runs in worker
+// processes. Otherwise it says why it runs in this process instead, with close-on-cancel on, which
+// decodes about 4 to 11 times slower (docs/spikes/S1.md section 10): no worker can be used, or the
+// last worker failed to start and none has reached ready since (a failure to start may be passing,
+// such as a worker killed under memory pressure). To warn once for each job that ran in process,
+// use the backend's [Embedded.InProcess] instead.
 func WorkerStatus() error {
 	if r, err := currentWorkers(); r == nil {
 		return fmt.Errorf("video engine runs in process, about 4 to 11 times slower: %w", err)

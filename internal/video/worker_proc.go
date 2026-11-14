@@ -58,7 +58,13 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 	var once sync.Once
 	ready := make(chan struct{})
 	m.waiting.Add(1)
-	loaded := func() { once.Do(func() { close(ready); m.waiting.Add(-1) }) }
+	loaded := func() {
+		once.Do(func() {
+			close(ready)
+			m.waiting.Add(-1)
+			degraded.Store(nil) // workers work again
+		})
+	}
 	defer loaded()
 	in := ""
 	wj := workerJob{Prog: j.prog, CacheDir: cacheDir, MaxOutput: j.maxOutput, Reads: j.progress == progReads, Module: j.module,

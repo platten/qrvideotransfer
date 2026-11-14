@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 )
 
 // Options configure [New] and [NewEmbedded].
@@ -45,17 +46,42 @@ func NewEmbedded(o Options) (*Embedded, error) {
 	if dir == "" {
 		dir = defaultCacheDir()
 	}
-	return &Embedded{ff{r: lazyEngine{cacheDir: dir}, fast: o.UnsandboxedHEVC}}, nil
+	return &Embedded{ff{r: lazyEngine{cacheDir: dir, fell: &atomic.Pointer[error]{}}, fast: o.UnsandboxedHEVC}}, nil
 }
 
-// InProcess is a stub for the test commit.
-func (*Embedded) InProcess() error { return nil }
+// InProcess is nil while every job of this backend has run in an engine worker process. Otherwise it
+// says why one ran in qrvt's process instead (about 4 to 11 times slower), and it keeps saying so for
+// the backend's life. A caller that makes one backend per job (the pipeline makes one per decode)
+// asks it at the job's end and warns once for that job (WarnEngineInProcess); [WorkerStatus] instead
+// describes the process's current state.
+func (b *Embedded) InProcess() error {
+	l, ok := b.r.(lazyEngine)
+	if !ok || l.fell == nil {
+		return nil
+	}
+	if p := l.fell.Load(); p != nil {
+		return fmt.Errorf("video engine ran in process, about 4 to 11 times slower: %w", *p)
+	}
+	return nil
+}
 
 // lazyEngine runs each job in an engine worker process (see ServeWorker). When there is none, or
 // one cannot be started, it runs the job in this process with close-on-cancel instead, which is
-// slower but keeps every guarantee; WorkerStatus says so. While the engine is compiled the instance
-// waits on qrvt, so neither the watchdog nor a probe's time bound counts that time.
-type lazyEngine struct{ cacheDir string }
+// slower but keeps every guarantee; WorkerStatus and the backend's InProcess say so. While the
+// engine is compiled the instance waits on qrvt, so neither the watchdog nor a probe's time bound
+// counts that time.
+type lazyEngine struct {
+	cacheDir string
+	fell     *atomic.Pointer[error] // the first reason a job of this backend ran in process
+}
+
+// fallBack records why a job runs in process, for the process (WorkerStatus) and the backend.
+func (l lazyEngine) fallBack(err error) {
+	degraded.Store(&err)
+	if l.fell != nil {
+		l.fell.CompareAndSwap(nil, &err)
+	}
+}
 
 func (l lazyEngine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	if j.trusted {
@@ -67,13 +93,15 @@ func (l lazyEngine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 		}
 		return e.exec(ctx, j, m)
 	}
-	if w, _ := currentWorkers(); w != nil {
+	w, why := currentWorkers()
+	if w != nil {
 		rc, err := w.exec(ctx, j, m, l.cacheDir)
 		if !errors.Is(err, errWorkerStart) {
 			return rc, err
 		}
-		degraded.Store(&err)
+		why = err
 	}
+	l.fallBack(why)
 	m.waiting.Add(1) // compiling on first use is not a stall
 	e, err := loadEngine(ctx, l.cacheDir, true)
 	m.waiting.Add(-1)
