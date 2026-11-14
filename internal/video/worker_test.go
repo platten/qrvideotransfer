@@ -551,11 +551,9 @@ func TestSlotTokensReturnHome(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan error, 1)
 		go func() { done <- run(ctx, c.r, c.job) }()
-		within(t, time.Minute, c.name+": taking the token", func() {
-			for len(first) == 0 {
-				time.Sleep(10 * time.Millisecond)
-			}
-		})
+		// Receiving the job's token orders its read of the global before the swap below (the race
+		// detector requires it); the token is put straight back.
+		within(t, time.Minute, c.name+": taking the token", func() { <-first; first <- struct{}{} })
 		workerSlots, slots = make(chan struct{}, 1), make(chan struct{}, 1) // replaced while the token is out
 		cancel()
 		var err error
