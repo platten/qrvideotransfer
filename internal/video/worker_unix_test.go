@@ -44,7 +44,10 @@ func TestWorkerClosesInherited(t *testing.T) {
 	eof := make(chan error, 1)
 	go func() { _, err := io.Copy(io.Discard, pr); eof <- err }()
 	select {
-	case <-eof: // every write end is closed: the worker's fd 9 too
+	case err := <-eof: // every write end is closed: the worker's fd 9 too
+		if err != nil {
+			t.Fatal(err)
+		}
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
 		t.Fatal("the worker kept the inherited descriptor 9 open")
@@ -65,6 +68,14 @@ func TestWorkerClosesInherited(t *testing.T) {
 	}
 }
 
+// TestOpenFDsFallback: without a descriptor directory, every number below the limit is a candidate.
+func TestOpenFDsFallback(t *testing.T) {
+	t.Parallel()
+	if fds := openFDs(filepath.Join(t.TempDir(), "missing")); len(fds) < 3 || fds[0] != 0 || len(fds) > 1<<16 {
+		t.Errorf("%d descriptors", len(fds))
+	}
+}
+
 // TestConcatCancel: cancelling a Concat whose input stalls (a FIFO that delivers nothing) stops it
 // promptly, because its input is closed on cancellation, as an encoder's is. Concat runs in qrvt's
 // own process with close-on-cancel off, so closing its input is its only stop.
@@ -81,7 +92,7 @@ func TestConcatCancel(t *testing.T) {
 	}
 	writer := make(chan *os.File, 1)
 	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0) //nolint:gosec // the test's own FIFO
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
 		writer <- f
 	}()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -99,6 +110,6 @@ func TestConcatCancel(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Error("Concat still runs 15 s after its cancellation")
 		_ = w.Close()
-		<-ret
+		t.Log(<-ret)
 	}
 }

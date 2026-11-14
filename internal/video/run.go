@@ -48,8 +48,11 @@ type job struct {
 	// module names a test module a worker runs instead of the engine (tests only).
 	module string
 	// trusted marks a job whose input is qrvt's own (encoding, joining runs). It runs in this
-	// process with close-on-cancel off: a worker would cost 15% (docs/spikes/S1.md section 13) and
-	// there is no hostile input to guard against. Cancellation closes its input.
+	// process with close-on-cancel off: a worker would cost 11-15% (docs/spikes/S1.md section 13)
+	// and there is no hostile input to guard against. Nothing can force it to stop, the watchdog
+	// included: it stops when its input closes, so the caller gives it an input that cancellation
+	// closes (NewEncoder and Concat do, with context.AfterFunc). While its guest computes it can
+	// delay this process's garbage collection (docs/SECURITY.md T1).
 	trusted bool
 }
 

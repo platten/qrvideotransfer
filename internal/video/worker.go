@@ -87,14 +87,18 @@ type workerJob struct {
 	MaxOutput int64 `json:"max_output,omitempty"`
 	// Module names a test module to run instead of the engine; only test binaries register any.
 	Module string `json:"module,omitempty"`
-	// Version is the protocol version the parent speaks (protocolVersion).
+	// Version is the protocol version the parent speaks. A worker refuses any other, before it looks
+	// at the rest of the job: the executable on disk may have been replaced by another release since
+	// the parent started.
 	Version int `json:"version"`
 }
 
-// protocolVersion is the worker protocol's version; tests change the parent's.
+// protocolVersion is the version of the worker protocol (message types, their bounds, the job's
+// fields); a change to any of them raises it. Tests change the parent's.
 var protocolVersion = 1
 
-// exitVersion is the exit code with which a worker refuses a job of another protocol version.
+// exitVersion is the exit code with which a worker refuses a job of another protocol version. As a
+// worker's first message, the parent takes it for a failure to start and runs the job in process.
 const exitVersion = -2
 
 // testModules holds the Wasm modules a test binary lets a worker run instead of the engine.
@@ -221,6 +225,7 @@ func ServeWorker(args []string, stdin io.Reader, stdout io.Writer) (served bool,
 		}
 		return false, 0
 	}
+	closeInherited()
 	return true, serveWorker(stdin, stdout, os.Exit)
 }
 
@@ -239,6 +244,10 @@ func serveWorker(in io.Reader, out io.Writer, exit func(int)) int {
 	var j workerJob
 	if err := json.Unmarshal(b, &j); err != nil {
 		_ = w.send(msgExit, exitMsg(-1, "invalid job"))
+		return 2
+	}
+	if j.Version != protocolVersion {
+		_ = w.send(msgExit, exitMsg(exitVersion, fmt.Sprintf("protocol version %d", protocolVersion)))
 		return 2
 	}
 	if err := j.validate(); err != nil {

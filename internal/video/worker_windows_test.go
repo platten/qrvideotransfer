@@ -35,6 +35,11 @@ func TestWorkerJobObject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if job == 0 {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal("the worker runs without a Job Object")
+	}
 	defer func() { _ = stdin.Close(); _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	b, _ := json.Marshal(workerJob{Prog: "ffmpeg", Version: protocolVersion})
 	if err := writeMsg(stdin, msgJob, b); err != nil {
@@ -43,7 +48,7 @@ func TestWorkerJobObject(t *testing.T) {
 	if typ, _, err := readMsg(bufio.NewReader(stdout), nil, parentLimit); typ != msgReady || err != nil {
 		t.Fatalf("the worker did not run: %q %v", typ, err)
 	}
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(cmd.Process.Pid)) //nolint:gosec // a process id
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(cmd.Process.Pid))
 	if err != nil {
 		t.Fatal(err)
 	}

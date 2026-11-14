@@ -24,6 +24,7 @@ func TestWorkerInProcess(t *testing.T) {
 	defer func() { progressTick = 200 * time.Millisecond }()
 	abs, _ := filepath.Abs(clip("hevc10hlg.mp4"))
 	job := func(j workerJob) io.Reader {
+		j.Version = protocolVersion
 		b, _ := json.Marshal(j)
 		var in bytes.Buffer
 		_ = writeMsg(&in, msgJob, b)
@@ -65,7 +66,7 @@ func TestWorkerInProcess(t *testing.T) {
 	}
 	// A parent that breaks the protocol after the job: the worker exits.
 	var in bytes.Buffer
-	b, _ = json.Marshal(workerJob{Prog: "ffmpeg", Module: "broken"})
+	b, _ = json.Marshal(workerJob{Prog: "ffmpeg", Module: "broken", Version: protocolVersion})
 	_ = writeMsg(&in, msgJob, b)
 	_ = writeMsg(&in, msgJob, b)
 	exited := make(chan int, 1)

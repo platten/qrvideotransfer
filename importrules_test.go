@@ -2,6 +2,7 @@ package qrvt
 
 import (
 	"errors"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -14,25 +15,43 @@ import (
 
 // checkImports applies the import rule of docs/SECURITY.md section 9.6 to the Go files under root:
 // the root package itself, cmd/ and internal/. Only internal/video (and packages below it) may
-// import os/exec, and nothing may import unsafe. tools/, spikes/ and testdata/ are not visited.
-// Test files and files of every build tag are included. It returns one line per violation.
+// import os/exec, and nothing may import unsafe. Nor may a file that imports reflect take an address
+// with it (a call of Pointer, UnsafeAddr or UnsafePointer), except internal/video/worker_windows.go,
+// the one reviewed exception. tools/, spikes/ and testdata/ are not visited. Test files and files of
+// every build tag are included. It returns one line per violation.
 func checkImports(t *testing.T, root string) []string {
 	t.Helper()
 	var bad []string
 	check := func(path string) {
-		f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
 		if err != nil {
 			t.Fatal(err)
 		}
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
 		video := strings.HasPrefix(rel, "internal/video/")
+		reflects := false
 		for _, im := range f.Imports {
 			p, _ := strconv.Unquote(im.Path.Value)
 			if p == "unsafe" || (p == "os/exec" && !video) {
 				bad = append(bad, rel+" imports "+p)
 			}
+			reflects = reflects || p == "reflect"
 		}
+		if !reflects || rel == "internal/video/worker_windows.go" {
+			return
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			if c, ok := n.(*ast.CallExpr); ok && len(c.Args) == 0 {
+				if s, ok := c.Fun.(*ast.SelectorExpr); ok {
+					switch s.Sel.Name {
+					case "Pointer", "UnsafeAddr", "UnsafePointer":
+						bad = append(bad, rel+" takes an address with reflect ("+s.Sel.Name+")")
+					}
+				}
+			}
+			return true
+		})
 	}
 	files, _ := filepath.Glob(filepath.Join(root, "*.go"))
 	for _, dir := range []string{"cmd", "internal"} {

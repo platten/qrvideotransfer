@@ -54,14 +54,15 @@ func workerEnv() []string {
 func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string) (int, error) {
 	// Until the worker has started and loaded the engine (a first compilation takes seconds to
 	// minutes, and starting a process on a loaded machine can take seconds), it is not stalled;
-	// engineLoadLimit bounds that phase instead.
-	var ready atomic.Bool
+	// loadLimit bounds that phase instead. The program's input is sent only once it is ready.
 	var once sync.Once
+	ready := make(chan struct{})
 	m.waiting.Add(1)
-	loaded := func() { once.Do(func() { ready.Store(true); m.waiting.Add(-1) }) }
+	loaded := func() { once.Do(func() { close(ready); m.waiting.Add(-1) }) }
 	defer loaded()
 	in := ""
-	wj := workerJob{Prog: j.prog, CacheDir: cacheDir, MaxOutput: j.maxOutput, Reads: j.progress == progReads, Module: j.module}
+	wj := workerJob{Prog: j.prog, CacheDir: cacheDir, MaxOutput: j.maxOutput, Reads: j.progress == progReads, Module: j.module,
+		Version: protocolVersion}
 	var err error
 	if j.input != "" {
 		in = "/in/" + inputName(j.input)
@@ -91,10 +92,10 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 	if err != nil {
 		return 0, err
 	}
-	if err := cmd.Start(); err != nil {
+	release, err := startWorker(cmd, !p.noJob)
+	if err != nil {
 		return 0, fmt.Errorf("%w: %w", errWorkerStart, err)
 	}
-	release := killOnClose(cmd.Process)
 	defer release()
 	if p.started != nil {
 		p.started(cmd.Process.Pid)
@@ -107,13 +108,17 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 		case <-finished:
 		}
 	}()
-	loadTimer := time.AfterFunc(engineLoadLimit, func() {
-		if !ready.Load() {
+	var overdue atomic.Bool
+	loadTimer := time.AfterFunc(loadLimit, func() {
+		select {
+		case <-ready:
+		default:
+			overdue.Store(true)
 			_ = cmd.Process.Kill() // never became ready
 		}
 	})
 	defer loadTimer.Stop()
-	go feedWorker(toWorker, msg, j.stdin)
+	go feedWorker(toWorker, msg, j.stdin, ready, finished)
 	rc, err := readWorker(bufio.NewReaderSize(fromWorker, 64<<10), j, m, loaded)
 	close(finished)
 	_ = toWorker.Close() // the worker's lifeline: it exits when this closes
@@ -122,16 +127,26 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 	if ctx.Err() != nil {
 		return 0, ctx.Err()
 	}
+	if overdue.Load() {
+		return 0, &LimitError{Limit: "EngineLoadLimit", Value: loadLimit.Seconds(), Max: loadLimit.Seconds(),
+			Hint: "the engine worker did not finish loading the video engine in that time and was stopped"}
+	}
 	if err != nil {
 		return 0, fmt.Errorf("%w; worker log: %s", err, tail.String())
 	}
 	return rc, nil
 }
 
-// feedWorker sends the job and then the program's standard input, if any. It keeps the pipe open
-// afterwards: closing it tells the worker to exit.
-func feedWorker(w io.Writer, job []byte, stdin io.Reader) {
+// feedWorker sends the job and, once the worker is ready, the program's standard input, if any; so a
+// worker that refuses the job has consumed none of it. It keeps the pipe open afterwards: closing it
+// tells the worker to exit.
+func feedWorker(w io.Writer, job []byte, stdin io.Reader, ready, finished <-chan struct{}) {
 	if writeMsg(w, msgJob, job) != nil {
+		return
+	}
+	select {
+	case <-ready:
+	case <-finished:
 		return
 	}
 	if stdin != nil {
@@ -150,11 +165,12 @@ func feedWorker(w io.Writer, job []byte, stdin io.Reader) {
 }
 
 // readWorker dispatches the worker's messages until its exit message. Anything malformed ends the
-// job with an error, before any allocation larger than one bounded message.
+// job with an error, before any allocation larger than one bounded message. A refusal of the
+// protocol version as the worker's first message is a failure to start: nothing has happened yet.
 func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 	var buf []byte
 	var reads int64
-	for {
+	for first := true; ; first = false {
 		var typ byte
 		var err error
 		typ, buf, err = readMsg(r, buf, parentLimit)
@@ -186,6 +202,10 @@ func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 				return 0, fmt.Errorf("%w: worker protocol: short exit message", ErrEngine)
 			}
 			rc := int(int32(binary.BigEndian.Uint32(buf))) //nolint:gosec // a signed exit code
+			if rc == exitVersion && first {
+				return 0, fmt.Errorf("%w: the worker speaks another protocol version (%s); this program speaks %d",
+					errWorkerStart, sanitise(string(buf[4:]), 100), protocolVersion)
+			}
 			if rc != 0 || len(buf) > 4 {
 				_, _ = j.stderr.Write([]byte("\n" + sanitise(string(buf[4:]), logTailLen) + "\n"))
 			}
@@ -200,12 +220,10 @@ func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 // waitDelay bounds how long a killed worker may take to be reaped.
 const waitDelay = 5 * time.Second
 
-// engineLoadLimit bounds the time a worker may take to load and compile the engine before it starts
-// the program; the stall watchdog does not cover that phase.
-const engineLoadLimit = 10 * time.Minute
-
-// EngineLoadLimit bounds the time from starting a worker process to its message that the engine
-// is loaded (SECURITY.md section 5).
+// EngineLoadLimit bounds the time from starting an engine worker process to its message that the
+// engine is loaded and the program starts (docs/SECURITY.md section 5). The stall watchdog does not
+// cover that phase, because a first compilation on a slow machine takes longer than
+// EngineStallTimeout; a worker that has not sent the message by then is killed.
 const EngineLoadLimit = 10 * time.Minute
 
 // loadLimit is EngineLoadLimit; tests shorten it.

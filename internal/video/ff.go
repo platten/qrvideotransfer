@@ -179,11 +179,21 @@ func (b *ff) Concat(ctx context.Context, runs []string, path string, fps int) er
 		return err
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
+	// The runs reach the engine through a pipe that cancellation closes, as an encoder's frames do:
+	// the instance runs in this process with close-on-cancel off, so that is how it stops.
+	pr, pw := io.Pipe()
+	go func() {
+		_, err := io.Copy(pw, io.MultiReader(rs...))
+		_ = pw.CloseWithError(err)
+	}()
+	stop := context.AfterFunc(ctx, func() { _ = pr.CloseWithError(ctx.Err()) })
+	defer stop()
+	defer func() { _ = pr.Close() }()
 	err = run(ctx, b.r, job{prog: "ffmpeg", args: func(_, out string) []string {
 		return []string{"-nostdin", "-hide_banner", "-nostats", "-loglevel", "error", "-fflags", "+genpts",
 			"-f", "h264", "-framerate", strconv.Itoa(fps), "-i", "pipe:0", "-map", "0:v:0", "-c", "copy",
 			"-use_editlist", "0", "-f", "mp4", "-y", out + "/out.mp4"}
-	}, outDir: tmp, stdin: io.MultiReader(rs...), progress: progInput, trusted: true})
+	}, outDir: tmp, stdin: pr, progress: progInput, trusted: true})
 	if err != nil {
 		return err
 	}

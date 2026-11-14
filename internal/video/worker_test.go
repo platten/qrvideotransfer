@@ -344,7 +344,7 @@ func TestWorkerVersion(t *testing.T) {
 		t.Errorf("worker exit %d", code)
 	}
 	typ, msg, err := readMsg(&out, nil, parentLimit)
-	if typ != msgExit || err != nil || len(msg) < 4 || int32(binary.BigEndian.Uint32(msg)) != exitVersion { //nolint:gosec // a signed code
+	if typ != msgExit || err != nil || len(msg) < 4 || int32(binary.BigEndian.Uint32(msg)) != exitVersion {
 		t.Errorf("refusal %q %q %v", typ, msg, err)
 	}
 
@@ -472,7 +472,7 @@ func TestWorkerJob(t *testing.T) {
 	// The worker refuses a bad job with a message, and a malformed one without.
 	var out bytes.Buffer
 	in := &bytes.Buffer{}
-	_ = writeMsg(in, msgJob, []byte(`{"prog":"sh"}`))
+	_ = writeMsg(in, msgJob, []byte(`{"prog":"sh","version":1}`))
 	if code := serveWorker(in, &out, func(int) {}); code != 2 {
 		t.Errorf("bad job: exit %d", code)
 	}
