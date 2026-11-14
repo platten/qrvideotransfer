@@ -66,7 +66,7 @@ func TestGuidance(t *testing.T) {
 		{&qrvt.UnsafeArchiveError{Path: "../x", Reason: "leaves the folder"}, nil, nil, "Nothing was written"},
 		{&qrvt.LimitError{Limit: "unpacked size", Value: 2, Max: 1, Flag: "--max-size"}, nil, nil, "--max-size"},
 		{&qrvt.LimitError{Limit: "unpacked size", Value: 2, Max: 1}, nil, nil, "no flag raises it"},
-		{&qrvt.LimitError{Limit: "stream size", Value: 2, Max: 1, Flag: "--other"}, nil, nil, "no flag raises it"},
+		{&qrvt.LimitError{Limit: "manifest entries", Value: 2, Max: 1, Flag: "--max-entries"}, nil, nil, "raise the limit with --max-entries"},
 		{&qrvt.LimitError{Limit: "manifest entries", Value: 2, Max: 1}, nil, nil, "no flag raises it"},
 		{&qrvt.UnsupportedVersionError{What: "format version", Value: 9}, nil, nil, "newer qrvt"},
 		{qrvt.ErrNotImplemented, nil, nil, "not implemented yet"},
@@ -203,18 +203,41 @@ func TestJSONWarningGoesThroughRenderer(t *testing.T) {
 	}
 }
 
+// TestSecretValuesNotEchoed checks that no error, whatever its cause, shows the value of
+// --passphrase-file or --verify-key: a mistyped value may be the secret itself.
 func TestSecretValuesNotEchoed(t *testing.T) {
 	f := newFiles(t)
-	for _, args := range [][]string{
-		{"decode", f.r1, "-o", f.dir, "--passphrase-file", "hunter2 secret"},
-		{"encode", f.a, "-o", "o.mp4", "--encrypt", "--passphrase-file", "hunter2 secret"},
-		{"decode", f.r1, "-o", f.dir, "--verify-key", "hunter2 secret"},
-		{"decode", f.r1, "-o", f.dir, "--verify-key", "qrvt-public-key-v1:hunter2"},
-		{"decode", f.r1, "-o", f.dir, "--verify-key", "qrvt-private-key-v1:hunter2"},
-	} {
-		out, errOut, err := run(t, &fakeAPI{}, nil, args...)
-		if ExitCode(err) != 2 || strings.Contains(out+errOut+err.Error(), "hunter2") {
-			t.Errorf("%v: exit %d, echoed: %q", args, ExitCode(err), errOut)
+	dir := filepath.Join(f.dir, "hunter2-dir")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(f.dir, "hunter2-empty")
+	if err := os.WriteFile(empty, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	priv := filepath.Join(f.dir, "hunter2.key")
+	if err := os.WriteFile(priv, []byte(testPriv+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("hunter2", 1000) // ENAMETOOLONG
+	notDir := filepath.Join(f.a, "hunter2") // ENOTDIR
+	for _, v := range []string{"hunter2 secret", long, notDir, dir, empty, priv, f.a + "hunter2", "qrvt-public-key-v1:hunter2", "qrvt-private-key-v1:hunter2"} {
+		for _, args := range [][]string{
+			{"decode", f.r1, "-o", f.dir, "--passphrase-file", v},
+			{"encode", f.a, "-o", "o.mp4", "--encrypt", "--passphrase-file", v},
+			{"decode", f.r1, "-o", f.dir, "--verify-key", v},
+		} {
+			out, errOut, err := run(t, &fakeAPI{}, nil, args...)
+			if err == nil {
+				if v == priv && args[len(args)-2] == "--passphrase-file" {
+					continue // a key file is a valid passphrase file
+				}
+				t.Errorf("%.60q: accepted", args)
+				continue
+			}
+			if ExitCode(err) != 2 || strings.Contains(out+errOut+err.Error(), "hunter2") {
+				t.Errorf("%.80q: exit %d, echoed: %q", args, ExitCode(err), errOut)
+			}
 		}
 	}
 }
@@ -252,6 +275,26 @@ func TestPassphraseFileContent(t *testing.T) {
 	ok := write("ok", strings.Repeat("b", maxSecretFile-1)+"\n")
 	if _, _, err := run(t, fa, nil, "decode", f.r1, "-o", f.dir, "--passphrase-file", ok); err != nil || len(fa.pass[0]) != maxSecretFile-1 {
 		t.Errorf("a passphrase of the largest length was refused: %v", err)
+	}
+}
+
+// TestCalibrateSuggestsOnlyItsFlags checks that calibrate make, which has no --cell, does not
+// suggest it.
+func TestCalibrateSuggestsOnlyItsFlags(t *testing.T) {
+	for _, res := range []string{"9000x2000", "2000x9000"} {
+		_, errOut, err := run(t, &fakeAPI{}, nil, "calibrate", "make", "-o", "c.mp4", "--resolution", res)
+		if err == nil || strings.Contains(err.Error()+errOut, "--cell") || !strings.Contains(err.Error(), "--resolution") {
+			t.Errorf("%s: %v", res, err)
+		}
+	}
+}
+
+func TestMaxEntriesHelp(t *testing.T) {
+	out, _, _ := run(t, &fakeAPI{}, nil, "decode", "--help")
+	for _, want := range []string{"--max-entries", "1000000", "64 MiB"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("decode --help lacks %q", want)
+		}
 	}
 }
 
