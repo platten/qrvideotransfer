@@ -206,6 +206,10 @@ const (
 	WarnSkippedFile     WarningCode = "SkippedFile"
 	WarnDownscaled      WarningCode = "Downscaled"
 	WarnMoire           WarningCode = "Moire"
+	// WarnEngineInProcess: no engine worker process could be started (the host did not call
+	// EngineWorker first in main, or starting one failed), so the video engine runs in this process
+	// with close-on-cancel on, with the same guarantees but 4 to 11 times slower.
+	WarnEngineInProcess WarningCode = "EngineInProcess"
 )
 
 // Warning is a condition the user should know about that does not stop the work.
