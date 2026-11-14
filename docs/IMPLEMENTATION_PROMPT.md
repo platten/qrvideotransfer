@@ -284,7 +284,7 @@ implementation history. Exit: no open finding of high or medium severity.
 - Root `SECURITY.md`; package formats; signing and notarisation wiring; the script that rebuilds the
   embedded ffmpeg from source, with the licence notices its GPL terms require; and a full release dry
   run. List for the owner every secret and external repository the release workflow needs.
-- Exit, in addition: an independent delta security review of everything merged since the M7 pass
+- Exit: the release dry run succeeds, and an independent delta security review of everything merged since the M7 pass
   ended (release workflows, packaging configuration, signing steps, and any code touched), with no
   open finding of high or medium severity.
 
