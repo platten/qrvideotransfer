@@ -824,7 +824,9 @@ Costs a user should expect:
   program's standard input, if any, is sent only once the worker reports the engine loaded. The
   worker keeps every control: the read-only single-file counting view, the 512 MiB ceiling, and
   `MaxDecodedPixelsPerInputByte` as a bound on its output. Results come back as typed, length-prefixed
-  messages (output, log, input reads, exit status) that the parent bounds before allocating and
+  messages (output, log, progress, exit status; the progress message carries the bytes counted as a
+  probe's progress, the input's bytes and read calls, and the time from readiness to the first read,
+  for the breakdown a time-bound error carries, SECURITY.md section 5) that the parent bounds before allocating and
   sanitises before printing; a lying worker can end a job, not make the parent allocate. The worker
   gets an empty environment (on Windows only `SYSTEMROOT`, `TEMP`, `TMP`), its working directory in the
   temporary directory, and no descriptors or handles but its three standard ones: on Unix it closes,
@@ -1455,3 +1457,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, review of PR #20: section 12's fallback is reported per backend by `(*video.Embedded).InProcess` (the pipeline warns once per decode), and `video.WorkerStatus` is the process's current state, cleared when a worker next reaches ready |
 | 2026-11-14 | M1 stream D, round 2 of the review of PR #20: section 8 withdraws PR #15's uncapped worker processes: `internal/video` caps them at `video.WorkerProcesses()` (CPU count, reduced so that workers at 920 MB fit in half the physical memory), with waiting for a turn not counted against any bound, prompted by a probe that exceeded its wall-clock bound on macos-26-intel; the hold-and-wait hazard now applies to both caps |
 | 2026-11-14 | M1 stream D, round 3 of the review of PR #20: section 8's worker cap counts GOMAXPROCS and, on Linux, the cgroup memory limit when smaller, and no longer implies that the cap fixed the slow CI probe (cause believed to be CPU starvation; a capped run still recorded 13 s); section 12's probe bound is 60 s |
+| 2026-11-14 | M1 stream D, time-bound diagnostics: section 12's worker progress message carries the input's bytes and reads and the time from readiness to the first read, for the breakdown a time-bound error carries (protocol version 2) |
