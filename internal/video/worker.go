@@ -54,6 +54,8 @@ func parentLimit(t byte) int {
 		return 8
 	case msgExit:
 		return maxExitMsg
+	case msgReady:
+		return 0
 	}
 	return -1
 }
@@ -289,6 +291,9 @@ func runJob(j *workerJob, stdin io.Reader, w *msgWriter) (int, error) {
 		e, err = loadEngine(ctx, j.CacheDir, false)
 	}
 	if err != nil {
+		return 0, err
+	}
+	if err := w.send(msgReady, nil); err != nil {
 		return 0, err
 	}
 	m := &meter{}

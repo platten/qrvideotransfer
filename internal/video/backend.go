@@ -55,7 +55,9 @@ type lazyEngine struct{ cacheDir string }
 
 func (l lazyEngine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	if j.trusted {
+		m.waiting.Add(1) // compiling on first use is not a stall
 		e, err := loadEngine(ctx, l.cacheDir, false)
+		m.waiting.Add(-1)
 		if err != nil {
 			return 0, err
 		}
@@ -68,7 +70,9 @@ func (l lazyEngine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 		}
 		degraded.Store(&err)
 	}
+	m.waiting.Add(1) // compiling on first use is not a stall
 	e, err := loadEngine(ctx, l.cacheDir, true)
+	m.waiting.Add(-1)
 	if err != nil {
 		return 0, err
 	}

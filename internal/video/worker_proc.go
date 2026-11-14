@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"time"
 )
 
@@ -95,8 +96,15 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 		case <-finished:
 		}
 	}()
+	var ready atomic.Bool
+	loadTimer := time.AfterFunc(engineLoadLimit, func() {
+		if !ready.Load() {
+			_ = cmd.Process.Kill() // never became ready
+		}
+	})
+	defer loadTimer.Stop()
 	go feedWorker(toWorker, msg, j.stdin)
-	rc, err := readWorker(bufio.NewReaderSize(fromWorker, 64<<10), j, m)
+	rc, err := readWorker(bufio.NewReaderSize(fromWorker, 64<<10), j, m, &ready)
 	close(finished)
 	_ = toWorker.Close() // the worker's lifeline: it exits when this closes
 	_ = cmd.Process.Kill()
@@ -133,9 +141,18 @@ func feedWorker(w io.Writer, job []byte, stdin io.Reader) {
 
 // readWorker dispatches the worker's messages until its exit message. Anything malformed ends the
 // job with an error, before any allocation larger than one bounded message.
-func readWorker(r io.Reader, j *job, m *meter) (int, error) {
+func readWorker(r io.Reader, j *job, m *meter, ready *atomic.Bool) (int, error) {
 	var buf []byte
 	var reads int64
+	// Until the worker has loaded the engine (a first compilation takes seconds to minutes), it is
+	// not stalled; engineLoadLimit bounds that phase instead.
+	loading := true
+	m.waiting.Add(1)
+	defer func() {
+		if loading {
+			m.waiting.Add(-1)
+		}
+	}()
 	for {
 		var typ byte
 		var err error
@@ -161,6 +178,12 @@ func readWorker(r io.Reader, j *job, m *meter) (int, error) {
 				m.n.Add(min(v-reads, 1<<40))
 				reads = v
 			}
+		case msgReady:
+			if loading {
+				loading = false
+				ready.Store(true)
+				m.waiting.Add(-1)
+			}
 		case msgExit:
 			if len(buf) < 4 {
 				return 0, fmt.Errorf("%w: worker protocol: short exit message", ErrEngine)
@@ -179,3 +202,7 @@ func readWorker(r io.Reader, j *job, m *meter) (int, error) {
 
 // waitDelay bounds how long a killed worker may take to be reaped.
 const waitDelay = 5 * time.Second
+
+// engineLoadLimit bounds the time a worker may take to load and compile the engine before it starts
+// the program; the stall watchdog does not cover that phase.
+const engineLoadLimit = 10 * time.Minute
