@@ -16,10 +16,12 @@ const (
 	// encoding or Concat instance, which runs in qrvt's own process with no forced stop.
 	EngineStallTimeout = 30 * time.Second
 
-	// EngineProbeTime bounds a probe's running time, not counting time spent waiting for an instance
-	// slot. Probes of the test clips and of the S1 and S2 recordings (up to 2.6 GB, 4K H.264 and
-	// HEVC, MP4, MOV, Matroska and MPEG-TS) took at most 1.2 s with close-on-cancel on.
-	EngineProbeTime = 15 * time.Second
+	// EngineProbeTime bounds a probe's running time, not counting time spent waiting for a slot or
+	// for the engine to load. It is a backstop behind the format whitelist, MaxProbeReads and the
+	// stall watchdog. Probes take 0.05-0.3 s unloaded (at most 1.2 s on the S1 and S2 recordings),
+	// but one took 13 s of active time under the full test load on a CI runner, so the bound is about
+	// four times that (docs/SECURITY.md section 5).
+	EngineProbeTime = 60 * time.Second
 	// MaxProbeReads bounds the bytes a probe reads from its input: at most probeReadsPerByte times
 	// the file's size plus MaxProbeReads (three times ffprobe's default probe size of 5 MB). The
 	// same probes read at most 1.07 times the file's size (an MPEG-TS file).
