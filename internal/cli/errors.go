@@ -92,8 +92,8 @@ func guide(err error, last *qrvt.Stats, o *qrvt.DecodeOptions) error {
 	case errors.As(err, &unsafe):
 		g = "Nothing was written. The archive tries to do something unsafe; do not trust its sender."
 	case errors.As(err, &limit):
-		if limit.Flag == "--max-size" {
-			g = "Raise --max-size if you expect a transfer this large."
+		if limit.Flag != "" {
+			g = "If you expect a transfer this large, raise the limit with " + limit.Flag + "."
 		} else {
 			g = "No flag raises it: the input is unusual, damaged or hostile."
 		}

@@ -32,30 +32,31 @@ const hidden = "(the value is not shown, in case it is a secret)"
 
 // readPassphraseFile returns the first line of a passphrase file, without its line ending or a
 // leading byte order mark. The line must be shorter than maxSecretFile bytes and hold no control
-// characters.
+// characters. No error shows the path: a mistyped value may be the passphrase itself.
 func readPassphraseFile(path string) (string, error) {
+	fail := func(reason string) error { return usagef("--passphrase-file: %s %s", reason, hidden) }
 	f, err := os.Open(path) //nolint:gosec // the user names the file
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", usagef("--passphrase-file: no such file %s", hidden)
+		return "", fail("no such file")
 	}
 	if err != nil {
-		return "", usagef("--passphrase-file %s: %v", path, pathError(err))
+		return "", fail(pathError(err).Error())
 	}
 	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, maxSecretFile+1))
 	if err != nil {
-		return "", usagef("--passphrase-file %s: %v", path, pathError(err))
+		return "", fail(pathError(err).Error())
 	}
 	first, _, _ := bytes.Cut(b, []byte("\n"))
 	if len(first) >= maxSecretFile {
-		return "", usagef("--passphrase-file %s: the first line is longer than %d bytes", path, maxSecretFile-1)
+		return "", fail(fmt.Sprintf("the first line is longer than %d bytes", maxSecretFile-1))
 	}
 	line := strings.TrimPrefix(strings.TrimSuffix(string(first), "\r"), "\ufeff")
 	if !utf8.ValidString(line) || strings.IndexFunc(line, unicode.IsControl) >= 0 {
-		return "", usagef("--passphrase-file %s: the first line holds control characters or is not UTF-8 text", path)
+		return "", fail("the first line holds control characters or is not UTF-8 text")
 	}
 	if line == "" {
-		return "", usagef("--passphrase-file %s: the first line is empty", path)
+		return "", fail("the first line is empty")
 	}
 	return line, nil
 }
@@ -110,23 +111,24 @@ func (a *app) decodePassphrase(fromFile string, r func() ui.Renderer) func() (st
 	}
 }
 
-// readKeyFile reads a key file of at most maxSecretFile bytes.
-func readKeyFile(flag, path string) ([]byte, os.FileInfo, error) {
+// readKeyFile reads a key file of at most maxSecretFile bytes. Errors begin with label, which
+// names the flag and, when it may be shown, the path.
+func readKeyFile(label, path string) ([]byte, os.FileInfo, error) {
 	f, err := os.Open(path) //nolint:gosec // the user names the file
 	if err != nil {
-		return nil, nil, usagef("%s %s: %v", flag, path, pathError(err))
+		return nil, nil, usagef("%s: %v", label, pathError(err))
 	}
 	defer func() { _ = f.Close() }()
 	st, err := f.Stat()
 	if err != nil {
-		return nil, nil, usagef("%s %s: %v", flag, path, pathError(err))
+		return nil, nil, usagef("%s: %v", label, pathError(err))
 	}
 	if st.IsDir() {
-		return nil, nil, usagef("%s %s: is a folder", flag, path)
+		return nil, nil, usagef("%s: is a folder", label)
 	}
 	b, err := io.ReadAll(io.LimitReader(f, maxSecretFile))
 	if err != nil {
-		return nil, nil, usagef("%s %s: %v", flag, path, pathError(err))
+		return nil, nil, usagef("%s: %v", label, pathError(err))
 	}
 	return b, st, nil
 }
@@ -144,7 +146,7 @@ func keyBytes(line, prefix string) ([]byte, bool) {
 // readSignKey reads --sign-key and returns its key line, trimmed. It warns, through the renderer,
 // when the file is readable by others (SECURITY.md T10).
 func (a *app) readSignKey(path string) ([]byte, error) {
-	b, st, err := readKeyFile("--sign-key", path)
+	b, st, err := readKeyFile("--sign-key "+path, path)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +165,7 @@ func (a *app) readSignKey(path string) ([]byte, error) {
 const warnReadableKey qrvt.WarningCode = "ReadableKey"
 
 // readVerifyKey reads a --verify-key value, a key line or the path of a public key file, and
-// returns the key line, trimmed. A value that names no file is not echoed.
+// returns the key line, trimmed. No error shows the value: a mistyped value may be a secret.
 func readVerifyKey(v string) ([]byte, error) {
 	const private = "this is a private key; give the public key"
 	t := strings.TrimSpace(v)
@@ -181,14 +183,14 @@ func readVerifyKey(v string) ([]byte, error) {
 	}
 	b, _, err := readKeyFile("--verify-key", v)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w %s", err, hidden)
 	}
 	line := strings.TrimSpace(string(b))
 	if strings.HasPrefix(line, privatePrefix) {
-		return nil, usagef("--verify-key %s: %s", v, private)
+		return nil, usagef("--verify-key: %s", private)
 	}
 	if _, ok := keyBytes(line, publicPrefix); !ok {
-		return nil, usagef("--verify-key %s: not a qrvt public key", v)
+		return nil, usagef("--verify-key: not a qrvt public key %s", hidden)
 	}
 	return []byte(line), nil
 }

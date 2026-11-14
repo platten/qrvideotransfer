@@ -43,6 +43,9 @@ var (
 	compressions = map[string]qrvt.Compression{"auto": qrvt.CompressAuto, "zstd": qrvt.CompressZstd, "xz": qrvt.CompressXZ, "none": qrvt.CompressNone}
 )
 
+// maxEntries is the format's limit on manifest entries (SECURITY.md section 5).
+const maxEntries = 1_000_000
+
 // maxDimension bounds a requested width or height before any other check.
 const maxDimension = 16384
 
@@ -92,17 +95,17 @@ func parseResolution(s string) (w, h int, err error) {
 }
 
 // fitCell reduces a requested size to multiples of the cell and checks the grid against the limits
-// of FORMAT.md section 3.
-func fitCell(w, h, cell int) (int, int, error) {
+// of FORMAT.md section 3. larger is the advice when the grid is too large.
+func fitCell(w, h, cell int, larger string) (int, int, error) {
 	fw, fh := w-w%cell, h-h%cell
 	gx, gy := fw/cell, fh/cell
 	switch {
 	case fh < 480:
 		return 0, 0, usagef("--resolution %dx%d: the height must be at least 480", w, h)
 	case gx > frame.MaxGrid:
-		return 0, 0, usagef("--resolution %dx%d: %d cells across; the most is %d, use a larger --cell", w, h, gx, frame.MaxGrid)
+		return 0, 0, usagef("--resolution %dx%d: %d cells across; the most is %d, %s", w, h, gx, frame.MaxGrid, larger)
 	case gy > frame.MaxGrid:
-		return 0, 0, usagef("--resolution %dx%d: %d cells down; the most is %d, use a larger --cell", w, h, gy, frame.MaxGrid)
+		return 0, 0, usagef("--resolution %dx%d: %d cells down; the most is %d, %s", w, h, gy, frame.MaxGrid, larger)
 	case frame.CheckGrid(gx, gy) != nil:
 		return 0, 0, usagef("--resolution %dx%d: the height must be less than 15 times the width", w, h)
 	}

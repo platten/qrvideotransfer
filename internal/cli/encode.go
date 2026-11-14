@@ -107,7 +107,7 @@ func (a *app) encodeOptions(cmd *cobra.Command, args []string, f *encodeFlags) (
 	case f.passFile != "" && !f.encrypt:
 		return o, req, usagef("--passphrase-file needs --encrypt")
 	}
-	if p.Width, p.Height, err = fitCell(w, h, f.cell); err != nil {
+	if p.Width, p.Height, err = fitCell(w, h, f.cell, "use a larger --cell"); err != nil {
 		return o, req, err
 	}
 	if p.Modulation, err = choose("mode", f.mode, modes, "gray4, bw or color"); err != nil {

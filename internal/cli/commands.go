@@ -48,7 +48,7 @@ func (a *app) calibrateCmd() *cobra.Command {
 			if err != nil {
 				return usagef("--resolution %q: %v", mk.resolution, err)
 			}
-			if _, _, err := fitCell(w, h, 4); err != nil { // the smallest cell the video steps through
+			if _, _, err := fitCell(w, h, 4, "use a smaller --resolution"); err != nil { // the smallest cell the video steps through
 				return err
 			}
 			if err := mk.check(); err != nil {
