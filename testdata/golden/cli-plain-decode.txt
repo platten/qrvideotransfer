@@ -1,0 +1,33 @@
+--- stderr
+qrvt decode: IMG_0412.MOV, IMG_0413.MOV -> received
+decode-video: started (3600 frames)
+demodulate: started (3600 frames)
+decode-video: 25% (900 frames of 3600 frames, 200.0 frames/s, 0:14 left)
+demodulate: 26% (950 frames of 3600 frames, 186.3 frames/s, 0:14 left)
+warning: Clipping: Highlights are clipped in 3.2% of cells; lower the screen brightness.
+decode-video: 50% (1800 frames of 3600 frames, 200.0 frames/s, 0:09 left)
+demodulate: 51% (1850 frames of 3600 frames, 192.7 frames/s, 0:09 left)
+warning: FramesDropped: The recording skipped 12 frames.
+decode-video: 75% (2700 frames of 3600 frames, 200.0 frames/s, 0:05 left)
+demodulate: 76% (2750 frames of 3600 frames, 195.0 frames/s, 0:04 left)
+decode-video: done (3600 frames in 0:18)
+demodulate: done (3600 frames in 0:19)
+repair: started (48 blocks)
+repair: 25% (12 blocks of 48 blocks, 48.0 blocks/s, 0:01 left)
+repair: 50% (24 blocks of 48 blocks, 48.0 blocks/s, 0:01 left)
+repair: 75% (36 blocks of 48 blocks, 48.0 blocks/s, 0:00 left)
+repair: done (48 blocks in 0:01)
+verify: started (50.0 MiB)
+verify: 50% (25.0 MiB of 50.0 MiB, 100.0 MiB/s, 0:00 left)
+verify: done (50.0 MiB in 0:01)
+unpack: started (50.0 MiB)
+unpack: 25% (12.5 MiB of 50.0 MiB, 31.2 MiB/s, 0:01 left)
+unpack: 50% (25.0 MiB of 50.0 MiB, 31.2 MiB/s, 0:01 left)
+unpack: 75% (37.5 MiB of 50.0 MiB, 31.2 MiB/s, 0:00 left)
+unpack: done (50.0 MiB in 0:02)
+--- stdout
+Decoded 12 files (50.0 MiB) into received
+  Recordings  2 (3600 captures)
+  Frames      840 of 840 seen, 93.6% clean
+  Encrypted   no
+  Signature   unsigned

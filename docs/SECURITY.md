@@ -99,7 +99,7 @@ Implementation defaults, each a named constant with a test that exceeds it:
 | --- | --- |
 | Unpacked size (`--max-size`) | 16 GiB. No ratio limit is applied, because a legitimate sparse file compresses by more than any sensible ratio |
 | Stream length | Free disk space less 1 GiB, and at most 64 GiB |
-| Manifest | 64 MiB and 1,000,000 entries |
+| Manifest (`--max-entries`) | 100,000 entries (`DefaultMaxEntries`) and 6,710,886 bytes (`DefaultMaxManifestBytes`, 64 MiB / 10). `--max-entries N` raises the entry limit to N and the size limit to N x 64 MiB / 1,000,000 bytes; the ceiling is the format limit, 1,000,000 entries and 64 MiB |
 | Path depth | 64 components, a path rule of FORMAT.md section 12: a decoder refuses the whole transfer, an encoder refuses to encode and names every such path. Two reasons. On macOS, and partly on Windows, the time spent on each path component grows with the depth of the folder (the measurements under "Extraction work"), so a deep manifest within the size limits could keep extraction busy for hours. And a tree far deeper than operating-system shells handle is a nuisance payload in itself |
 | scrypt work factor accepted (`ScryptWorkFactor`) | 18, which is 256 MiB of scrypt memory, and the factor the encoder writes. A higher factor in a received stream is refused before scrypt runs |
 | zstd window accepted (`MaxZstdWindow`) | 8 MiB, the window the encoder uses; a frame asking for more, including a single-segment frame with a larger content size, is refused before its buffers are allocated |
@@ -116,7 +116,8 @@ Implementation defaults, each a named constant with a test that exceeds it:
 | HEVC fast path (opt-in only): decode time | 10 s per picture. The decoder cannot be cancelled, so at the first picture that exceeds the limit the whole decode stops with an error naming the limit; no abandoned decoder is left running while work continues. Does not apply to the default path |
 
 A decode that reaches a limit stops with an error that names the limit and, where one exists, the flag
-that raises it. Only the unpacked size has a flag in version 1.
+that raises it. Two limits have a flag in version 1: the unpacked size (`--max-size`) and the manifest
+(`--max-entries`, up to 1,000,000 entries and 64 MiB).
 
 ## 6. Sender authenticity
 
@@ -294,3 +295,4 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | M1 stream A, second independent review of PR 7: section 5's xz row says qrvt parses the xz container itself, hands the LZMA2 decoder one chunk at a time with the dictionary of its own header parse, requires each chunk to be consumed exactly, and gives the refusal memory as measured (under 1 MiB before the first block's data; at most the block's dictionary plus 1 MiB after). The "Extraction work" row says the finish phase is not cancelled. T5 lists the link errors that fall back to the check-then-rename; any other stops and undoes the extraction. Section 9.5 states the exception for extracting a legal manifest (bounded by the manifest limits, up to about 20 minutes on Windows as measured, with progress and cancellation) and that the 60-second bound applies to everything before extraction |
 | 2026-11-14 | M1 stream A, third independent review of PR 7: section 5's xz row says a body holds exactly one block, so one LZMA2 decoder and one dictionary per body, with the reason (a new 8 MiB dictionary per block let 100,000 tiny blocks cost 78 s and 785 GB of allocation), the chunk rules, and states live memory and total allocation separately as measured (one dictionary, one chunk and fixed buffers live; allocation under 1 MiB, or the dictionary plus 1 MiB, independent of stream length; 12 MiB for 500,000 one-byte chunks), with the fuzz target's allocation bound |
 | 2026-11-14 | M1 stream A, fourth independent review of PR 7: section 5's xz row adds the limits on LZMA state resets and on new uncompressed runs, with the library allocations they bound, and states only bounds that hold: live memory; total allocation as derived from the rules plus the measured fixed cost per LZMA chunk (about 200 bytes, which no rule limits); the measured figures for the review streams; and the fuzz target's check described as a check of the inputs it tries |
+| 2026-11-14 | M1 stream F, PR #11 round 3 (the owner's decision): section 5 gives the manifest default as 100,000 entries and 6,710,886 bytes (a tenth of the format limit), raised by `--max-entries` up to 1,000,000 entries and 64 MiB; two limits now have a flag, the unpacked size and the manifest |
