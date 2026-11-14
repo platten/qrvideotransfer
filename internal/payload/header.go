@@ -100,10 +100,10 @@ func ParseHeader(b []byte) (Header, error) {
 	}
 	a, l := binary.BigEndian.Uint64(b[8:]), binary.BigEndian.Uint64(b[16:])
 	if a > maxArchiveLen {
-		return Header{}, &LimitError{"archive length", maxArchiveLen, maxArchiveLen}
+		return Header{}, &LimitError{"archive length", maxArchiveLen, maxArchiveLen, ""}
 	}
 	if l > MaxStreamLen {
-		return Header{}, &LimitError{"stream length", int64(min(l, maxArchiveLen)), MaxStreamLen}
+		return Header{}, &LimitError{"stream length", int64(min(l, maxArchiveLen)), MaxStreamLen, ""}
 	}
 	h := Header{
 		Method:     Method(b[5]),
@@ -113,7 +113,7 @@ func ParseHeader(b []byte) (Header, error) {
 		BodyLen:    int64(l),
 	}
 	if h.StreamLen() > MaxStreamLen {
-		return Header{}, &LimitError{"stream length", h.StreamLen(), MaxStreamLen}
+		return Header{}, &LimitError{"stream length", h.StreamLen(), MaxStreamLen, ""}
 	}
 	return h, nil
 }
