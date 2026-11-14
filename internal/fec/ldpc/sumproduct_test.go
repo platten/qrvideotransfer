@@ -181,22 +181,25 @@ var variants = []variant{
 	{"offset min-sum 0.5, 25 it", 25, 1, 0.5, false},
 }
 
-// variantErrors returns the frame errors of the shipped decoder and of each variant on the same frames.
-func variantErrors(id uint8, ebn0 float64, frames int, seed uint64) (shipped int, errs []int) {
-	errs = make([]int, len(variants))
+// variantErrors returns the frame errors of the integer decoder with check-node rule ir and of each of
+// vs on the same frames. The integer decoder gets soft bits at units steps per unit of LLR (llrScale
+// in the other tests).
+func variantErrors(id uint8, ir rule, ebn0, units float64, vs []variant, frames int, seed uint64) (shipped int, errs []int) {
+	errs = make([]int, len(vs))
 	workers := runtime.GOMAXPROCS(0)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for w := range workers {
 		wg.Go(func() {
 			c, _ := New(id)
+			c.rule = ir
 			d := newSPDecoder(c)
 			n := c.N()
 			rate := float64(c.info) / float64(n)
 			sigma := math.Sqrt(1 / (rate * math.Pow(10, ebn0/10)) / 2)
 			fl, fq := make([]float64, n), make([]float64, n)
 			q := make([]int8, n)
-			s, e := 0, make([]int, len(variants))
+			s, e := 0, make([]int, len(vs))
 			wrong := func(info []uint8, dec func(i int) bool) bool {
 				for i, v := range info {
 					if dec(i) != (v == 1) {
@@ -213,14 +216,14 @@ func variantErrors(id uint8, ebn0 float64, frames int, seed uint64) (shipped int
 				for i, bit := range sent {
 					y := float64(1-2*int(bit)) + sigma*r.NormFloat64()
 					fl[i] = 2 * y / (sigma * sigma)
-					q[i] = int8(max(-127, min(127, math.Round(llrScale*fl[i]))))
-					fq[i] = float64(q[i]) / llrScale
+					q[i] = int8(max(-127, min(127, math.Round(units*fl[i]))))
+					fq[i] = float64(q[i]) / units
 				}
 				c.decodeBits(q)
 				if wrong(info, func(i int) bool { return c.bit(i) == 1 }) {
 					s++
 				}
-				for k, v := range variants {
+				for k, v := range vs {
 					in := fq
 					if v.unquantised {
 						in = fl
@@ -243,7 +246,25 @@ func variantErrors(id uint8, ebn0 float64, frames int, seed uint64) (shipped int
 	return shipped, errs
 }
 
-// TestMinSumVariants sweeps Eb/N0 in 0.1 dB steps and logs where the shipped decoder and each
+// TestSoftBitUnits logs where the M1 integer decoder crosses FER 1e-2 on robust with soft bits at
+// 4, 8 and 16 steps per unit of LLR (DESIGN.md section 8). Long tests only.
+func TestSoftBitUnits(t *testing.T) {
+	if !long() {
+		t.Skip("set QRVT_LONG_TESTS=1")
+	}
+	const frames = 4000
+	for _, units := range []float64{4, 8, 16} {
+		var ebn0 []float64
+		var errs []int
+		for e := 0.6; e <= 2.4+1e-9; e += 0.1 {
+			n, _ := variantErrors(4, m1Rule, e, units, nil, frames, 9)
+			ebn0, errs = append(ebn0, e), append(errs, n)
+		}
+		t.Logf("robust, M1 decoder, %g soft-bit steps per unit of LLR: FER 1e-2 at %.2f dB", units, crossing(ebn0, errs, frames, 1e-2))
+	}
+}
+
+// TestMinSumVariants sweeps Eb/N0 in 0.1 dB steps and logs where the M1 decoder and each
 // variant cross FER 1e-2 on the same frames (log-linear interpolation between the bracketing
 // points), and the capacity gap. Long tests only.
 func TestMinSumVariants(t *testing.T) {
@@ -255,7 +276,7 @@ func TestMinSumVariants(t *testing.T) {
 	for _, id := range []uint8{4, 2, 3, 1} {
 		c := mustNew(t, id)
 		limit := capacityLimit(float64(c.info) / float64(c.N()))
-		names := append([]string{"shipped decoder (int16, x0.75 as floor(3m/4), 25 it)"}, make([]string, len(variants))...)
+		names := append([]string{"M1 decoder (int16, x0.75 as floor(3m/4), 25 it)"}, make([]string, len(variants))...)
 		for k, v := range variants {
 			names[k+1] = v.name
 		}
@@ -269,7 +290,7 @@ func TestMinSumVariants(t *testing.T) {
 			if e > ranges[id][1]+1e-9 {
 				break
 			}
-			s, errs := variantErrors(id, e, frames, 9)
+			s, errs := variantErrors(id, m1Rule, e, llrScale, variants, frames, 9)
 			fers := []float64{float64(s) / frames}
 			for _, n := range errs {
 				fers = append(fers, float64(n)/frames)
