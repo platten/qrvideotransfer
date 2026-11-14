@@ -420,9 +420,12 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   | `fast` | 3.6 dB | 2.85e-3 | 2.22e-3 | 324 | 75 | -12.5 |
   | `fast` | 3.7 dB | 9.45e-4 | 6.75e-4 | 137 | 29 | -8.4 |
 
-  Near FER 1e-3, B is significantly behind M1 on code 3 and on `normal`, by about 0.01 dB, and
-  clearly better on `fast` and on `robust`. Whether a tolerance of that size is accepted is the
-  designer's decision, pending. It improves `robust` by 0.87 dB at scale 1 and has the smallest worst case over the
+  Near FER 1e-3, B is slightly but significantly worse than M1 on code 3 and on `normal`, and
+  clearly better on `fast` and on `robust`. The size of the loss, read from the local slope of each
+  curve (FER falls by a factor of 3.1 per 0.1 dB on code 3 and 3.4 on `normal` here), is 0.011 dB on
+  code 3 at 2.2 dB (0.001 dB, not significant, at 2.3 dB), 0.011 dB on `normal` at 2.6 dB and 0.008 dB at 2.7 dB. **The designer accepted
+  this trade with an explicit tolerance: at FER 1e-3 the decoder must be within 0.02 dB of the
+  previous decoder on every code**, which B meets, in return for 0.87 dB on `robust`. It improves `robust` by 0.87 dB at scale 1 and has the smallest worst case over the
   three scales (1.47 dB, against 1.50 for A1, which also fails code 2 by 0.11 dB, 2.20 for A2 and 3.16
   for A3): offset min-sum depends on the soft-bit scale, normalised min-sum does not. `robust` buys its
   3.1 dB of Es/N0 over code 3 with 56% of the payload per sent bit.
@@ -1239,3 +1242,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream G follow-up: section 17 says Dependabot ignores wazero and go-ffmpreg, which are updated by hand with the S1 measurements re-run (stream D) no later than M7 |
 | 2026-11-13 | Decoder follow-up to M1 stream B (designer's decision): section 8 records the measured candidates (offset min-sum 1-3 steps, normalised x13/16 with soft bits x4 inside, M1 and sum-product) at soft-bit scales 0.5, 1 and 2, FER 1e-2 and 1e-3, wrong-codeword counts and the choice of x13/16 for all codes; the decoder description, the measured points of the mother and shortened codes (`robust` now 1.75 dB from capacity, meeting the 2.5 dB criterion) and the speed are updated. No format bit changes |
 | 2026-11-14 | Review of PR #14: section 8 replaces the FER 1e-3 statement with the paired comparison (`TestPairedM1B`, 400,000 frames per point): B is significantly behind M1 near FER 1e-3 on code 3 and `normal` (about 0.01 dB, z up to +6.1) and better on `fast` and `robust`; the tolerance is the designer's decision, pending |
+| 2026-11-14 | Designer's decision on PR #14: section 8 records that candidate B was accepted with an explicit tolerance (at FER 1e-3 within 0.02 dB of the previous decoder on every code), the measured losses near FER 1e-3 (0.011 dB on code 3 and `normal`) and the 0.87 dB gain on `robust` |
