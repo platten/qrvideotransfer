@@ -413,6 +413,22 @@ func TestHelpers(t *testing.T) {
 	if dirSize(dir) != 3 {
 		t.Errorf("dirSize %d", dirSize(dir))
 	}
+	// A file still open for writing counts at its current size. On Windows a directory listing
+	// reports the size recorded in the directory entry, which lags behind an open file; the fast
+	// path's copy-size bound and the copy's progress both depend on this.
+	w, err := os.Create(filepath.Join(dir, "growing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Close() }()
+	for i := 1; i <= 3; i++ {
+		if _, err := w.Write(make([]byte, 1<<20)); err != nil {
+			t.Fatal(err)
+		}
+		if got := dirSize(dir); got != 3+int64(i)<<20 {
+			t.Errorf("after %d MiB written: dirSize %d", i, got)
+		}
+	}
 	if _, err := containerOf("x.264"); err != nil {
 		t.Error(err)
 	}

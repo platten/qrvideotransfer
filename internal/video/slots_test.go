@@ -10,10 +10,12 @@ import (
 )
 
 // TestWatchdogUnderLoad: more spinning instances than Ps are started at once, each with a 2 s
-// watchdog; every one must be stopped by it, and promptly. With the cap, at most EngineInstances()
-// run at a time and an instance waiting for its turn is not stalled. Without it (DESIGN.md section
-// 12), all run at once and are still stopped on time: with close-on-cancel, compiled loops return to
-// Go at every back-edge, where the scheduler can preempt them. Not parallel: it replaces the slots.
+// watchdog; every one must be stopped by it. With the cap, at most EngineInstances() run at a time,
+// an instance waiting for its turn is not stalled, and every one is stopped promptly: that is
+// asserted. Without the cap (DESIGN.md section 12) every one must still be stopped by the watchdog,
+// but the time is only logged: on a 16-thread development machine they were stopped on time, while
+// on the macos-26-intel CI runner five took 16.8 s against a 2 s limit, which is why the cap stays.
+// Not parallel: it replaces the slots.
 func TestWatchdogUnderLoad(t *testing.T) {
 	e := engineFor(t)
 	n := runtime.GOMAXPROCS(0) + 1
@@ -37,7 +39,9 @@ func TestWatchdogUnderLoad(t *testing.T) {
 		wg.Wait()
 		slots = old
 		rounds := (n + k - 1) / k
-		if el := time.Since(start); el > time.Duration(rounds)*(limit+2*time.Second)+5*time.Second {
+		el := time.Since(start)
+		t.Logf("%d instances in %d slots (GOMAXPROCS %d): %v", n, k, runtime.GOMAXPROCS(0), el)
+		if k == capped && el > time.Duration(rounds)*(limit+2*time.Second)+5*time.Second {
 			t.Errorf("%d instances in %d slots took %v", n, k, el)
 		}
 		for i, err := range errs {
