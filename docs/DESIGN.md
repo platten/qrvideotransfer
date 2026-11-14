@@ -776,6 +776,7 @@ type DecodeOptions struct {
     Passphrase       func() (string, error)
     VerifyKeys       [][]byte // non-empty: the transfer must be signed by one of these
     MaxSize          int64
+    MaxEntries       int      // manifest entries that may be unpacked; 0: the default, about 100,000; at most 1,000,000 (flag --max-entries)
     Overwrite        bool
     Report           string   // optional path for a JSON report
     Backend          string
@@ -1190,4 +1191,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream G follow-up: section 17 says Dependabot ignores wazero and go-ffmpreg, which are updated by hand with the S1 measurements re-run (stream D) no later than M7 |
 | 2026-11-13 | M1 stream F: section 13 resolves what the command line left open: the `--resolution` presets (with `2160p` as another name for `4k`) and its use by `calibrate make` for the monitor resolution; ranges for `--fps` (1-240) and `--jobs` (0-1024, 0 the CPU count); `--hdr` replaces `--mode`; `--passphrase-file` reads the first line and needs `--encrypt` on encode; `--verify-key` takes a key file or a key line; the `--max-size` units; which output flags exclude each other; where plain, summary and JSON output go and the JSON schema; the hidden `demo` command; required `-o`; and the exit codes |
 | 2026-11-13 | M1 stream F, PR #11 review: section 13 says that with `--json` nothing goes to standard error, that a failure before the job starts is a single error line, and that warnings are events |
-| 2026-11-14 | M1 stream F, PR #11 round 2: section 13 adds `--max-entries` (the owner's decision: default manifest limits about a tenth of the format's, raised by one flag), mapped to `DecodeOptions.MaxEntries` |
+| 2026-11-14 | M1 stream F, PR #11 round 2: section 13 adds `--max-entries` (the owner's decision: default manifest limits about a tenth of the format's, raised by one flag), mapped to `DecodeOptions.MaxEntries`, which section 14 shows |
