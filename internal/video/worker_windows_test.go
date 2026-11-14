@@ -45,7 +45,9 @@ func TestWorkerJobObject(t *testing.T) {
 	if err := writeMsg(stdin, msgJob, b); err != nil {
 		t.Fatal(err)
 	}
-	if typ, _, err := readMsg(bufio.NewReader(stdout), nil, parentLimit); typ != msgReady || err != nil {
+	var typ byte
+	within(t, time.Minute, "the worker's ready message", func() { typ, _, err = readMsg(bufio.NewReader(stdout), nil, parentLimit) })
+	if typ != msgReady || err != nil {
 		t.Fatalf("the worker did not run: %q %v", typ, err)
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(cmd.Process.Pid))

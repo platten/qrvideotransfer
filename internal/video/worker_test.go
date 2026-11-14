@@ -60,10 +60,22 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// hostileWorker misbehaves in the way named.
+// hostileWorker misbehaves in the way named. It first says the engine is loaded, as a worker does
+// before any guest code runs, except in the modes that test the phase before that ("pre-" modes)
+// and those that send the message themselves or never.
 func hostileWorker(mode string) int {
 	_, _, _ = readMsg(bufio.NewReader(os.Stdin), nil, workerLimit)
+	if !strings.HasPrefix(mode, "pre-") && mode != "noready" && mode != "slowload" && mode != "readyhang" {
+		_ = writeMsg(os.Stdout, msgReady, nil)
+	}
 	switch mode {
+	case "pre-garbage":
+		_, _ = os.Stdout.Write(bytes.Repeat([]byte("usage: qrvt\n"), 100))
+	case "pre-out": // output before the ready message
+		_ = writeMsg(os.Stdout, msgOut, []byte{1})
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
+	case "pre-exit": // a failure before the ready message
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(1, "cannot load the engine"))
 	case "oversize": // a message claiming 4 GiB
 		_, _ = os.Stdout.Write([]byte{msgOut, 0xff, 0xff, 0xff, 0xff})
 	case "garbage":
@@ -104,7 +116,7 @@ func hostileWorker(mode string) int {
 	case "readyhang": // says it is ready, then hangs
 		_ = writeMsg(os.Stdout, msgReady, nil)
 		time.Sleep(time.Hour)
-	case "version": // speaks another protocol version
+	case "pre-version": // speaks another protocol version
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(exitVersion, "protocol version 99"))
 	case "lateversion": // claims a version mismatch after it has sent output
 		_ = writeMsg(os.Stdout, msgOut, []byte{1})
@@ -219,7 +231,9 @@ func parentKilled(t *testing.T, mode string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	line, err := bufio.NewReader(out).ReadString('\n')
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	var line string
+	within(t, time.Minute, "the fake parent's first line", func() { line, err = bufio.NewReader(out).ReadString('\n') })
 	pid, perr := strconv.Atoi(strings.TrimSpace(line))
 	if err != nil || perr != nil {
 		_ = cmd.Process.Kill()
@@ -245,7 +259,7 @@ func TestWorkerHostile(t *testing.T) {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
 		var out bytes.Buffer
-		err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }, stdout: &out})
+		err := run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }, stdout: &out})
 		runtime.ReadMemStats(&after)
 		if !errors.Is(err, ErrEngine) {
 			t.Errorf("%s: %v", mode, err)
@@ -265,7 +279,7 @@ func TestWorkerHostile(t *testing.T) {
 	// Wrong plane sizes: a third of a frame is a truncated frame.
 	p, _ := testWorkers(t, "planes")
 	pi := probeInfo{ClipInfo: ClipInfo{Width: 16, Height: 16, BitDepth: 8}, Size: 1000, PixFmt: "yuv420p"}
-	d := startDecoder(t.Context(), workerRunner{p}, clip("hevc8.mp4"), pi, DecodeConfig{}, "yuv420p")
+	d := startDecoder(testCtx(t, time.Minute), workerRunner{p}, clip("hevc8.mp4"), pi, DecodeConfig{}, "yuv420p")
 	var f Frame
 	if err := d.Next(&f); !errors.Is(err, ErrInvalidVideo) {
 		t.Errorf("partial frame: %v", err)
@@ -292,13 +306,14 @@ func printable(s string) bool {
 func TestWorkerForgedResults(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
+	ctx := testCtx(t, time.Minute)
 	p, _ := testWorkers(t, "probelie")
-	if _, err := probe(t.Context(), workerRunner{p}, clip("hevc8.mp4")); err == nil {
+	if _, err := probe(ctx, workerRunner{p}, clip("hevc8.mp4")); err == nil {
 		t.Error("a huge probed size was accepted")
 	}
 	p, _ = testWorkers(t, "sizelie")
 	pi := probeInfo{ClipInfo: ClipInfo{Width: 16, Height: 16, BitDepth: 8}, Size: 1000, PixFmt: "yuv420p"}
-	d := startDecoder(t.Context(), workerRunner{p}, clip("hevc8.mp4"), pi, DecodeConfig{}, "yuv420p")
+	d := startDecoder(ctx, workerRunner{p}, clip("hevc8.mp4"), pi, DecodeConfig{}, "yuv420p")
 	var f Frame
 	if err := d.Next(&f); !errors.Is(err, ErrInvalidVideo) {
 		t.Errorf("forged frame size: %v", err)
@@ -333,9 +348,11 @@ func TestWorkerLoadLimit(t *testing.T) {
 }
 
 // TestWorkerVersion: a worker refuses a job of another protocol version, and the parent takes that,
-// as the worker's first message, for a failure to start, so the job runs in process and WorkerStatus
-// says why. Not parallel: it changes the version the parent sends and the process's status.
+// coming before the ready message, for a failure to start, so the job runs in process and
+// WorkerStatus says why. Not parallel: it changes the version the parent sends and the process's
+// status.
 func TestWorkerVersion(t *testing.T) {
+	ctx := testCtx(t, 3*time.Minute)
 	var out bytes.Buffer
 	in := &bytes.Buffer{}
 	b, _ := json.Marshal(workerJob{Prog: "ffmpeg", Version: protocolVersion + 1})
@@ -348,15 +365,15 @@ func TestWorkerVersion(t *testing.T) {
 		t.Errorf("refusal %q %q %v", typ, msg, err)
 	}
 
-	p, _ := testWorkers(t, "version")
-	if err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }}); !errors.Is(err, errWorkerStart) {
+	p, _ := testWorkers(t, "pre-version")
+	if err := run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }}); !errors.Is(err, errWorkerStart) {
 		t.Errorf("parent: %v", err)
 	}
 
 	v := protocolVersion
 	defer func() { protocolVersion = v; degraded.Store(nil) }()
 	protocolVersion++
-	d, err := embedded(t).NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	d, err := embedded(t).NewDecoder(ctx, clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,6 +382,62 @@ func TestWorkerVersion(t *testing.T) {
 	}
 	if err := WorkerStatus(); err == nil || !strings.Contains(err.Error(), "protocol version") {
 		t.Errorf("status: %v", err)
+	}
+}
+
+// TestWorkerStartFailures: whatever ends a worker before its ready message (an exit, an exit with a
+// failure, garbage, output) is a failure to start, since no guest code has run: nothing reaches the
+// job's output, and through the embedded backend the job runs in process and WorkerStatus says why.
+// Not parallel: it replaces the process's workers.
+func TestWorkerStartFailures(t *testing.T) {
+	ctx := testCtx(t, 3*time.Minute)
+	for _, mode := range []string{"pre-early", "pre-exit", "pre-garbage", "pre-out"} {
+		p, ps := testWorkers(t, mode)
+		var out bytes.Buffer
+		err := run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }, stdout: &out})
+		if !errors.Is(err, errWorkerStart) || !printable(err.Error()) {
+			t.Errorf("%s: %v", mode, err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("%s: %d bytes of output passed on", mode, out.Len())
+		}
+		gone(t, ps.all(), 5*time.Second)
+	}
+
+	w, _ := currentWorkers()
+	defer func() { setWorkers(w, nil); degraded.Store(nil) }()
+	p, _ := testWorkers(t, "pre-garbage")
+	setWorkers(p, nil)
+	d, err := embedded(t).NewDecoder(ctx, clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(decodeAll(t, d)); n != 24 {
+		t.Errorf("%d frames", n)
+	}
+	if err := WorkerStatus(); err == nil || !strings.Contains(err.Error(), "before it was ready") {
+		t.Errorf("status: %v", err)
+	}
+}
+
+// testCtx is the test's context with a deadline, so that a hang fails the test by name instead of
+// running into go test's timeout.
+func testCtx(t *testing.T, d time.Duration) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), d)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// within runs f and fails the test if it has not returned after d. f must not call t's methods.
+func within(t *testing.T, d time.Duration, what string, f func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); f() }()
+	select {
+	case <-done:
+	case <-time.After(d):
+		t.Fatalf("%s: still waiting after %v", what, d)
 	}
 }
 
