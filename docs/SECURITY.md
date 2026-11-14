@@ -248,7 +248,10 @@ the engine loaded is killed at `EngineLoadLimit` (shortened in the test) with th
 process left (`TestWorkerLoadLimit`). On Unix a worker closes a descriptor it inherited without
 close-on-exec (fd 9 in the test) as it starts, and still serves its job (`TestWorkerClosesInherited`).
 A worker refuses a job of another protocol version, and the parent then runs the job in process and
-reports why; the same refusal sent after other messages is an ordinary failure (`TestWorkerVersion`,
+reports why. More generally, whatever ends a worker before its ready message (an exit, a failure,
+garbage, an early output message) is a failure to start: nothing the worker sent is passed on and the
+job runs in process (`TestWorkerStartFailures`). After the ready message, the same refusal is an
+ordinary failure (`TestWorkerVersion`,
 `TestWorkerHostile`). Forged replies (a
 message claiming 4 GiB, garbage, an unknown type, a malformed progress or exit message, an early exit,
 a lying read count and escape sequences, error texts whose cut to their bound falls inside a
@@ -339,10 +342,16 @@ root package, `cmd/` and `internal/` that fails if any package other than `inter
 
 One reviewed exception: Windows system calls that take a struct's address (the Job Object's limits,
 `IsProcessInJob`'s result in a test) get it from `reflect.Value.Pointer`, without importing `unsafe`.
-That hand-off is one helper, `addr` in `internal/video/worker_windows.go`; the pointer is
-heap-allocated (passing it to reflect makes it escape), so it does not move, and each caller keeps it
-alive across the call with `runtime.KeepAlive`. The same test fails if any other file outside
-`tools/` and `spikes/` that imports `reflect` calls `Pointer`, `UnsafeAddr` or `UnsafePointer`.
+That hand-off is one helper, `addr`, defined in `internal/video/worker_windows.go`. Being part of
+package `video` on Windows, it may be called from any Windows file of `internal/video`, tests
+included (`worker_windows_test.go` calls it for `IsProcessInJob`); no other package can call it. The
+pointer is heap-allocated (passing it to reflect makes it escape), so it does not move, and each
+caller keeps it alive across the call with `runtime.KeepAlive`. The same test fails if any other file
+outside `tools/` and `spikes/`, whatever it imports, holds a selector named `Pointer`, `UnsafeAddr` or
+`UnsafePointer`, called or not: a method call, a method value (`f := v.Pointer`), a method expression
+(`reflect.Value.Pointer(v)`), or a call on a `reflect.Value` made in another package. Only
+package-qualified names, such as the type `atomic.Pointer`, are allowed. The fixtures include each of
+these.
 
 ## 10. Final security pass (milestone M7)
 
@@ -405,3 +414,4 @@ instruction and states which versions receive fixes.
 | 2026-11-13 | M1 stream D, worker processes: guarantee 1's basis includes the worker process; T1, section 5 and section 9.3 describe the worker, its fallback, its exit when the parent goes, and that it is not an operating-system sandbox |
 | 2026-11-14 | M1 stream D, review round 3 of PR #9: section 9.3 adds that a second showinfo configuration line is refused, and the test with a forged configuration line before a forged frame |
 | 2026-11-14 | M1 stream D, review of PR #15: T1 states that encoding and `Concat` run in qrvt's own process with close-on-cancel off and no forced stop (acceptable because their input is qrvt's own), that cancelling them closes their input, and that their guest delays, and a spinning one would stall, qrvt's own garbage collection, which matters to a host that encodes and decodes in one process; it adds the protocol version refusal, the cut on a character boundary and `EngineLoadLimit`. Section 5: a new row for `EngineLoadLimit` (10 minutes, with its reasons and test); the stall row no longer lists encoding among the progress kinds, says encoding and `Concat` are not covered, and limits "never exceed the cap" to the in-process path. Section 9.3 claims only what is tested: the orphan test with and without the Job Object, the Job Object test (suspended start, `IsProcessInJob`, kill on closing the job), the load-limit, inherited-descriptor, protocol-version, forged-result and `Concat` cancel tests. Section 9.6 records the `reflect` address hand-off as the one reviewed exception, checked by the import-rule test |
+| 2026-11-14 | M1 stream D, round 2 of the review of PR #15: section 9.3 says that whatever ends a worker before its ready message is a failure to start, with the job run in process (`TestWorkerStartFailures`). Section 9.6 says `addr` may be called from any Windows file of `internal/video`, tests included, and that the import-rule test refuses any selector named `Pointer`, `UnsafeAddr` or `UnsafePointer` outside the exception file, called or not and whatever the file imports (method values, method expressions, values made in another package), allowing only package-qualified names |

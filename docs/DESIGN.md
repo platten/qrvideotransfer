@@ -802,8 +802,10 @@ Costs a user should expect:
   directory, an output bound) travels over the worker's standard input as one length-prefixed JSON
   message, never in its arguments or environment, and the worker validates it as untrusted input. The
   job carries the protocol's version; a worker refuses any other (the executable on disk may have been
-  replaced by another release while qrvt runs), and the parent, given that refusal as the worker's
-  first message, treats it as a failure to start: the job runs in process (*Fallback*, below). The
+  replaced by another release while qrvt runs). The worker sends its ready message before any guest
+  code runs, so the parent treats anything other than that message as the worker's first (that
+  refusal, any other exit, a broken or early message, the worker ending) as a failure to start,
+  passes on nothing the worker sent, and runs the job in process (*Fallback*, below). The
   program's standard input, if any, is sent only once the worker reports the engine loaded. The
   worker keeps every control: the read-only single-file counting view, the 512 MiB ceiling, and
   `MaxDecodedPixelsPerInputByte` as a bound on its output. Results come back as typed, length-prefixed
@@ -837,7 +839,7 @@ Costs a user should expect:
     about 0.5 s for a 4K frame), and a guest that spun would stall it, and with it the whole process;
     that matters to a host that encodes and decodes in one process (SECURITY.md T1).
   - *Fallback.* When the host never called the hook, its executable cannot be found or a worker
-    cannot be started, the instance runs in qrvt's process with close-on-cancel on, under the
+    cannot be started or fails before its ready message, the instance runs in qrvt's process with close-on-cancel on, under the
     `EngineInstances()` cap: the same guarantees, 4 to 11 times slower. `video.WorkerStatus` then
     returns the reason, which the pipeline reports as a warning (`WarnEngineInProcess`).
   - *Not claimed.* A worker is the same binary with the same privileges as qrvt; worker processes
@@ -1427,3 +1429,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream G follow-up 2: section 17 states that an advisory for wazero or go-ffmpreg (GitHub alert or CI scan) is fixed by hand straight away with S1 re-run, how the Fedora and Arch Linux container digests are refreshed and that the containers run read-only and without new privileges, and adds the HEVC fast-path test step and fuzz tag (stream D, PR #9) |
 | 2026-11-13 | M1 stream D, worker processes (owner's decision after the close-on-cancel measurement): section 8 re-derives the worker count for workers (no GOMAXPROCS cap; 920 MB each, measured 190-403 MB) and keeps the cap for instances in qrvt's process; section 12 adds worker processes (protocol, isolation, termination, fallback, what is not claimed, the compile cache) and keeps encoding in process with close-on-cancel off (15% cost through a worker); section 14 adds the `EngineWorker` hook as the one exception to "never exits the process" |
 | 2026-11-14 | M1 stream D, review of PR #15: section 8 marks the worker memory figures as measured on one machine (the S1 development machine), not on the CI runners, and counts `Concat` among the in-process instances. Section 12: the worker speed figures are marked the same way, with the second run's figures; the job carries a protocol version, which a worker of another version refuses and the parent takes for a failure to start; standard input is sent only after the ready message; on Unix the worker closes every inherited descriptor above 2 as it starts; on Windows it is created suspended and resumed only once in its Job Object; the loading phase is bounded by `video.EngineLoadLimit`, and compiling in qrvt's process has no limit but the context; encoding and `Concat` stay in process with no forced stop, stop on cancellation by having their input closed, and delay (or, spinning, would stall) qrvt's own garbage collection; the watchdog is no longer described as covering encoding |
+| 2026-11-14 | M1 stream D, round 2 of the review of PR #15: section 12 treats anything other than the ready message as a worker's first message (a version refusal, any other exit, a broken or early message, the worker ending) as a failure to start, with nothing passed on and the job run in process |
