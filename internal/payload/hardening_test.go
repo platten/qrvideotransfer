@@ -242,7 +242,7 @@ func TestDeepManifestResources(t *testing.T) {
 		t.Skip("the time bound does not apply under the race detector; it runs in the ordinary test task")
 	}
 	start := time.Now()
-	m := MarshalManifest(worstCase(false))
+	m := MarshalManifest(worstCase(false, limits{MaxManifestEntries, MaxManifestBytes}))
 	if len(m) < MaxManifestBytes-1024 || len(m) > MaxManifestBytes {
 		t.Fatalf("manifest is %d bytes", len(m))
 	}
@@ -252,7 +252,9 @@ func TestDeepManifestResources(t *testing.T) {
 	b.Write(make([]byte, 1024)) // an empty tar: every entry is missing
 	out := t.TempDir()
 	var err error
-	_, sys := allocated(func() { _, err = unpack(rawStream(b.Bytes()), UnpackOptions{OutputDir: out}) })
+	_, sys := allocated(func() {
+		_, err = unpack(rawStream(b.Bytes()), UnpackOptions{OutputDir: out, MaxEntries: MaxManifestEntries})
+	})
 	if !isUnsafe(err) {
 		t.Fatalf("Unpack: %v", err)
 	}

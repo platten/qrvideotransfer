@@ -118,8 +118,9 @@ jobs:
           MILESTONE: ${{ matrix.milestone }}
 
   # Started by hand only, with the input extraction_worst_case (SECURITY.md section 5, "Extraction
-  # work"): times one extraction of the manifest within the limits that maximises files x depth (64
-  # components, 64 MiB of manifest), and of the widest one, on every CI system. For example:
+  # work"): times one extraction of the manifest that maximises files x depth (64 components), and of
+  # the widest one, at the default manifest limits and at the format limits, on every CI system.
+  # For example:
   #   gh workflow run nightly.yml --ref <branch> -f extraction_worst_case=true -f fuzztime=10s
   extraction-worst-case:
     name: extraction worst case (${{ matrix.os }})

@@ -446,7 +446,7 @@ func checkBlockHeader(h []byte) (csize, usize int64, dict int, err error) {
 		d = (2 | int64(code)&1) << (11 + code/2)
 	}
 	if d > XZDictCap {
-		return 0, 0, 0, &LimitError{"xz dictionary", d, XZDictCap}
+		return 0, 0, 0, &LimitError{"xz dictionary", d, XZDictCap, ""}
 	}
 	return sizes[0], sizes[1], int(d), nil
 }

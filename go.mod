@@ -15,10 +15,10 @@ require (
 	github.com/gen2brain/h265 v0.2.5
 	github.com/klauspost/compress v1.20.4
 	github.com/klauspost/reedsolomon v1.14.2
-	github.com/muesli/mango-cobra v1.2.0
+	github.com/muesli/mango-cobra v1.3.0
 	github.com/muesli/roff v0.1.0
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.9
+	github.com/spf13/pflag v1.1.0
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/ulikunitz/xz v0.5.17
 	golang.org/x/sys v0.50.0
@@ -43,7 +43,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.30 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
-	github.com/muesli/mango v0.1.0 // indirect
+	github.com/muesli/mango v0.2.0 // indirect
 	github.com/muesli/mango-pflag v0.1.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v1.0.0 // indirect

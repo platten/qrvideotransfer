@@ -98,11 +98,11 @@ func BenchmarkExtractDeep(b *testing.B) {
 	}
 }
 
-// worstCase returns the manifest within the limits that maximises files times depth: a chain of 63
-// one-letter folders and, in the deepest, as many empty files of 64 components as fit in
-// MaxManifestBytes. With wide set it returns the other extreme, the most empty files at depth 1.
-// Names are base-36 counters, skipping those the path rules refuse (con, nul, ...).
-func worstCase(wide bool) []Entry {
+// worstCase returns the manifest within the limits lim that maximises files times depth: a chain of
+// 63 one-letter folders and, in the deepest, as many empty files of 64 components as fit in lim. With
+// wide set it returns the other extreme, the most empty files at depth 1. Names are base-36
+// counters, skipping those the path rules refuse (con, nul, ...).
+func worstCase(wide bool, lim limits) []Entry {
 	var es []Entry
 	p := ""
 	if !wide {
@@ -114,14 +114,14 @@ func worstCase(wide bool) []Entry {
 	}
 	size := len(MarshalManifest(es))
 	empty := len(MarshalManifest(nil))
-	for n := int64(0); len(es) < MaxManifestEntries; n++ {
+	for n := int64(0); int64(len(es)) < lim.entries; n++ {
 		name := strconv.FormatInt(n, 36)
 		if pathRule(name) != "" {
 			continue
 		}
 		e := Entry{Path: p + name, Mode: 0o644, MTime: testTime, SHA256: sha256.Sum256(nil)}
 		k := len(MarshalManifest([]Entry{e})) - empty + 1 // with its comma
-		if size+k > MaxManifestBytes {
+		if int64(size+k) > lim.bytes {
 			break
 		}
 		es, size = append(es, e), size+k
@@ -153,29 +153,40 @@ func archiveFile(tb testing.TB, entries []Entry) (*os.File, int64) {
 	return f, n
 }
 
-// BenchmarkExtractWorstCase measures one extraction into a new folder of the worst manifest within
-// the limits (worstCase), and of the widest one. SECURITY.md section 5 publishes the figures; the
-// nightly workflow's extraction-worst-case job runs it on every CI system. It takes minutes.
+// BenchmarkExtractWorstCase measures one extraction into a new folder of the worst manifest
+// (worstCase) and of the widest one, within the decoder's default limits and within the format
+// limits, the most --max-entries raises them to. SECURITY.md section 5 publishes the figures; the
+// nightly workflow's extraction-worst-case job runs it on every CI system. The format-limit cases
+// take up to 20 minutes on Windows; -bench 'WorstCase/limits=default' runs only the defaults.
 func BenchmarkExtractWorstCase(b *testing.B) {
-	for _, wide := range []bool{false, true} {
-		es := worstCase(wide)
-		files, depth := 0, 0
-		for _, e := range es {
-			if !e.Dir {
-				files, depth = files+1, strings.Count(e.Path, "/")+1
+	for _, c := range []struct {
+		name string
+		lim  limits
+	}{
+		{"default", limits{DefaultMaxEntries, DefaultMaxManifestBytes}},
+		{"format", limits{MaxManifestEntries, MaxManifestBytes}},
+	} {
+		for _, wide := range []bool{false, true} {
+			es := worstCase(wide, c.lim)
+			files, depth := 0, 0
+			for _, e := range es {
+				if !e.Dir {
+					files, depth = files+1, strings.Count(e.Path, "/")+1
+				}
 			}
-		}
-		b.Run(fmt.Sprintf("files=%d/components=%d", files, depth), func(b *testing.B) {
-			f, n := archiveFile(b, es)
-			b.StopTimer()
-			for range b.N {
-				out := b.TempDir()
-				b.StartTimer()
-				_, err := unpackArchive(context.Background(), io.NewSectionReader(f, 0, n), n, UnpackOptions{OutputDir: out})
+			b.Run(fmt.Sprintf("limits=%s/files=%d/components=%d", c.name, files, depth), func(b *testing.B) {
+				f, n := archiveFile(b, es)
 				b.StopTimer()
-				must(b, err)
-			}
-		})
+				for range b.N {
+					out := b.TempDir()
+					b.StartTimer()
+					_, err := unpackArchive(context.Background(), io.NewSectionReader(f, 0, n), n,
+						UnpackOptions{OutputDir: out, MaxEntries: c.lim.entries})
+					b.StopTimer()
+					must(b, err)
+				}
+			})
+		}
 	}
 }
 

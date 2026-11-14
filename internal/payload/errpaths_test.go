@@ -15,7 +15,7 @@ import (
 func TestErrorStrings(t *testing.T) {
 	for _, err := range []error{
 		&UnsafeArchiveError{"p", "r"}, &InputError{"p", "r"}, &ExistsError{"p", "r"},
-		&LimitError{"l", 2, 1}, &UnsupportedVersionError{"v", 3},
+		&LimitError{"l", 2, 1, ""}, &UnsupportedVersionError{"v", 3},
 	} {
 		if s := err.Error(); !strings.HasPrefix(s, "payload: ") || len(s) < 15 {
 			t.Errorf("%T: %q", err, s)
