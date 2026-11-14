@@ -195,12 +195,14 @@ func TestSandboxWrite(t *testing.T) {
 }
 
 // TestMemoryCeiling: an instance that needs more than its 512 MiB is stopped and reported, and the
-// process carries on (SECURITY.md 9.3).
+// process carries on (SECURITY.md 9.3). The source is small and only the scaled picture (968 MB) is
+// too large: an 8192 x 8192 source took over 30 s to fill on windows-2025 under load, with no output,
+// and was stopped as a stall before it reached the allocation.
 func TestMemoryCeiling(t *testing.T) {
 	t.Parallel()
 	e := engineFor(t)
 	var p peakAlloc
-	log, err := ffmpegJob(withPeak(t.Context(), &p), e, "", "-v", "error", "-f", "lavfi", "-i", "color=s=8192x8192:d=1",
+	log, err := ffmpegJob(withPeak(t.Context(), &p), e, "", "-v", "error", "-f", "lavfi", "-i", "color=s=64x64:d=1",
 		"-vf", "scale=11000:11000,format=rgba64le", "-frames:v", "1", "-f", "null", "-")
 	if !errors.Is(err, ErrEngine) {
 		t.Fatalf("over the ceiling: %v (%s)", err, log)
