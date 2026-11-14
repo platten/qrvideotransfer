@@ -193,8 +193,8 @@ jobs:
   # have neither Go nor git, so the dnf and pacman paths install git and the script downloads Go.
   # Without --spike: ffmpeg with libx265 on Fedora needs RPM Fusion, which the script only advises.
   # The digests are refreshed by hand at the start of each milestone, and for Fedora also when a new
-  # release comes out (April and October); the tag beside each digest names what it was taken from.
-  # The checkout is mounted read-only and the container cannot gain privileges.
+  # release comes out (spring and autumn); the tag beside each digest names what it was taken from.
+  # The checkout is mounted read-only and the container runs with no-new-privileges.
   setup-scripts-container:
     name: setup scripts (${{ matrix.distro }})
     strategy:

@@ -1226,7 +1226,7 @@ by GoReleaser).
   Lint runs on both builds. The setup scripts run with `--spike` on Linux, macOS and Windows runners,
   and `setup.sh` without it in Fedora and Arch Linux containers, so that every package-manager path and
   the Go download are exercised. The container images are pinned by digest and refreshed by hand at the
-  start of each milestone, and Fedora's also when a new release comes out (April and October); the
+  start of each milestone, and Fedora's also when a new release comes out (spring and autumn); the
   checkout is mounted read-only and the containers run with `no-new-privileges`. One step runs the
   `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
   tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
