@@ -226,11 +226,12 @@ func TestSecretValuesNotEchoed(t *testing.T) {
 			{"decode", f.r1, "-o", f.dir, "--passphrase-file", v},
 			{"encode", f.a, "-o", "o.mp4", "--encrypt", "--passphrase-file", v},
 			{"decode", f.r1, "-o", f.dir, "--verify-key", v},
+			{"encode", f.a, "-o", "o.mp4", "--sign-key", v},
 		} {
 			out, errOut, err := run(t, &fakeAPI{}, nil, args...)
 			if err == nil {
-				if v == priv && args[len(args)-2] == "--passphrase-file" {
-					continue // a key file is a valid passphrase file
+				if v == priv && args[len(args)-2] != "--verify-key" {
+					continue // a private key file is a valid passphrase file and signing key
 				}
 				t.Errorf("%.60q: accepted", args)
 				continue
@@ -289,9 +290,17 @@ func TestCalibrateSuggestsOnlyItsFlags(t *testing.T) {
 	}
 }
 
+// TestDefaultManifestLimits checks the root defaults against the rule: a tenth of the format
+// limits of 1,000,000 entries and 64 MiB.
+func TestDefaultManifestLimits(t *testing.T) {
+	if qrvt.DefaultMaxEntries != maxEntries/10 || qrvt.DefaultMaxManifestBytes != (64<<20)/10 {
+		t.Errorf("defaults %d entries, %d bytes", qrvt.DefaultMaxEntries, qrvt.DefaultMaxManifestBytes)
+	}
+}
+
 func TestMaxEntriesHelp(t *testing.T) {
 	out, _, _ := run(t, &fakeAPI{}, nil, "decode", "--help")
-	for _, want := range []string{"--max-entries", "1000000", "64 MiB"} {
+	for _, want := range []string{"--max-entries", "1000000", "64 MiB", "100000", "6710886"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("decode --help lacks %q", want)
 		}
