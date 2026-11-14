@@ -350,8 +350,12 @@ caller keeps it alive across the call with `runtime.KeepAlive`. The same test fa
 outside `tools/` and `spikes/`, whatever it imports, holds a selector named `Pointer`, `UnsafeAddr` or
 `UnsafePointer`, called or not: a method call, a method value (`f := v.Pointer`), a method expression
 (`reflect.Value.Pointer(v)`), or a call on a `reflect.Value` made in another package. Only
-package-qualified names, such as the type `atomic.Pointer`, are allowed. The fixtures include each of
-these.
+package-qualified names, such as the type `atomic.Pointer`, are allowed, and the test decides that by
+type-checking each package (`go/types`): the left side must resolve to an imported package, so a
+local variable or parameter named `reflect` or `atomic` does not pass. The fixtures include each of
+these cases. The check is a guard against mistakes, not a proof: it matches names, so it does not
+catch reflection by name (`MethodByName`) or an address formatted as text (`%p`) and parsed back.
+Those are left to review.
 
 ## 10. Final security pass (milestone M7)
 
@@ -415,3 +419,4 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | M1 stream D, review round 3 of PR #9: section 9.3 adds that a second showinfo configuration line is refused, and the test with a forged configuration line before a forged frame |
 | 2026-11-14 | M1 stream D, review of PR #15: T1 states that encoding and `Concat` run in qrvt's own process with close-on-cancel off and no forced stop (acceptable because their input is qrvt's own), that cancelling them closes their input, and that their guest delays, and a spinning one would stall, qrvt's own garbage collection, which matters to a host that encodes and decodes in one process; it adds the protocol version refusal, the cut on a character boundary and `EngineLoadLimit`. Section 5: a new row for `EngineLoadLimit` (10 minutes, with its reasons and test); the stall row no longer lists encoding among the progress kinds, says encoding and `Concat` are not covered, and limits "never exceed the cap" to the in-process path. Section 9.3 claims only what is tested: the orphan test with and without the Job Object, the Job Object test (suspended start, `IsProcessInJob`, kill on closing the job), the load-limit, inherited-descriptor, protocol-version, forged-result and `Concat` cancel tests. Section 9.6 records the `reflect` address hand-off as the one reviewed exception, checked by the import-rule test |
 | 2026-11-14 | M1 stream D, round 2 of the review of PR #15: section 9.3 says that whatever ends a worker before its ready message is a failure to start, with the job run in process (`TestWorkerStartFailures`). Section 9.6 says `addr` may be called from any Windows file of `internal/video`, tests included, and that the import-rule test refuses any selector named `Pointer`, `UnsafeAddr` or `UnsafePointer` outside the exception file, called or not and whatever the file imports (method values, method expressions, values made in another package), allowing only package-qualified names |
+| 2026-11-14 | M1 stream D, review of PR #20: section 9.6 says the address rule is decided by type-checking each package, so a local variable or parameter named after an imported package does not pass, and that the check guards against mistakes and is not a proof: reflection by name (`MethodByName`) and addresses formatted as text (`%p`) are left to review |

@@ -840,8 +840,13 @@ Costs a user should expect:
     that matters to a host that encodes and decodes in one process (SECURITY.md T1).
   - *Fallback.* When the host never called the hook, its executable cannot be found or a worker
     cannot be started or fails before its ready message, the instance runs in qrvt's process with close-on-cancel on, under the
-    `EngineInstances()` cap: the same guarantees, 4 to 11 times slower. `video.WorkerStatus` then
-    returns the reason, which the pipeline reports as a warning (`WarnEngineInProcess`).
+    `EngineInstances()` cap: the same guarantees, 4 to 11 times slower. Two calls report it.
+    `(*video.Embedded).InProcess` is per backend: it returns the first reason any job of that backend
+    ran in process, and keeps returning it. The pipeline makes one backend per decode, asks it at the
+    decode's end, and warns once for that job (`WarnEngineInProcess`). `video.WorkerStatus` is the
+    process's current state: it returns the reason while no worker can be used, or after a failed
+    start until a worker next reaches ready (a failed start may be passing, such as a worker killed
+    under memory pressure).
   - *Not claimed.* A worker is the same binary with the same privileges as qrvt; worker processes
     bound hangs and memory and keep a stuck engine from blocking qrvt, but they are not an operating
     system sandbox. The WebAssembly sandbox is still what confines the decoder.
@@ -1430,3 +1435,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream D, worker processes (owner's decision after the close-on-cancel measurement): section 8 re-derives the worker count for workers (no GOMAXPROCS cap; 920 MB each, measured 190-403 MB) and keeps the cap for instances in qrvt's process; section 12 adds worker processes (protocol, isolation, termination, fallback, what is not claimed, the compile cache) and keeps encoding in process with close-on-cancel off (15% cost through a worker); section 14 adds the `EngineWorker` hook as the one exception to "never exits the process" |
 | 2026-11-14 | M1 stream D, review of PR #15: section 8 marks the worker memory figures as measured on one machine (the S1 development machine), not on the CI runners, and counts `Concat` among the in-process instances. Section 12: the worker speed figures are marked the same way, with the second run's figures; the job carries a protocol version, which a worker of another version refuses and the parent takes for a failure to start; standard input is sent only after the ready message; on Unix the worker closes every inherited descriptor above 2 as it starts; on Windows it is created suspended and resumed only once in its Job Object; the loading phase is bounded by `video.EngineLoadLimit`, and compiling in qrvt's process has no limit but the context; encoding and `Concat` stay in process with no forced stop, stop on cancellation by having their input closed, and delay (or, spinning, would stall) qrvt's own garbage collection; the watchdog is no longer described as covering encoding |
 | 2026-11-14 | M1 stream D, round 2 of the review of PR #15: section 12 treats anything other than the ready message as a worker's first message (a version refusal, any other exit, a broken or early message, the worker ending) as a failure to start, with nothing passed on and the job run in process |
+| 2026-11-14 | M1 stream D, review of PR #20: section 12's fallback is reported per backend by `(*video.Embedded).InProcess` (the pipeline warns once per decode), and `video.WorkerStatus` is the process's current state, cleared when a worker next reaches ready |
