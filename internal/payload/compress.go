@@ -44,38 +44,10 @@ func decompressor(r io.Reader, m Method) (io.Reader, func(), error) {
 		}
 		return d, d.Close, nil
 	case MethodXZ:
-		g := &xzGuard{r: r}
-		x, err := xz.ReaderConfig{DictCap: XZDictCap, SingleStream: true}.NewReader(g)
-		if err != nil {
-			return nil, nil, errors.Join(g.err, fmt.Errorf("%w: xz: %w", ErrFormat, err))
-		}
-		return guarded{x, g}, func() {}, nil
+		return newXZReader(r), func() {}, nil
 	default:
 		return r, func() {}, nil
 	}
-}
-
-// guarded reports the guard's error rather than the library's rendering of it, and at the end of the
-// stream refuses anything that follows it.
-type guarded struct {
-	r io.Reader
-	g *xzGuard
-}
-
-func (d guarded) Read(p []byte) (int, error) {
-	n, err := d.r.Read(p)
-	switch {
-	case err == nil:
-	case d.g.err != nil:
-		err = d.g.err
-	case errors.Is(err, io.EOF):
-		if ferr := d.g.finish(); ferr != nil {
-			err = ferr
-		}
-	default:
-		err = fmt.Errorf("%w: xz: %w", ErrFormat, err)
-	}
-	return n, err
 }
 
 // methodFor returns the stream method for a compression choice; for CompressAuto, sample yields the

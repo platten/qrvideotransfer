@@ -371,7 +371,8 @@ func TestXZDesync(t *testing.T) {
 	a := archive(t, MarshalManifest(manifestFor(es...)), es...)
 	h := Header{Method: MethodXZ, ArchiveLen: int64(len(a))}
 	var err error
-	alloc, _ := allocated(func() { _, err = unpack(rawWithHeader(h, xzDesync(t)), UnpackOptions{OutputDir: t.TempDir()}) })
+	stream := rawWithHeader(h, xzDesync(t))
+	alloc, _ := allocated(func() { _, err = unpack(stream, UnpackOptions{OutputDir: t.TempDir()}) })
 	if !isFormat(err) || alloc > 16<<20 {
 		t.Fatalf("Unpack: %v, allocated %d MiB", err, alloc>>20)
 	}

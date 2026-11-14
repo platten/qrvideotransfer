@@ -150,7 +150,9 @@ func (x *extractor) walk(phase Phase, visit visitFunc, leave func(parent *os.Roo
 		if n > 0 {
 			x.report(phase, int64(n), total)
 		}
-		if err := x.ctx.Err(); err != nil {
+		// The finish phase runs after every file is in place and costs one change per folder created,
+		// so it is not cancelled: a cancellation then would report failure with the files placed.
+		if err := x.ctx.Err(); err != nil && phase != PhaseFinish {
 			return unwind(0, err)
 		}
 		p := x.entries[i].Path
@@ -320,8 +322,9 @@ func (x *extractor) commitOne(parent *os.Root, name, p string, i int) (*os.Root,
 
 // place moves staged file i to its path. Without overwrite it hard-links the staged file there, which
 // fails if anything has appeared at the path since the pre-check, and then removes the staged name.
-// Where hard links are not supported it checks that the path is free and renames, leaving a short
-// window between the two. With overwrite, an existing regular file is first moved into the staging
+// Only where the file system does not support hard links (linkUnsupported) does it check that the
+// path is free and rename, leaving a short window between the two; any other link error stops the
+// commit. With overwrite, an existing regular file is first moved into the staging
 // folder (and back on rollback); anything else, or another name for a file this transfer has already
 // placed, is refused.
 func (x *extractor) place(i int, e Entry) error {
@@ -355,7 +358,7 @@ func (x *extractor) place(i int, e Entry) error {
 		err = x.root.Remove(at(s))
 	case errors.Is(err, fs.ErrExist):
 		return &ExistsError{e.Path, "appeared while the transfer was being extracted"}
-	default:
+	case linkUnsupported(err):
 		if _, err := x.root.Lstat(at(e.Path)); !errors.Is(err, fs.ErrNotExist) {
 			return &ExistsError{e.Path, "appeared while the transfer was being extracted"}
 		}
@@ -408,9 +411,6 @@ func (x *extractor) close() {
 	}
 	_ = x.root.Close()
 }
-
-// linkUnsupported reports whether a link error means the file system has no hard links. Stub.
-func linkUnsupported(error) bool { return true }
 
 // at returns a path the extractor is about to pass to the operating system, after reporting it to
 // the counting seam of the tests.

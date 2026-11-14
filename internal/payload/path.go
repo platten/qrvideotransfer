@@ -21,7 +21,7 @@ var devices = map[string]bool{"CON": true, "PRN": true, "AUX": true, "NUL": true
 
 func init() {
 	for _, p := range []string{"COM", "LPT"} {
-		for _, d := range "123456789\u00b9\u00b2\u00b3" {
+		for _, d := range "0123456789\u00b9\u00b2\u00b3" {
 			devices[p+string(d)] = true
 		}
 	}
