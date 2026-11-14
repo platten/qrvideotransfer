@@ -60,10 +60,22 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// hostileWorker misbehaves in the way named.
+// hostileWorker misbehaves in the way named. It first says the engine is loaded, as a worker does
+// before any guest code runs, except in the modes that test the phase before that ("pre-" modes)
+// and those that send the message themselves or never.
 func hostileWorker(mode string) int {
 	_, _, _ = readMsg(bufio.NewReader(os.Stdin), nil, workerLimit)
+	if !strings.HasPrefix(mode, "pre-") && mode != "noready" && mode != "slowload" && mode != "readyhang" {
+		_ = writeMsg(os.Stdout, msgReady, nil)
+	}
 	switch mode {
+	case "pre-garbage":
+		_, _ = os.Stdout.Write(bytes.Repeat([]byte("usage: qrvt\n"), 100))
+	case "pre-out": // output before the ready message
+		_ = writeMsg(os.Stdout, msgOut, []byte{1})
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
+	case "pre-exit": // a failure before the ready message
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(1, "cannot load the engine"))
 	case "oversize": // a message claiming 4 GiB
 		_, _ = os.Stdout.Write([]byte{msgOut, 0xff, 0xff, 0xff, 0xff})
 	case "garbage":
@@ -104,7 +116,7 @@ func hostileWorker(mode string) int {
 	case "readyhang": // says it is ready, then hangs
 		_ = writeMsg(os.Stdout, msgReady, nil)
 		time.Sleep(time.Hour)
-	case "version": // speaks another protocol version
+	case "pre-version": // speaks another protocol version
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(exitVersion, "protocol version 99"))
 	case "lateversion": // claims a version mismatch after it has sent output
 		_ = writeMsg(os.Stdout, msgOut, []byte{1})
@@ -141,11 +153,23 @@ func (w workerRunner) exec(ctx context.Context, j *job, m *meter) (int, error) {
 
 // pids collects the workers a runner starts.
 type pids struct {
-	mu sync.Mutex
-	l  []int
+	mu    sync.Mutex
+	l     []int
+	first time.Time // when the first one started
 }
 
-func (p *pids) add(pid int) { p.mu.Lock(); p.l = append(p.l, pid); p.mu.Unlock() }
+func (p *pids) add(pid int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.l) == 0 {
+		p.first = time.Now()
+	}
+	p.l = append(p.l, pid)
+}
+
+// since is the time since the first worker started: a test's timing excludes waiting for a worker
+// slot.
+func (p *pids) since() time.Duration { p.mu.Lock(); defer p.mu.Unlock(); return time.Since(p.first) }
 
 func (p *pids) all() []int { p.mu.Lock(); defer p.mu.Unlock(); return append([]int(nil), p.l...) }
 
@@ -184,13 +208,14 @@ func TestWorkerSpin(t *testing.T) {
 		t.Skip("takes 30 s")
 	}
 	p, ps := testWorkers(t)
-	start := time.Now()
 	err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil }})
 	var le *LimitError
 	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
 		t.Fatalf("got %v", err)
 	}
-	if el := time.Since(start); el < EngineStallTimeout || el > EngineStallTimeout+5*time.Second {
+	// Timed from the worker's start, after any wait for a slot. The watchdog may last have seen the
+	// instance waiting up to one tick before that start, so the stop may come a tick under the limit.
+	if el := ps.since(); el < EngineStallTimeout-watchTick || el > EngineStallTimeout+5*time.Second {
 		t.Errorf("stopped after %v", el)
 	}
 	gone(t, ps.all(), 5*time.Second)
@@ -219,7 +244,9 @@ func parentKilled(t *testing.T, mode string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	line, err := bufio.NewReader(out).ReadString('\n')
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	var line string
+	within(t, time.Minute, "the fake parent's first line", func() { line, err = bufio.NewReader(out).ReadString('\n') })
 	pid, perr := strconv.Atoi(strings.TrimSpace(line))
 	if err != nil || perr != nil {
 		_ = cmd.Process.Kill()
@@ -245,7 +272,7 @@ func TestWorkerHostile(t *testing.T) {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
 		var out bytes.Buffer
-		err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }, stdout: &out})
+		err := run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }, stdout: &out})
 		runtime.ReadMemStats(&after)
 		if !errors.Is(err, ErrEngine) {
 			t.Errorf("%s: %v", mode, err)
@@ -265,7 +292,7 @@ func TestWorkerHostile(t *testing.T) {
 	// Wrong plane sizes: a third of a frame is a truncated frame.
 	p, _ := testWorkers(t, "planes")
 	pi := probeInfo{ClipInfo: ClipInfo{Width: 16, Height: 16, BitDepth: 8}, Size: 1000, PixFmt: "yuv420p"}
-	d := startDecoder(t.Context(), workerRunner{p}, clip("hevc8.mp4"), pi, DecodeConfig{}, "yuv420p")
+	d := startDecoder(testCtx(t, time.Minute), workerRunner{p}, clip("hevc8.mp4"), pi, DecodeConfig{}, "yuv420p")
 	var f Frame
 	if err := d.Next(&f); !errors.Is(err, ErrInvalidVideo) {
 		t.Errorf("partial frame: %v", err)
@@ -292,13 +319,14 @@ func printable(s string) bool {
 func TestWorkerForgedResults(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
+	ctx := testCtx(t, time.Minute)
 	p, _ := testWorkers(t, "probelie")
-	if _, err := probe(t.Context(), workerRunner{p}, clip("hevc8.mp4")); err == nil {
+	if _, err := probe(ctx, workerRunner{p}, clip("hevc8.mp4")); err == nil {
 		t.Error("a huge probed size was accepted")
 	}
 	p, _ = testWorkers(t, "sizelie")
 	pi := probeInfo{ClipInfo: ClipInfo{Width: 16, Height: 16, BitDepth: 8}, Size: 1000, PixFmt: "yuv420p"}
-	d := startDecoder(t.Context(), workerRunner{p}, clip("hevc8.mp4"), pi, DecodeConfig{}, "yuv420p")
+	d := startDecoder(ctx, workerRunner{p}, clip("hevc8.mp4"), pi, DecodeConfig{}, "yuv420p")
 	var f Frame
 	if err := d.Next(&f); !errors.Is(err, ErrInvalidVideo) {
 		t.Errorf("forged frame size: %v", err)
@@ -319,23 +347,24 @@ func TestWorkerLoadLimit(t *testing.T) {
 	p, ps := testWorkers(t, "noready")
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	start := time.Now()
 	err := run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
 		timeout: time.Second})
 	var le *LimitError
 	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" {
 		t.Fatalf("got %v", err)
 	}
-	if el := time.Since(start); el < 2*time.Second || el > 12*time.Second {
+	if el := ps.since(); el < 2*time.Second || el > 12*time.Second {
 		t.Errorf("stopped after %v", el)
 	}
 	gone(t, ps.all(), 5*time.Second)
 }
 
 // TestWorkerVersion: a worker refuses a job of another protocol version, and the parent takes that,
-// as the worker's first message, for a failure to start, so the job runs in process and WorkerStatus
-// says why. Not parallel: it changes the version the parent sends and the process's status.
+// coming before the ready message, for a failure to start, so the job runs in process and
+// WorkerStatus says why. Not parallel: it changes the version the parent sends and the process's
+// status.
 func TestWorkerVersion(t *testing.T) {
+	ctx := testCtx(t, 3*time.Minute)
 	var out bytes.Buffer
 	in := &bytes.Buffer{}
 	b, _ := json.Marshal(workerJob{Prog: "ffmpeg", Version: protocolVersion + 1})
@@ -348,15 +377,15 @@ func TestWorkerVersion(t *testing.T) {
 		t.Errorf("refusal %q %q %v", typ, msg, err)
 	}
 
-	p, _ := testWorkers(t, "version")
-	if err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }}); !errors.Is(err, errWorkerStart) {
+	p, _ := testWorkers(t, "pre-version")
+	if err := run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }}); !errors.Is(err, errWorkerStart) {
 		t.Errorf("parent: %v", err)
 	}
 
 	v := protocolVersion
 	defer func() { protocolVersion = v; degraded.Store(nil) }()
 	protocolVersion++
-	d, err := embedded(t).NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	d, err := embedded(t).NewDecoder(ctx, clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,6 +394,172 @@ func TestWorkerVersion(t *testing.T) {
 	}
 	if err := WorkerStatus(); err == nil || !strings.Contains(err.Error(), "protocol version") {
 		t.Errorf("status: %v", err)
+	}
+}
+
+// TestWorkerStartFailures: whatever ends a worker before its ready message (an exit, an exit with a
+// failure, garbage, output) is a failure to start, since no guest code has run: nothing reaches the
+// job's output, and through the embedded backend the job runs in process and WorkerStatus says why.
+// Not parallel: it replaces the process's workers.
+func TestWorkerStartFailures(t *testing.T) {
+	ctx := testCtx(t, 3*time.Minute)
+	for _, mode := range []string{"pre-early", "pre-exit", "pre-garbage", "pre-out"} {
+		p, ps := testWorkers(t, mode)
+		var out bytes.Buffer
+		err := run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }, stdout: &out})
+		if !errors.Is(err, errWorkerStart) || !printable(err.Error()) {
+			t.Errorf("%s: %v", mode, err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("%s: %d bytes of output passed on", mode, out.Len())
+		}
+		gone(t, ps.all(), 5*time.Second)
+	}
+
+	w, _ := currentWorkers()
+	defer func() { setWorkers(w, nil); degraded.Store(nil) }()
+	p, _ := testWorkers(t, "pre-garbage")
+	setWorkers(p, nil)
+	d, err := embedded(t).NewDecoder(ctx, clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(decodeAll(t, d)); n != 24 {
+		t.Errorf("%d frames", n)
+	}
+	if err := WorkerStatus(); err == nil || !strings.Contains(err.Error(), "before it was ready") {
+		t.Errorf("status: %v", err)
+	}
+}
+
+// TestWorkerStatusRecovers: after a worker fails to start, WorkerStatus reports the fallback until a
+// worker next reaches ready, and then reports nothing; the backend whose job fell back keeps saying
+// so (InProcess), for its one warning, and a backend whose jobs all ran in workers says nothing. Not
+// parallel: it replaces the process's workers.
+func TestWorkerStatusRecovers(t *testing.T) {
+	ctx := testCtx(t, 3*time.Minute)
+	w, _ := currentWorkers()
+	defer func() { setWorkers(w, nil); degraded.Store(nil) }()
+	p, _ := testWorkers(t, "pre-garbage")
+	setWorkers(p, nil)
+	hit := embedded(t)
+	if _, err := hit.Probe(ctx, clip("hevc8.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	if WorkerStatus() == nil || hit.InProcess() == nil {
+		t.Fatalf("after a failed start: status %v, backend %v", WorkerStatus(), hit.InProcess())
+	}
+	setWorkers(w, nil)
+	clean := embedded(t)
+	if _, err := clean.Probe(ctx, clip("hevc8.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	if err := WorkerStatus(); err != nil {
+		t.Errorf("after a worker reached ready: %v", err)
+	}
+	if err := clean.InProcess(); err != nil {
+		t.Errorf("a backend whose jobs ran in workers: %v", err)
+	}
+	if hit.InProcess() == nil {
+		t.Error("the backend whose job fell back forgot it")
+	}
+}
+
+// TestWorkerStatusKeptWithoutReady: only a worker that reaches ready clears WorkerStatus; one
+// cancelled while loading, or one that fails to start, does not. Not parallel: it sets the status.
+func TestWorkerStatusKeptWithoutReady(t *testing.T) {
+	defer degraded.Store(nil)
+	reason := errors.New("an earlier failed start")
+	for _, mode := range []string{"noready", "pre-garbage"} {
+		degraded.Store(&reason)
+		p, ps := testWorkers(t, mode)
+		_ = run(testCtx(t, 2*time.Second), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+		gone(t, ps.all(), 5*time.Second)
+		if WorkerStatus() == nil {
+			t.Errorf("%s: a worker that never reached ready cleared the status", mode)
+		}
+	}
+	degraded.Store(&reason)
+	p, _ := testWorkers(t, "early") // ready, then ends
+	_ = run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+	if err := WorkerStatus(); err != nil {
+		t.Errorf("a worker reached ready: %v", err)
+	}
+}
+
+// TestWorkerCount: worker processes are capped at the CPU count, reduced so that each, counted at
+// 920 MB, fits in half the physical memory (DESIGN.md section 8), at least one; an unknown memory
+// size leaves the CPU count.
+func TestWorkerCount(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		cpus int
+		mem  uint64
+		want int
+	}{{16, 16e9, 8}, {4, 16e9, 4}, {8, 1e9, 1}, {2, 0, 2}, {0, 0, 1}} {
+		if got := workerCount(c.cpus, c.mem); got != c.want {
+			t.Errorf("workerCount(%d, %d) = %d, want %d", c.cpus, c.mem, got, c.want)
+		}
+	}
+	if n := WorkerProcesses(); n < 1 || n > max(1, runtime.NumCPU()) || n != cap(workerSlots) {
+		t.Errorf("WorkerProcesses() = %d with %d CPUs and %d slots", n, runtime.NumCPU(), cap(workerSlots))
+	}
+}
+
+// TestWorkerCap: with every worker slot taken, the next job waits for one, starting no process,
+// and the wait counts against neither the stall watchdog nor a probe's time bound; it ends only
+// with its context. Once the slot is free a job runs. Not parallel: it runs with a single slot.
+func TestWorkerCap(t *testing.T) {
+	old := workerSlots
+	workerSlots = make(chan struct{}, 1)
+	defer func() { workerSlots = old }()
+	p, ps := testWorkers(t, "readyhang")
+	ctx, cancel := context.WithCancel(t.Context())
+	held := make(chan error, 1)
+	go func() {
+		held <- run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+	}()
+	within(t, time.Minute, "the first worker's start", func() {
+		for len(ps.all()) == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
+	q, qs := testWorkers(t, "early")
+	start := time.Now()
+	err := run(testCtx(t, 3*time.Second), workerRunner{q}, job{prog: "ffprobe", args: func(string, string) []string { return nil },
+		timeout: time.Second, check: probeLimits(1, time.Second)})
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) < 3*time.Second || len(qs.all()) != 0 {
+		t.Errorf("waiting for a slot: %v after %v, %d workers started", err, time.Since(start), len(qs.all()))
+	}
+	cancel()
+	within(t, time.Minute, "the held worker's end", func() { err = <-held })
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the held worker: %v", err)
+	}
+	err = run(testCtx(t, time.Minute), workerRunner{q}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+	if len(qs.all()) != 1 || !errors.Is(err, ErrEngine) { // "early" ends without a result
+		t.Errorf("after the slot was freed: %v, %d workers", err, len(qs.all()))
+	}
+}
+
+// testCtx is the test's context with a deadline, so that a hang fails the test by name instead of
+// running into go test's timeout.
+func testCtx(t *testing.T, d time.Duration) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), d)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// within runs f and fails the test if it has not returned after d. f must not call t's methods.
+func within(t *testing.T, d time.Duration, what string, f func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); f() }()
+	select {
+	case <-done:
+	case <-time.After(d):
+		t.Fatalf("%s: still waiting after %v", what, d)
 	}
 }
 

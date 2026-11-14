@@ -54,7 +54,8 @@ func workerEnv() []string {
 func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string) (int, error) {
 	// Until the worker has started and loaded the engine (a first compilation takes seconds to
 	// minutes, and starting a process on a loaded machine can take seconds), it is not stalled;
-	// loadLimit bounds that phase instead. The program's input is sent only once it is ready.
+	// loadLimit bounds that phase instead. Nor is it stalled while it waits for a worker slot. The
+	// program's input is sent only once it is ready.
 	var once sync.Once
 	ready := make(chan struct{})
 	m.waiting.Add(1)
@@ -80,6 +81,12 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 	if err != nil || len(msg) > maxJobMsg {
 		return 0, fmt.Errorf("%w: job too large", ErrEngine)
 	}
+	select {
+	case workerSlots <- struct{}{}:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+	defer func() { <-workerSlots }()
 	cmd := exec.Command(p.exe, p.args...) //nolint:gosec // qrvt's own executable
 	cmd.Env, cmd.Dir, cmd.WaitDelay = p.env, os.TempDir(), waitDelay
 	tail := &logTail{}
@@ -165,15 +172,18 @@ func feedWorker(w io.Writer, job []byte, stdin io.Reader, ready, finished <-chan
 }
 
 // readWorker dispatches the worker's messages until its exit message. Anything malformed ends the
-// job with an error, before any allocation larger than one bounded message. A refusal of the
-// protocol version as the worker's first message is a failure to start: nothing has happened yet.
+// job with an error, before any allocation larger than one bounded message. Until the ready
+// message, nothing but that message is accepted: anything else is a failure to start (startFailure).
 func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 	var buf []byte
 	var reads int64
-	for first := true; ; first = false {
+	for ready := false; ; {
 		var typ byte
 		var err error
 		typ, buf, err = readMsg(r, buf, parentLimit)
+		if !ready && (err != nil || typ != msgReady) {
+			return 0, startFailure(typ, buf, err)
+		}
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return 0, fmt.Errorf("%w: the engine worker ended without a result", ErrEngine)
@@ -197,15 +207,13 @@ func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 			}
 		case msgReady:
 			loaded()
+			ready = true
+			degraded.Store(nil) // a worker reached ready: workers work again
 		case msgExit:
 			if len(buf) < 4 {
 				return 0, fmt.Errorf("%w: worker protocol: short exit message", ErrEngine)
 			}
 			rc := int(int32(binary.BigEndian.Uint32(buf))) //nolint:gosec // a signed exit code
-			if rc == exitVersion && first {
-				return 0, fmt.Errorf("%w: the worker speaks another protocol version (%s); this program speaks %d",
-					errWorkerStart, sanitise(string(buf[4:]), 100), protocolVersion)
-			}
 			if rc != 0 || len(buf) > 4 {
 				_, _ = j.stderr.Write([]byte("\n" + sanitise(string(buf[4:]), logTailLen) + "\n"))
 			}
@@ -217,8 +225,57 @@ func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 	}
 }
 
+// startFailure describes how a worker ended before its ready message, which it sends before any guest
+// code runs, as a failure to start: a refusal of the protocol version (the executable on disk may be
+// another release), an exit, a broken message or any other message. Nothing of the job has happened
+// and nothing the worker sent is passed on, so the job can run in process instead.
+func startFailure(typ byte, buf []byte, err error) error {
+	switch {
+	case errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF):
+		return fmt.Errorf("%w: the engine worker ended before it was ready", errWorkerStart)
+	case err != nil:
+		return fmt.Errorf("%w: the engine worker failed before it was ready: %w", errWorkerStart, err)
+	case typ == msgExit && len(buf) >= 4 && int32(binary.BigEndian.Uint32(buf)) == exitVersion: //nolint:gosec // a signed exit code
+		return fmt.Errorf("%w: the worker speaks another protocol version (%s); this program speaks %d",
+			errWorkerStart, sanitise(string(buf[4:]), 100), protocolVersion)
+	case typ == msgExit && len(buf) >= 4:
+		return fmt.Errorf("%w: the engine worker failed before it was ready (exit %d): %s", errWorkerStart,
+			int32(binary.BigEndian.Uint32(buf)), sanitise(string(buf[4:]), 200)) //nolint:gosec // a signed exit code
+	}
+	return fmt.Errorf("%w: the engine worker sent a malformed or early message (type 0x%02x) before it was ready", errWorkerStart, typ)
+}
+
 // waitDelay bounds how long a killed worker may take to be reaped.
 const waitDelay = 5 * time.Second
+
+// workerSlots holds one token per engine worker process allowed to run in this process: at most
+// WorkerProcesses() at once, whoever starts them. A job waiting for a token is waiting, not stalled,
+// and its wait counts against no bound but its context. Without the cap, parallel callers (the
+// package's own tests on a 4-vCPU CI runner) starved workers of CPU until a probe of a small clip
+// exceeded EngineProbeTime, a bound on wall-clock time.
+var workerSlots = make(chan struct{}, workerCount(runtime.NumCPU(), physicalMemory()))
+
+// workerMemory is what each worker is counted at: the worst process memory measured for one 4K
+// decoding instance, when its whole 512 MiB reservation became resident (DESIGN.md section 8).
+const workerMemory = 920e6
+
+// workerCount is the worker cap for cpus CPUs and mem bytes of physical memory (0: unknown): the CPU
+// count, reduced so that the workers, each counted at workerMemory, fit in half the memory; at least
+// one.
+func workerCount(cpus int, mem uint64) int {
+	n := max(1, cpus)
+	if mem > 0 {
+		n = min(n, max(1, int(mem/2/workerMemory))) //nolint:gosec // a small quotient
+	}
+	return n
+}
+
+// WorkerProcesses is how many engine worker processes may run at once in this process: the CPU
+// count, reduced so that each, counted at 920 MB, fits in half the physical memory (at least one).
+// Further jobs wait for a turn. As with [EngineInstances], a caller that keeps this many decoders
+// open without reading them holds every turn, and its next probe or decoder waits until its context
+// ends.
+func WorkerProcesses() int { return cap(workerSlots) }
 
 // EngineLoadLimit bounds the time from starting an engine worker process to its message that the
 // engine is loaded and the program starts (docs/SECURITY.md section 5). The stall watchdog does not
