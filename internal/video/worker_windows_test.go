@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -15,6 +16,30 @@ import (
 )
 
 var isProcessInJob = windows.NewLazySystemDLL("kernel32.dll").NewProc("IsProcessInJob")
+
+// TestWorkerJobFailures covers the Job Object code's failure paths: a program that cannot start, a
+// process that cannot be opened for assignment, and one with no thread to resume.
+func TestWorkerJobFailures(t *testing.T) {
+	t.Parallel()
+	if _, err := startWorkerJob(exec.Command(filepath.Join(t.TempDir(), "missing.exe"))); err == nil { //nolint:gosec // a test path
+		t.Error("a missing program started")
+	}
+	job, err := newKillJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = windows.CloseHandle(job) }()
+	const nobody = 0xfffffffc // no such process
+	if assignJob(job, nobody) == nil {
+		t.Error("assigned a process that does not exist")
+	}
+	if resume(nobody) == nil {
+		t.Error("resumed a process that does not exist")
+	}
+	if physicalMemory() == 0 {
+		t.Error("no physical memory size")
+	}
+}
 
 // TestWorkerJobObject: a worker is started suspended, put in its kill-on-close Job Object and only
 // then resumed, so it never runs outside the job. It runs (it answers), IsProcessInJob finds it in
