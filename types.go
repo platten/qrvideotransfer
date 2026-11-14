@@ -51,12 +51,15 @@ type EncodeOptions struct {
 	Profile     Profile
 	Compression Compression            // CompressAuto, CompressZstd, CompressXZ, CompressNone
 	Passphrase  func() (string, error) // nil: no encryption
-	SignKey     []byte                 // nil: unsigned
-	DryRun      bool
-	Backend     string      // "embedded", "system" or a path
-	Workers     int         // 0: the CPU count, reduced to fit memory
-	TempDir     string      // "": the system temporary directory
-	Progress    func(Event) // called from one goroutine; nil allowed
+	// SignKey is the private key line of a qrvt key file, "qrvt-private-key-v1:" and the base64 of
+	// the 32-byte seed (SECURITY.md section 6), without surrounding white space or line ending.
+	// nil: unsigned.
+	SignKey  []byte
+	DryRun   bool
+	Backend  string      // "embedded", "system" or a path
+	Workers  int         // 0: the CPU count, reduced to fit memory
+	TempDir  string      // "": the system temporary directory
+	Progress func(Event) // called from one goroutine; nil allowed
 }
 
 // DecodeOptions are the inputs of [Decode].
@@ -65,8 +68,17 @@ type DecodeOptions struct {
 	OutputDir  string
 	StateDir   string // "": no resuming
 	Passphrase func() (string, error)
-	VerifyKeys [][]byte // non-empty: the transfer must be signed by one of these
-	MaxSize    int64    // largest total size that may be unpacked
+	// VerifyKeys are trusted public key lines, each "qrvt-public-key-v1:" and the base64 of the
+	// 32-byte key (SECURITY.md section 6), without surrounding white space or line ending.
+	// Non-empty: the transfer must be signed by one of these.
+	VerifyKeys [][]byte
+	MaxSize    int64 // largest total size that may be unpacked
+	// MaxEntries is the largest number of manifest entries that may be unpacked (flag
+	// --max-entries). 0 means DefaultMaxEntries, with a manifest of at most
+	// DefaultMaxManifestBytes. Otherwise it is 1 to 1,000,000, the format limit, and the manifest
+	// may hold at most MaxEntries x 64 MiB / 1,000,000 bytes, capped at 64 MiB. A manifest over
+	// either limit is a LimitError whose Flag is "--max-entries".
+	MaxEntries int
 	Overwrite  bool
 	Report     string // optional path for a JSON report
 	Backend    string
@@ -77,6 +89,17 @@ type DecodeOptions struct {
 	Workers         int
 	Progress        func(Event)
 }
+
+// Default manifest limits of [Decode], a tenth of the format limits of 1,000,000 entries and
+// 64 MiB (SECURITY.md section 5). DecodeOptions.MaxEntries raises them.
+const (
+	// DefaultMaxEntries is the number of manifest entries a decode accepts when
+	// DecodeOptions.MaxEntries is 0.
+	DefaultMaxEntries = 100000
+	// DefaultMaxManifestBytes is the manifest size, in bytes, a decode accepts when
+	// DecodeOptions.MaxEntries is 0: 64 MiB / 10, rounded down.
+	DefaultMaxManifestBytes = 6710886
+)
 
 // CalibrationOptions are the inputs of [CalibrationVideo].
 type CalibrationOptions struct {
@@ -233,7 +256,7 @@ type DecodeReport struct {
 	CleanFraction float64
 	Encrypted     bool
 	Signed        bool
-	SignerKey     []byte // public key of the signer, when signed
+	SignerKey     []byte // the signer's raw 32-byte Ed25519 public key, when signed
 	Warnings      []Warning
 }
 

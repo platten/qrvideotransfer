@@ -309,7 +309,7 @@ func runJob(j *workerJob, stdin io.Reader, w *msgWriter) (int, error) {
 				case <-done:
 					return
 				case <-t.C:
-					if v := m.n.Load(); v != last {
+					if v := m.reads.Load(); v != last {
 						last = v
 						_ = w.send(msgProgress, binary.BigEndian.AppendUint64(nil, uint64(v))) //nolint:gosec // non-negative
 					}

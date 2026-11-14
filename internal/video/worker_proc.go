@@ -175,7 +175,7 @@ func readWorker(r io.Reader, j *job, m *meter, ready *atomic.Bool) (int, error) 
 				return 0, fmt.Errorf("%w: worker protocol: progress of %d bytes", ErrEngine, len(buf))
 			}
 			if v := int64(binary.BigEndian.Uint64(buf)); v > reads { //nolint:gosec // compared, not trusted
-				m.n.Add(min(v-reads, 1<<40))
+				m.reads.Add(min(v-reads, 1<<40))
 				reads = v
 			}
 		case msgReady:

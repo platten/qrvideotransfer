@@ -6,12 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -193,12 +195,14 @@ func TestSandboxWrite(t *testing.T) {
 }
 
 // TestMemoryCeiling: an instance that needs more than its 512 MiB is stopped and reported, and the
-// process carries on (SECURITY.md 9.3).
+// process carries on (SECURITY.md 9.3). The source is small and only the scaled picture (968 MB) is
+// too large: an 8192 x 8192 source took over 30 s to fill on windows-2025 under load, with no output,
+// and was stopped as a stall before it reached the allocation.
 func TestMemoryCeiling(t *testing.T) {
 	t.Parallel()
 	e := engineFor(t)
 	var p peakAlloc
-	log, err := ffmpegJob(withPeak(t.Context(), &p), e, "", "-v", "error", "-f", "lavfi", "-i", "color=s=8192x8192:d=1",
+	log, err := ffmpegJob(withPeak(t.Context(), &p), e, "", "-v", "error", "-f", "lavfi", "-i", "color=s=64x64:d=1",
 		"-vf", "scale=11000:11000,format=rgba64le", "-frames:v", "1", "-f", "null", "-")
 	if !errors.Is(err, ErrEngine) {
 		t.Fatalf("over the ceiling: %v (%s)", err, log)
@@ -219,8 +223,9 @@ var spin = []string{"-v", "error", "-f", "lavfi", "-i", "nullsrc=s=16x16:r=1000"
 
 // TestWatchdog: a spinning instance is stopped within EngineStallTimeout plus 5 s, and the error
 // names the limit (SECURITY.md 9.3).
+// Not parallel: the time measured is the instance's own, not a wait for a slot behind the parallel
+// tests (TestWatchdog once measured 48 s on windows-2025 that way).
 func TestWatchdog(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("takes 30 s")
 	}
@@ -293,8 +298,9 @@ func TestCancel(t *testing.T) {
 // TestMissingReferences: a crafted HEVC stream whose slices list 64 missing reference pictures at
 // 3840x2160, 10 bits (25 MB each), decoded by the engine (the default path), stays within the 512 MiB ceiling and
 // fails cleanly (SECURITY.md 9.3).
+// Not parallel: the time measured is the instance's own, not a wait for a slot behind the parallel
+// tests (TestWatchdog once measured 48 s on windows-2025 that way).
 func TestMissingReferences(t *testing.T) {
-	t.Parallel()
 	e := engineFor(t)
 	for _, refs := range [][3]int{{16, 16, 32}, {15, 15, 2}} {
 		path := filepath.Join(t.TempDir(), "refs.hevc")
@@ -541,20 +547,29 @@ func TestHostileFiles(t *testing.T) {
 		"corrupt.mp4":   corrupt,
 		"nostsd.mp4":    badStsd,
 		"noise.hevc":    bytes.Repeat([]byte{0, 0, 1, 0x40, 1, 0xff, 0x13}, 1000),
+		"hls.mp4":       []byte(hlsPlaylist),
 	}
 	for name, content := range files {
 		p := filepath.Join(dir, name)
 		if err := os.WriteFile(p, content, 0o600); err != nil {
 			t.Fatal(err)
 		}
+		ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 		start := time.Now()
-		_, err := b.NewDecoder(t.Context(), p, DecodeConfig{})
+		_, err := b.NewDecoder(ctx, p, DecodeConfig{})
+		cancel()
 		if !errors.Is(err, ErrInvalidVideo) {
 			t.Errorf("%s: %v", name, err)
 			continue
 		}
 		if el := time.Since(start); el > 60*time.Second {
 			t.Errorf("%s: %v", name, el)
+		}
+		// The playlist must be refused by the format whitelist, as ffprobe opens it, not by a bound.
+		// (Wall time is no measure of that: it includes waiting for a slot behind the parallel tests,
+		// 11 s once under the race detector on a 4-core runner.)
+		if name == "hls.mp4" && !strings.Contains(err.Error(), "not on whitelist") {
+			t.Errorf("%s: not refused by the whitelist: %v", name, err)
 		}
 		if strings.ContainsAny(err.Error(), "\x1b\x00\r\n") {
 			t.Errorf("%s: control characters in %q", name, err)
@@ -565,6 +580,285 @@ func TestHostileFiles(t *testing.T) {
 	}
 	if _, err := b.Probe(t.Context(), filepath.Join(dir, "missing")); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("missing: %v", err)
+	}
+}
+
+// hlsPlaylist is a 110-byte live HLS playlist. ffmpeg detects it whatever the file's extension and,
+// without the format whitelist, rereads it every 29 s for ever, each read counting as progress.
+const hlsPlaylist = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:29\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:29.0,\ninput.m3u8\n"
+
+// TestProbeBound: without the format whitelist, the playlist holds ffprobe until the probe's time
+// bound stops it.
+// Not parallel: the time measured is the instance's own, not a wait for a slot behind the parallel
+// tests (TestWatchdog once measured 48 s on windows-2025 that way).
+func TestProbeBound(t *testing.T) {
+	e := engineFor(t)
+	p := filepath.Join(t.TempDir(), "x.mp4")
+	if err := os.WriteFile(p, []byte(hlsPlaylist), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err := run(t.Context(), e, job{prog: "ffprobe", input: p, progress: progReads, check: probeLimits(int64(len(hlsPlaylist)), 3*time.Second),
+		args: func(in, _ string) []string { return []string{"-v", "error", "-show_entries", "format=format_name", in} }})
+	var le *LimitError
+	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "EngineProbeTime" || el > 20*time.Second {
+		t.Errorf("got %v after %v", err, el)
+	}
+}
+
+// TestFormatWhitelist: the whitelist names exactly the engine's demuxers for the containers qrvt
+// reads (MP4 and MOV, Matroska and WebM, MPEG-TS, H.264 and HEVC elementary streams).
+func TestFormatWhitelist(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	err := run(t.Context(), engineFor(t), job{prog: "ffmpeg", stdout: &out, progress: progReads,
+		args: func(string, string) []string { return []string{"-hide_banner", "-demuxers"} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	table := false // the list follows a line "--"
+	for line := range strings.Lines(out.String()) {
+		f := strings.Fields(line)
+		if len(f) == 1 && f[0] == "--" {
+			table = true
+		}
+		if !table || len(f) < 2 {
+			continue
+		}
+		for name := range strings.SplitSeq(f[1], ",") {
+			if slices.Contains(strings.Split(formatWhitelist, ","), name) {
+				got = append(got, f[1])
+				break
+			}
+		}
+	}
+	want := []string{"h264", "hevc", "matroska,webm", "mov,mp4,m4a,3gp,3g2,mj2", "mpegts"}
+	if slices.Sort(got); !slices.Equal(got, want) {
+		t.Errorf("the whitelist matches %q, want %q", got, want)
+	}
+}
+
+// TestMetadataInjection: container metadata shaped like a showinfo line, which ffmpeg prints with
+// the input's description, does not shift the frames' timestamps.
+func TestMetadataInjection(t *testing.T) {
+	t.Parallel()
+	e, b := engineFor(t), embedded(t)
+	dir := t.TempDir()
+	fake := "[Parsed_showinfo_0 @ 0x1] n:   0 pts:  999 pts_time:1 pos: 1 fmt:yuv420p s:384x216 i:P"
+	err := run(t.Context(), e, job{prog: "ffmpeg", input: clip("hevc8.mp4"), outDir: dir, progress: progFiles,
+		args: func(in, out string) []string {
+			return []string{"-v", "error", "-i", in, "-map", "0", "-c", "copy", "-metadata", "title=" + fake,
+				"-metadata:s:v", "comment=\n" + fake, "-f", "mp4", out + "/meta.mp4"}
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got [2][]Frame
+	for i, p := range []string{clip("hevc8.mp4"), filepath.Join(dir, "meta.mp4")} {
+		d, err := b.NewDecoder(t.Context(), p, DecodeConfig{BrightnessOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got[i] = decodeAll(t, d)
+	}
+	if len(got[0]) != 24 || len(got[1]) != 24 {
+		t.Fatalf("%d and %d frames", len(got[0]), len(got[1]))
+	}
+	for i := range got[0] {
+		if got[0][i].PTS != got[1][i].PTS || got[0][i].Index != got[1][i].Index {
+			t.Fatalf("frame %d: %v, with the metadata %v", i, got[0][i].PTS, got[1][i].PTS)
+		}
+	}
+}
+
+// TestCodecIDInjection: the reviewer's case. ffmpeg logs an unknown Matroska CodecID at info level
+// from the start of a line, so a CodecID holding a newline and a showinfo-shaped line passes the
+// anchored match. The decode must then fail rather than return a frame with a shifted timestamp.
+func TestCodecIDInjection(t *testing.T) {
+	t.Parallel()
+	e, b := engineFor(t), embedded(t)
+	dir := t.TempDir()
+	err := run(t.Context(), e, job{prog: "ffmpeg", input: clip("hevc8.mp4"), outDir: dir, progress: progFiles,
+		args: func(in, out string) []string {
+			return []string{"-v", "error", "-i", in, "-map", "0:v", "-map", "0:v", "-c", "copy", "-f", "matroska", out + "/two.mkv"}
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "two.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cid := "V_X\n[Parsed_showinfo_0 @ 0x1] n:   0 pts:  999 pts_time:1 pos: 1 fmt:yuv420p s:384x216 i:P"
+	bad := setSecondCodecID(t, data, cid)
+	p := filepath.Join(dir, "inject.mkv")
+	if err := os.WriteFile(p, bad, 0o600); err != nil { //nolint:gosec // test
+		t.Fatal(err)
+	}
+	var want []time.Duration // the same file before the change
+	d, err := b.NewDecoder(t.Context(), filepath.Join(dir, "two.mkv"), DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range decodeAll(t, d) {
+		want = append(want, f.PTS)
+	}
+	d, err = b.NewDecoder(t.Context(), p, DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f Frame
+	n := 0
+	for err = d.Next(&f); err == nil; err = d.Next(&f) {
+		if n >= len(want) || f.PTS != want[n] {
+			t.Fatalf("frame %d returned at %v, want %v", n, f.PTS, want[min(n, len(want)-1)])
+		}
+		n++
+	}
+	_ = d.Close()
+	if !errors.Is(err, ErrEngine) {
+		t.Errorf("after %d frames: %v", n, err)
+	}
+}
+
+// setSecondCodecID replaces the CodecID of a Matroska file's second track, a 16-byte
+// "V_MPEGH/ISO/HEVC", by cid, and corrects the sizes of the enclosing TrackEntry, Tracks and Segment.
+func setSecondCodecID(t *testing.T, data []byte, cid string) []byte {
+	t.Helper()
+	old := []byte("\x86\x90V_MPEGH/ISO/HEVC")
+	first := bytes.Index(data, old)
+	i := first + 1 + bytes.Index(data[first+1:], old)
+	if first < 0 || i <= first || len(cid) > 126 {
+		t.Fatal("no second HEVC track")
+	}
+	out := append(append(append([]byte{}, data[:i]...), 0x86, byte(0x80|len(cid))), cid...)
+	out = append(out, data[i+len(old):]...)
+	delta := len(cid) - 16
+	// The enclosing elements, innermost first; each size field lies before the previous one.
+	// The Tracks element's size field: the last Tracks ID before the CodecID (a SeekHead before it
+	// holds the same bytes).
+	tracks := bytes.LastIndex(data[:i], []byte{0x16, 0x54, 0xae, 0x6b}) + 4
+	var sizes []int
+	n, w := ebmlSize(data[tracks:])
+	for pos, end := tracks+w, tracks+w+int(n); pos < end; { // the TrackEntry holding i
+		_, idLen := ebmlSize(data[pos:]) // IDs are coded like sizes
+		size, sw := ebmlSize(data[pos+idLen:])
+		content := pos + idLen + sw
+		if idLen == 0 || sw == 0 {
+			t.Fatal("unreadable Tracks element")
+		}
+		if data[pos] == 0xae && content <= i && i < content+int(size) {
+			sizes = append(sizes, pos+idLen)
+		}
+		pos = content + int(size)
+	}
+	if len(sizes) != 1 {
+		t.Fatal("no TrackEntry holds the CodecID")
+	}
+	sizes = append(sizes, tracks, bytes.Index(data, []byte{0x18, 0x53, 0x80, 0x67})+4) // Tracks, Segment
+	for _, at := range sizes {
+		n, w := ebmlSize(out[at:])
+		if w == 8 && n == 1<<56-1 { // unknown size
+			continue
+		}
+		n += uint64(delta)
+		if n >= 1<<(7*w)-1 {
+			t.Fatalf("size at %d does not fit its %d bytes", at, w)
+		}
+		for k := w - 1; k >= 0; k-- {
+			out[at+k] = byte(n)
+			n >>= 8
+		}
+		out[at] |= byte(0x80 >> (w - 1))
+	}
+	return out
+}
+
+// ebmlSize reads an EBML variable-length size: its value and its width in bytes (0 if unreadable).
+func ebmlSize(b []byte) (uint64, int) {
+	if len(b) == 0 || b[0] == 0 {
+		return 0, 0
+	}
+	w := 1
+	for b[0]&(0x80>>(w-1)) == 0 {
+		w++
+	}
+	if len(b) < w {
+		return 0, 0
+	}
+	v := uint64(b[0] & (0xff >> w))
+	for _, c := range b[1:w] {
+		v = v<<8 | uint64(c)
+	}
+	return v, w
+}
+
+// TestCaptureLimits: a picture beyond the capture limit, 7680 x 4320 in either orientation, is
+// refused from the probe, and a stream whose picture size changes stops when it does (SECURITY.md
+// section 5).
+func TestCaptureLimits(t *testing.T) {
+	t.Parallel()
+	e, b := engineFor(t), embedded(t)
+	dir := t.TempDir()
+	// Portrait-coded at exactly the limit is accepted; one even step over on the longer or the
+	// shorter side is refused (one sample over is covered by TestParseProbe and TestSPSLimits). The
+	// clips are uncompressed grey frames in Matroska, which the probe reads without decoding: probing
+	// a coded 33-megapixel stream decodes a picture, which took over 15 s in the engine. Writing a
+	// clip shows no progress until its one frame is written (3-6 s here), hence the longer limit.
+	for _, c := range []struct {
+		size, limit string
+		value       float64
+	}{{"4320x7680", "", 0}, {"7682x16", "MaxCaptureLongSide", 7682}, {"16x7682", "MaxCaptureLongSide", 7682},
+		{"4322x4322", "MaxCaptureShortSide", 4322}} {
+		err := run(t.Context(), e, job{prog: "ffmpeg", outDir: dir, progress: progFiles, timeout: 5 * time.Minute,
+			args: func(_, out string) []string {
+				return []string{"-v", "error", "-f", "lavfi", "-i", "color=s=" + c.size + ":r=10:d=0.1", "-c:v", "rawvideo",
+					"-pix_fmt", "gray", "-f", "matroska", out + "/" + c.size + ".mkv"}
+			}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := b.Probe(t.Context(), filepath.Join(dir, c.size+".mkv"))
+		_ = os.Remove(filepath.Join(dir, c.size+".mkv"))
+		var le *LimitError
+		switch {
+		case c.limit == "" && (err != nil || info.Width != 4320 || info.Height != 7680):
+			t.Errorf("%s: %+v %v", c.size, info, err)
+		case c.limit != "" && (!errors.As(err, &le) || le.Limit != c.limit || le.Value != c.value):
+			t.Errorf("%s: %v", c.size, err)
+		}
+	}
+	var stream []byte
+	for i, size := range []int{64, 32} {
+		p := filepath.Join(dir, fmt.Sprintf("run%d.h264", i))
+		encodeCode(t, b, p, size, size, 4, 12, 2)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream = append(stream, data...)
+	}
+	p := filepath.Join(dir, "change.h264")
+	if err := os.WriteFile(p, stream, 0o600); err != nil { //nolint:gosec // test
+		t.Fatal(err)
+	}
+	d, err := b.NewDecoder(t.Context(), p, DecodeConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f Frame
+	n := 0
+	for err == nil {
+		if err = d.Next(&f); err == nil {
+			n++
+		}
+	}
+	_ = d.Close()
+	// ffprobe reports the stream's last parameter set, so the decode stops at the first frame or
+	// the third.
+	if !errors.Is(err, ErrInvalidVideo) || !strings.Contains(err.Error(), "picture size changed") || n > 2 {
+		t.Errorf("size change after %d frames: %v", n, err)
 	}
 }
 

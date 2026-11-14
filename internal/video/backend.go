@@ -50,7 +50,8 @@ func NewEmbedded(o Options) (*Embedded, error) {
 
 // lazyEngine runs each job in an engine worker process (see ServeWorker). When there is none, or
 // one cannot be started, it runs the job in this process with close-on-cancel instead, which is
-// slower but keeps every guarantee; WorkerStatus says so.
+// slower but keeps every guarantee; WorkerStatus says so. While the engine is compiled the instance
+// waits on qrvt, so neither the watchdog nor a probe's time bound counts that time.
 type lazyEngine struct{ cacheDir string }
 
 func (l lazyEngine) exec(ctx context.Context, j *job, m *meter) (int, error) {

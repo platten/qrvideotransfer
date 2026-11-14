@@ -8,13 +8,28 @@ import (
 // MaxIterations is the most decoding iterations spent on one codeword (docs/SECURITY.md section 5).
 const MaxIterations = 25
 
-// Soft-value bounds of the decoder. Posteriors are clamped to +-lMax, and every variable-to-check
-// message Q = L - R then stays within +-qMax without saturation: |R| <= floor(3 qMax / 4) = 24573,
-// so |L - R| <= 8191 + 24573 = qMax. Known (shortened) bits send qMax.
+// Soft-value bounds of the decoder. Posteriors are clamped to +-lMax and check-to-variable
+// magnitudes to rMax, so every variable-to-check message Q = L - R stays within +-qMax without
+// saturation: |L - R| <= 8191 + 24573 = qMax. Known (shortened) bits send qMax.
 const (
 	lMax = 1<<13 - 1
 	qMax = 32764
+	rMax = qMax - lMax
 )
+
+// rule is the check-node update of the min-sum family: the two smallest input magnitudes m become
+// min(max(floor(scale m / 16) - offset, 0), rMax), and soft bits enter the decoder multiplied by
+// 1 << shift. The int16 arithmetic of apply requires 0 <= scale <= 16 and offset >= 0, and shift
+// at most 3 keeps every soft bit within the posterior clamp (TestRule).
+type rule struct {
+	scale, offset int16
+	shift         uint
+}
+
+// decoderRule is the shipped check-node update: normalised min-sum with factor 13/16, soft bits
+// multiplied by 4 inside so that small messages keep their precision. It was chosen by measurement
+// over offset min-sum and the factor 0.75 of M1 (DESIGN.md section 8, TestDecoderCandidates).
+var decoderRule = rule{scale: 13, shift: 2}
 
 // shapes maps an inner-code id to its mother rate and shard size (FORMAT.md section 8).
 var shapes = [...]struct {
@@ -48,6 +63,7 @@ type Code struct {
 	info  int // information bits carried, including the CRC
 	k     int // information bits of the mother code
 	kb, m int // information block columns, block rows
+	rule  rule
 
 	layers [][]edge
 	rOff   []int // offset of each layer's messages in r
@@ -74,7 +90,7 @@ func New(id uint8) (*Code, error) {
 // newCode returns the code of rate r carrying info bits: the mother code shortened by k - info bits.
 func newCode(r Rate, info int) *Code {
 	b, _ := Base1944(r)
-	c := &Code{rate: r, base: b, info: info, k: b.K(), m: len(b.Shift)}
+	c := &Code{rate: r, base: b, info: info, k: b.K(), m: len(b.Shift), rule: decoderRule}
 	c.kb = BaseCols - c.m
 	c.u = make([]uint8, info)
 	c.lam = make([][Z]uint8, c.m)
@@ -220,18 +236,18 @@ func (c *Code) bit(i int) uint8 {
 	return 0
 }
 
-// decodeBits runs the layered normalised min-sum decoder on the N soft bits llr, stopping when the
+// decodeBits runs the layered min-sum decoder with c.rule on the N soft bits llr, stopping when the
 // hard decisions satisfy every check (before the first iteration if they already do) or after
 // MaxIterations. It reports the iterations run and whether the checks passed.
 func (c *Code) decodeBits(llr []int8) (iters int, ok bool) {
 	for i := range c.info {
-		c.l[i] = int16(llr[i])
+		c.l[i] = int16(llr[i]) << c.rule.shift
 	}
 	for i := c.info; i < c.k; i++ {
 		c.l[i] = lMax
 	}
 	for i := c.k; i < N; i++ {
-		c.l[i] = int16(llr[c.info+i-c.k])
+		c.l[i] = int16(llr[c.info+i-c.k]) << c.rule.shift
 	}
 	clear(c.r)
 	if c.checksPass() {
@@ -273,9 +289,9 @@ func (c *Code) checksPass() bool {
 	return true
 }
 
-// layer processes one block row: Q = L - R, then new R from the two smallest |Q| scaled by 0.75
-// (floor(3m/4)) and the sign product, then L = Q + R. The 81 rotated posteriors of each block are
-// read as two contiguous runs.
+// layer processes one block row: Q = L - R, then new R from the two smallest |Q| mapped by c.rule
+// and the sign product, then L = Q + R. The 81 rotated posteriors of each block are read as two
+// contiguous runs.
 func (c *Code) layer(layer []edge, r [][Z]int16) {
 	var m1, m2, idx, sgn [Z]int16
 	for q := range m1 {
@@ -310,8 +326,7 @@ func (c *Code) layer(layer []edge, r [][Z]int16) {
 		}
 	}
 	for q := range Z {
-		m1[q] -= (m1[q] + 3) >> 2 // floor(3m/4)
-		m2[q] -= (m2[q] + 3) >> 2
+		m1[q], m2[q] = c.rule.apply(m1[q]), c.rule.apply(m2[q])
 	}
 	for e, b := range layer {
 		base, s := b.col*Z, b.shift
@@ -332,6 +347,12 @@ func (c *Code) layer(layer []edge, r [][Z]int16) {
 			hi[q-n1] = clamp(int32(Q[q]) + int32(R[q]))
 		}
 	}
+}
+
+// apply maps a smallest input magnitude m (0 to 32767) to the output magnitude of the rule.
+func (r rule) apply(m int16) int16 {
+	s := (m>>4)*r.scale + (m&15)*r.scale>>4 // floor(scale m / 16) without overflow
+	return min(max(s-r.offset, 0), rMax)
 }
 
 func clamp(v int32) int16 { return int16(min(max(v, -lMax), lMax)) }

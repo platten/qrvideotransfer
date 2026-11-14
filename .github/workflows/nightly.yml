@@ -12,6 +12,11 @@ on:
         description: Fuzzing time per target (a Go duration)
         default: 5m
         required: false
+      extraction_worst_case:
+        description: Also time the worst-case extraction on every CI system (SECURITY.md section 5)
+        type: boolean
+        default: false
+        required: false
 
 permissions:
   contents: read
@@ -111,3 +116,39 @@ jobs:
           TASK: ${{ matrix.task }}
           WHAT: ${{ matrix.what }}
           MILESTONE: ${{ matrix.milestone }}
+
+  # Started by hand only, with the input extraction_worst_case (SECURITY.md section 5, "Extraction
+  # work"): times one extraction of the manifest within the limits that maximises files x depth (64
+  # components, 64 MiB of manifest), and of the widest one, on every CI system. For example:
+  #   gh workflow run nightly.yml --ref <branch> -f extraction_worst_case=true -f fuzztime=10s
+  extraction-worst-case:
+    name: extraction worst case (${{ matrix.os }})
+    if: github.repository == 'platten/qrvideotransfer' && github.event_name == 'workflow_dispatch' && inputs.extraction_worst_case
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Time the worst-case extraction
+        timeout-minutes: 110
+        shell: bash
+        run: |
+          {
+            echo "### Worst-case extraction on $OS"
+            echo '```'
+            go test -run '^$' -bench '^BenchmarkExtractWorstCase$' -benchtime 1x -timeout 105m ./internal/payload
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          CGO_ENABLED: "0"
+          OS: ${{ matrix.os }}

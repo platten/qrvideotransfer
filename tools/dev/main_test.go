@@ -15,6 +15,45 @@ func TestGoTest(t *testing.T) {
 	}
 }
 
+// TestFuzzTags: the fuzz task adds the HEVC fast path's tag, so that FuzzFastPathNAL is fuzzed too.
+func TestFuzzTags(t *testing.T) {
+	if got := fuzzTags("noasm,nounsafe"); got != "noasm,nounsafe,unsandboxedhevc" {
+		t.Errorf("fuzzTags with release tags = %q", got)
+	}
+	if got := fuzzTags(""); got != "unsandboxedhevc" {
+		t.Errorf("fuzzTags without = %q", got)
+	}
+}
+
+func TestLintRuns(t *testing.T) {
+	got := lintRuns("noasm,nounsafe", false)
+	want := [][]string{{"run", "./..."}, {"run", "--build-tags=noasm,nounsafe", "./..."}}
+	if len(got) != 2 || !slices.Equal(got[0], want[0]) || !slices.Equal(got[1], want[1]) {
+		t.Fatalf("lintRuns with tags = %v, want %v", got, want)
+	}
+	if got := lintRuns("", true); len(got) != 1 || !slices.Equal(got[0], []string{"run", "--fix", "./..."}) {
+		t.Fatalf("lintRuns without tags = %v", got)
+	}
+}
+
+func TestVulncheckRuns(t *testing.T) {
+	got := vulncheckRuns("noasm,nounsafe")
+	if len(got) != 3 {
+		t.Fatalf("vulncheckRuns = %v, want one per target system", got)
+	}
+	for i, goos := range []string{"linux", "darwin", "windows"} {
+		if got[i].goos != goos || strings.Join(got[i].args, " ") != "-tags=noasm,nounsafe ./..." {
+			t.Errorf("run %d = %+v", i, got[i])
+		}
+	}
+	if got := vulncheckRuns(""); strings.Join(got[0].args, " ") != "./..." {
+		t.Errorf("untagged run = %+v", got[0])
+	}
+	if toolNamed("govulncheck").pkg != "golang.org/x/vuln/cmd/govulncheck@v1.9.0" {
+		t.Error("govulncheck is not pinned to v1.9.0")
+	}
+}
+
 func TestTestCommand(t *testing.T) {
 	cases := []struct {
 		args          []string

@@ -34,6 +34,12 @@ const (
 	fastMaxNAL = 64 << 20
 )
 
+// FastPathCopySize bounds the copy instance's temporary directory: it may hold at most twice the
+// input file's size plus FastPathCopySize bytes (an Annex B copy of the slice is smaller than the
+// input, and its packet list takes about 70 bytes a picture, 15 MB for an hour at 60 fps). Checked
+// once a second; beyond it the copy is cancelled and the decode stops with an error naming it.
+const FastPathCopySize = 64 << 20
+
 // FastPathPictureTime is the time a picture may take on the HEVC fast path. The decoder cannot be
 // cancelled, so the first picture that exceeds it stops the whole decode, leaving its goroutine
 // behind; the caller must not continue decoding in this process.
@@ -122,7 +128,7 @@ func (d *fastDecoder) start() error {
 		return err
 	}
 	if err := run(d.ctx, d.b.r, job{prog: "ffmpeg", input: d.path, outDir: d.tmp, progress: progFiles,
-		args: func(in, out string) []string { return copyArgs(in, out, d.p, d.c) }}); err != nil {
+		args: func(in, out string) []string { return copyArgs(in, out, d.p, d.c) }, check: d.copyLimit}); err != nil {
 		return err
 	}
 	if err := d.readTimestamps(filepath.Join(d.tmp, "s.txt")); err != nil {
@@ -146,6 +152,16 @@ func (d *fastDecoder) start() error {
 	return nil
 }
 
+// copyLimit applies FastPathCopySize to the copy instance's temporary directory.
+func (d *fastDecoder) copyLimit(*meter, time.Duration) error {
+	limit := 2*d.p.Size + FastPathCopySize
+	if n := dirSize(d.tmp); n > limit {
+		return &LimitError{Limit: "FastPathCopySize", Value: float64(n), Max: float64(limit),
+			Hint: "copying the HEVC stream out of its container wrote far more than the file holds"}
+	}
+	return nil
+}
+
 func (d *fastDecoder) openStream() error {
 	f, err := os.Open(filepath.Join(d.tmp, "s.hevc"))
 	if err != nil {
@@ -162,7 +178,7 @@ func copyArgs(in, out string, p probeInfo, c DecodeConfig) []string {
 	if seek := c.Start - prerollTime; seek > 0 {
 		a = append(a, "-noaccurate_seek", "-ss", strconv.FormatFloat(seek.Seconds(), 'f', 6, 64))
 	}
-	a = append(a, "-i", in)
+	a = append(append(a, inputOptions...), "-i", in)
 	var to []string
 	if c.Length > 0 {
 		end := p.Start + (c.Start + c.Length + prerollTime).Seconds()
@@ -301,7 +317,7 @@ func parseSPSLimits(rbsp []byte) (w, h, dpb int, err error) {
 		r.ue()
 		r.ue()
 	}
-	if r.bad || w <= 0 || h <= 0 || w > MaxCaptureWidth || h > MaxCaptureHeight {
+	if r.bad || checkSize(w, h) != nil { // the capture limit, in either orientation
 		return 0, 0, 0, fmt.Errorf("%w: unreadable sequence parameter set", errRefused)
 	}
 	return w, h, dpb, nil
@@ -393,8 +409,15 @@ func (n *nalReader) next() ([]byte, error) {
 type nalWorker struct {
 	dec    nalDecoder
 	closed bool
-	in     chan hevc.NALUnit // a NAL unit to decode; closed to flush
-	out    chan nalResult
+	in     chan nalCall // closed to abandon the decoder
+	// out holds one result, so that an abandoned worker finishes its call and exits.
+	out chan nalResult
+}
+
+// nalCall is one call to make: decode nal, or flush.
+type nalCall struct {
+	nal   hevc.NALUnit
+	flush bool
 }
 
 type nalResult struct {
@@ -403,17 +426,22 @@ type nalResult struct {
 }
 
 func startWorker(dec nalDecoder) *nalWorker {
-	w := &nalWorker{dec: dec, in: make(chan hevc.NALUnit), out: make(chan nalResult)}
+	w := &nalWorker{dec: dec, in: make(chan nalCall), out: make(chan nalResult, 1)}
 	go func() {
-		for {
-			nal, ok := <-w.in
-			w.out <- w.call(nal, !ok)
-			if !ok {
-				return
-			}
+		for c := range w.in {
+			w.out <- w.call(c.nal, c.flush)
 		}
 	}()
 	return w
+}
+
+// stop abandons the decoder without flushing it; its goroutine exits once any call in progress
+// returns.
+func (w *nalWorker) stop() {
+	if !w.closed {
+		w.closed = true
+		close(w.in)
+	}
 }
 
 // call runs one decoder call inside the recover boundary.
@@ -434,15 +462,10 @@ func (w *nalWorker) call(nal hevc.NALUnit, flush bool) (r nalResult) {
 func (w *nalWorker) do(nal hevc.NALUnit, flush bool, deadline time.Time) (nalResult, error) {
 	t := time.NewTimer(time.Until(deadline))
 	defer t.Stop()
-	if flush {
-		w.closed = true
-		close(w.in)
-	} else {
-		select {
-		case w.in <- nal:
-		case <-t.C:
-			return nalResult{}, pictureTimeError()
-		}
+	select {
+	case w.in <- nalCall{nal: nal, flush: flush}:
+	case <-t.C:
+		return nalResult{}, pictureTimeError()
 	}
 	select {
 	case r := <-w.out:
@@ -591,10 +614,11 @@ func (d *fastDecoder) fallback(err error) {
 	d.engine = startDecoder(d.ctx, d.b.r, d.path, d.p, c, d.pix)
 }
 
-// release stops the worker (when it is idle) and removes the copied stream.
+// release abandons the decoder without flushing it, whose pictures are no longer wanted, and removes
+// the copied stream.
 func (d *fastDecoder) release() {
-	if d.w != nil && !d.w.closed && d.fail == nil {
-		_, _ = d.w.do(hevc.NALUnit{}, true, time.Now().Add(pictureTime))
+	if d.w != nil {
+		d.w.stop()
 	}
 	d.w = nil
 	for _, p := range d.queue {

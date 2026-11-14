@@ -3,6 +3,7 @@ package video
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -257,6 +258,29 @@ func TestParseProbe(t *testing.T) {
 			t.Errorf("%s accepted", bad)
 		}
 	}
+	// The capture limit is 7680 x 4320 in either orientation: longer side at most 7680, shorter side at
+	// most 4320.
+	for _, ok := range []string{`{"streams":[{"width":7680,"height":4320}]}`, `{"streams":[{"width":4320,"height":7680}]}`} {
+		if _, err := parseProbe([]byte(ok)); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for js, limit := range map[string]string{
+		`{"streams":[{"width":7681,"height":4320}]}`: "MaxCaptureLongSide", `{"streams":[{"width":4320,"height":7681}]}`: "MaxCaptureLongSide",
+		`{"streams":[{"width":7680,"height":4321}]}`: "MaxCaptureShortSide", `{"streams":[{"width":4321,"height":7680}]}`: "MaxCaptureShortSide",
+		`{"streams":[{"width":4322,"height":4322}]}`: "MaxCaptureShortSide",
+	} {
+		var le *LimitError
+		if _, err := parseProbe([]byte(js)); !errors.As(err, &le) || le.Limit != limit {
+			t.Errorf("%s: %v", js, err)
+		}
+	}
+	// 4:2:0 chroma planes of an odd-sized picture would be mis-framed.
+	for _, odd := range []string{`{"streams":[{"width":385,"height":216}]}`, `{"streams":[{"width":384,"height":215}]}`} {
+		if _, err := parseProbe([]byte(odd)); !errors.Is(err, ErrUnsupported) {
+			t.Errorf("%s: %v", odd, err)
+		}
+	}
 	p, err = parseProbe([]byte(`{"streams":[{"codec_name":"x\u001b[31m","width":2,"height":2,"r_frame_rate":"1000001/1",
 		"nb_frames":"-5","duration":"NaN","bit_rate":"-1","tags":{"rotate":"-90"},"side_data_list":[{"rotation":1e300}]}],
 		"format":{"duration":"5"}}`))
@@ -304,25 +328,81 @@ func TestShowinfo(t *testing.T) {
 	}
 	done := make(chan struct{})
 	close(done)
-	a, ok := s.pop(done)
-	if !ok || a.w != 384 || a.h != 216 || a.at() != 400*time.Millisecond {
-		t.Errorf("first: %+v", a)
+	a, err := s.pop(t.Context(), done, time.Minute)
+	if err != nil || a.w != 384 || a.h != 216 || a.at() != 400*time.Millisecond {
+		t.Errorf("first: %+v %v", a, err)
 	}
-	b, ok := s.pop(done)
-	if !ok || b.w != -1 {
-		t.Errorf("unparsable: %+v", b)
+	b, err := s.pop(t.Context(), done, time.Minute)
+	if err != nil || b.w != -1 {
+		t.Errorf("unparsable: %+v %v", b, err)
 	}
-	if _, ok := s.pop(done); ok {
-		t.Error("a third timestamp")
+	if _, err := s.pop(t.Context(), done, time.Minute); !errors.Is(err, errNoTimestamp) {
+		t.Errorf("a third timestamp: %v", err)
+	}
+	// Only a line that starts with the filter's own prefix is a frame: container metadata that
+	// ffmpeg prints (indented) cannot inject one. A native ffmpeg may print the address without 0x.
+	for _, l := range []string{
+		"    title           : [Parsed_showinfo_0 @ 0x1] n:   0 pts:   9 pts_time:0 s:384x216",
+		"x[Parsed_showinfo_0 @ 0x1] n: 0 pts: 9 s:2x2",
+		"[Parsed_showinfo_0 @ 0x1]   side data n: 0 pts: 9 s:2x2",
+		"[Parsed_showinfo_x @ 0x1] n: 0 pts: 9 s:2x2",
+	} {
+		s.parse(l)
+		if len(s.q) != 0 {
+			t.Fatalf("%q gave a timestamp", l)
+		}
+	}
+	s.parse("[Parsed_showinfo_0 @ 000001C2F3A0B2C0] n: 2 pts: 9 s:2x2")
+	if c, err := s.pop(t.Context(), done, time.Minute); err != nil || c.pts != 9 {
+		t.Errorf("native line: %+v %v", c, err)
+	}
+	// Waiting for a line ends at the stall limit, or at once when the context ends.
+	open := make(chan struct{})
+	start := time.Now()
+	var le *LimitError
+	if _, err := s.pop(t.Context(), open, 200*time.Millisecond); !errors.As(err, &le) || le.Limit != "EngineStallTimeout" ||
+		time.Since(start) < 200*time.Millisecond {
+		t.Errorf("no line: %v", err)
+	}
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(io.ErrClosedPipe)
+	if _, err := s.pop(ctx, open, time.Minute); !errors.Is(err, io.ErrClosedPipe) {
+		t.Errorf("cancelled: %v", err)
 	}
 	if !strings.Contains(s.String(), "other line") || len(s.String()) > logTailLen {
 		t.Errorf("tail %q", s.String())
 	}
-	for range 1100 {
-		s.parse("[Parsed_showinfo_0 @ 0x1] n: 1 pts: 1 s:2x2")
+	for i := range 1100 {
+		s.parse(fmt.Sprintf("[Parsed_showinfo_0 @ 0x1] n: %d pts: 1 s:2x2", 3+i))
 	}
 	if !s.overflow() {
 		t.Error("no overflow")
+	}
+	// Frame lines must count up from 0 after each configuration line, so a line injected from the
+	// file (text that ffmpeg logs at the start of a line, such as a Matroska CodecID with a newline)
+	// is detected instead of shifting every timestamp after it.
+	for name, lines := range map[string][]string{
+		"before the configuration": {"n: 0 pts: 99 s:2x2", "config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 0 s:2x2"},
+		"repeated":                 {"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 99 s:2x2", "n: 0 pts: 0 s:2x2"},
+		"skipped":                  {"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 0 s:2x2", "n: 2 pts: 2 s:2x2"},
+	} {
+		s := newShowinfo()
+		for _, l := range lines {
+			s.parse("[Parsed_showinfo_0 @ 0x1] " + l)
+		}
+		if _, err := s.pop(t.Context(), done, time.Minute); !errors.Is(err, ErrEngine) || errors.Is(err, errNoTimestamp) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	s = newShowinfo()
+	for _, l := range []string{"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 0 s:2x2", "n: 1 pts: 1 s:2x2",
+		"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 2 s:2x2"} { // a reconfigured filter counts from 0
+		s.parse("[Parsed_showinfo_1 @ 0x2] " + l)
+	}
+	for i := range 3 {
+		if c, err := s.pop(t.Context(), done, time.Minute); err != nil || c.pts != int64(i) {
+			t.Errorf("after a reconfiguration, %d: %+v %v", i, c, err)
+		}
 	}
 	for _, c := range []struct {
 		ts   frameTS
@@ -376,6 +456,22 @@ func TestHelpers(t *testing.T) {
 	_ = os.Mkdir(filepath.Join(dir, "d"), 0o700)
 	if dirSize(dir) != 3 {
 		t.Errorf("dirSize %d", dirSize(dir))
+	}
+	// A file still open for writing counts at its current size. On Windows a directory listing
+	// reports the size recorded in the directory entry, which lags behind an open file; the fast
+	// path's copy-size bound and the copy's progress both depend on this.
+	w, err := os.Create(filepath.Join(dir, "growing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Close() }()
+	for i := 1; i <= 3; i++ {
+		if _, err := w.Write(make([]byte, 1<<20)); err != nil {
+			t.Fatal(err)
+		}
+		if got := dirSize(dir); got != 3+int64(i)<<20 {
+			t.Errorf("after %d MiB written: dirSize %d", i, got)
+		}
 	}
 	if _, err := containerOf("x.264"); err != nil {
 		t.Error(err)

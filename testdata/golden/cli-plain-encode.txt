@@ -1,0 +1,17 @@
+--- stderr
+qrvt encode: photos, notes.txt -> out.mp4
+pack: started (12.0 MiB)
+pack: 25% (3.0 MiB of 12.0 MiB, 4.0 MiB/s, 0:02 left)
+pack: 50% (6.0 MiB of 12.0 MiB, 4.0 MiB/s, 0:02 left)
+pack: 75% (9.0 MiB of 12.0 MiB, 4.0 MiB/s, 0:01 left)
+pack: done (12.0 MiB in 0:03)
+protect: started (10.0 MiB)
+protect: 50% (5.0 MiB of 10.0 MiB, 5.0 MiB/s, 0:01 left)
+protect: done (10.0 MiB in 0:02)
+render: started (840 frames)
+render: 35% (300 frames of 840 frames, 30.0 frames/s, 0:18 left)
+warning: Downscaled: The video was reduced to 1916x1080 to fit the cell size.
+encode-video: started (840 frames)
+--- stdout
+Wrote out.mp4
+  Frames  840

@@ -4,11 +4,14 @@ package video
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -180,6 +183,108 @@ func TestFastPathTimeLimit(t *testing.T) {
 	_ = d.Close()
 }
 
+// slowDecoder takes d over every call and decodes nothing.
+type slowDecoder struct{ d time.Duration }
+
+func (s slowDecoder) DecodeNAL(hevc.NALUnit) ([]*hevc.Picture, error) {
+	time.Sleep(s.d)
+	return nil, nil
+}
+func (slowDecoder) Flush() []*hevc.Picture { return nil }
+
+// TestFastPathSharedDeadline: the slices of one picture share its time (93b40a6): two slices of
+// 0.6 s each exceed a 1 s limit, although each alone is within it. Not parallel: it shortens the
+// limit.
+func TestFastPathSharedDeadline(t *testing.T) {
+	pictureTime = time.Second
+	defer func() { pictureTime = FastPathPictureTime }()
+	stream := append(nal(1, []byte{0x80, 0x10}), nal(1, []byte{0x00, 0x10})...) // first_slice_segment_in_pic_flag 1, then 0
+	d := &fastDecoder{ctx: t.Context(), nals: &nalReader{r: bytes.NewReader(stream)}, w: startWorker(slowDecoder{600 * time.Millisecond}), last: -1}
+	var f Frame
+	start := time.Now()
+	err := d.Next(&f)
+	var le *LimitError
+	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "FastPathPictureTime" || el < time.Second || el > 5*time.Second {
+		t.Errorf("got %v after %v", err, el)
+	}
+	_ = d.Close()
+}
+
+// flushDecoder fails at its fifth call; its Flush takes 5 s and is recorded.
+type flushDecoder struct {
+	calls   int
+	flushed atomic.Bool
+}
+
+func (f *flushDecoder) DecodeNAL(hevc.NALUnit) ([]*hevc.Picture, error) {
+	if f.calls++; f.calls == 5 {
+		return nil, errors.New("a bad slice")
+	}
+	return nil, nil
+}
+
+func (f *flushDecoder) Flush() []*hevc.Picture {
+	f.flushed.Store(true)
+	time.Sleep(5 * time.Second)
+	return nil
+}
+
+// TestFastPathRelease: when the engine takes over, the old decoder is abandoned without a flush,
+// which could take a picture's whole time. Not parallel: it replaces newNALDecoder.
+func TestFastPathRelease(t *testing.T) {
+	f := fastBackend(t)
+	dec := &flushDecoder{}
+	newNALDecoder = func(int) (nalDecoder, error) { return dec, nil }
+	defer func() { newNALDecoder = func(n int) (nalDecoder, error) { return newH265(n) } }()
+	d, err := f.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fr Frame
+	start := time.Now()
+	if err := d.Next(&fr); err != nil || d.(*fastDecoder).fellBack == nil {
+		t.Fatalf("no fallback: %v", err)
+	}
+	if el := time.Since(start); dec.flushed.Load() || el > 10*time.Second {
+		t.Errorf("the old decoder was flushed (%v), the first frame took %v", dec.flushed.Load(), el)
+	}
+	_ = d.Close()
+}
+
+// TestFastPathCopyLimit: the copy instance is stopped when its temporary directory grows beyond
+// twice the input's size plus FastPathCopySize.
+func TestFastPathCopyLimit(t *testing.T) {
+	t.Parallel()
+	grow := fakeRunner(func(ctx context.Context, j *job, _ *meter) (int, error) {
+		f, err := os.Create(filepath.Join(j.outDir, "s.hevc"))
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = f.Close() }()
+		chunk := make([]byte, 1<<20)
+		for n := 0; ctx.Err() == nil; n++ {
+			if n < 200 {
+				_, _ = f.Write(chunk)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return 0, nil
+	})
+	p := probeInfo{ClipInfo: ClipInfo{Codec: "hevc", Width: 64, Height: 64, BitDepth: 8}, PixFmt: "yuv420p", Size: 1000}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := newFastDecoder(ctx, &ff{r: grow, fast: true}, "x", p, DecodeConfig{})
+	var le *LimitError
+	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "FastPathCopySize" || le.Max != 2*1000+FastPathCopySize || el > 15*time.Second {
+		t.Errorf("got %v after %v", err, el)
+	}
+	if a := copyArgs("IN", "OUT", p, DecodeConfig{}); slices.Index(a, "-format_whitelist") > slices.Index(a, "IN") ||
+		a[slices.Index(a, "-format_whitelist")+1] != formatWhitelist || a[slices.Index(a, "-protocol_whitelist")+1] != "file,pipe" {
+		t.Errorf("copy arguments %q", a)
+	}
+}
+
 // TestSPSLimits checks the parameter-set parser against the committed clips and crafted sets.
 func TestSPSLimits(t *testing.T) {
 	t.Parallel()
@@ -239,6 +344,39 @@ func TestSPSLimits(t *testing.T) {
 	if pw, ph, dpb, err := parseSPSLimits(w.trailing()); err != nil || pw != 64 || ph != 64 || dpb != 7 {
 		t.Errorf("sub-layers: %dx%d dpb %d %v", pw, ph, dpb, err)
 	}
+	// The capture limit in either orientation: portrait-coded 4320 x 7680 passes, and one sample
+	// over on the longer or the shorter side is refused.
+	for _, c := range []struct {
+		w, h int
+		ok   bool
+	}{{4320, 7680, true}, {7680, 4320, true}, {7681, 4320, false}, {4320, 7681, false}, {4321, 7680, false}, {4322, 4322, false}} {
+		_, _, _, err := parseSPSLimits(spsOfSize(c.w, c.h))
+		if (err == nil) != c.ok || err != nil && !errors.Is(err, errRefused) {
+			t.Errorf("%dx%d: %v", c.w, c.h, err)
+		}
+	}
+}
+
+// spsOfSize is the RBSP of a one-sub-layer SPS declaring a w x h picture.
+func spsOfSize(w, h int) []byte {
+	var b bitWriter
+	b.u(4, 0)
+	b.u(3, 0)
+	b.u(1, 1)
+	b.u(96, 0) // profile_tier_level(1, 0)
+	b.ue(0)
+	b.ue(1) // 4:2:0
+	b.ue(uint64(w))
+	b.ue(uint64(h))
+	b.u(1, 0)
+	for range 3 { // bit depths, log2_max_pic_order_cnt_lsb_minus4
+		b.ue(0)
+	}
+	b.u(1, 1)
+	b.ue(4)
+	b.ue(0)
+	b.ue(0)
+	return b.trailing()
 }
 
 // annexB returns a committed clip's stream in Annex B form, copied by the engine.
@@ -311,6 +449,7 @@ func FuzzFastPathNAL(f *testing.F) {
 		}
 		dec, _ := newH265(1)
 		w := startWorker(dec)
+		defer w.stop()
 		r := &nalReader{r: bytes.NewReader(data)}
 		for {
 			b, err := r.next()
