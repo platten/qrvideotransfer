@@ -221,8 +221,9 @@ var spin = []string{"-v", "error", "-f", "lavfi", "-i", "nullsrc=s=16x16:r=1000"
 
 // TestWatchdog: a spinning instance is stopped within EngineStallTimeout plus 5 s, and the error
 // names the limit (SECURITY.md 9.3).
+// Not parallel: the time measured is the instance's own, not a wait for a slot behind the parallel
+// tests (TestWatchdog once measured 48 s on windows-2025 that way).
 func TestWatchdog(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("takes 30 s")
 	}
@@ -295,8 +296,9 @@ func TestCancel(t *testing.T) {
 // TestMissingReferences: a crafted HEVC stream whose slices list 64 missing reference pictures at
 // 3840x2160, 10 bits (25 MB each), decoded by the engine (the default path), stays within the 512 MiB ceiling and
 // fails cleanly (SECURITY.md 9.3).
+// Not parallel: the time measured is the instance's own, not a wait for a slot behind the parallel
+// tests (TestWatchdog once measured 48 s on windows-2025 that way).
 func TestMissingReferences(t *testing.T) {
-	t.Parallel()
 	e := engineFor(t)
 	for _, refs := range [][3]int{{16, 16, 32}, {15, 15, 2}} {
 		path := filepath.Join(t.TempDir(), "refs.hevc")
@@ -585,8 +587,9 @@ const hlsPlaylist = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:29\n#EXT-X
 
 // TestProbeBound: without the format whitelist, the playlist holds ffprobe until the probe's time
 // bound stops it.
+// Not parallel: the time measured is the instance's own, not a wait for a slot behind the parallel
+// tests (TestWatchdog once measured 48 s on windows-2025 that way).
 func TestProbeBound(t *testing.T) {
-	t.Parallel()
 	e := engineFor(t)
 	p := filepath.Join(t.TempDir(), "x.mp4")
 	if err := os.WriteFile(p, []byte(hlsPlaylist), 0o600); err != nil {
