@@ -24,7 +24,7 @@ import (
 // engineFor returns the embedded backend's loaded engine.
 func engineFor(t *testing.T) *engine {
 	t.Helper()
-	e, err := loadEngine(t.Context(), defaultCacheDir())
+	e, err := loadEngine(t.Context(), defaultCacheDir(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -719,6 +719,26 @@ func TestCodecIDInjection(t *testing.T) {
 	_ = d.Close()
 	if !errors.Is(err, ErrEngine) {
 		t.Errorf("after %d frames: %v", n, err)
+	}
+
+	// A forged configuration line before the forged frame (review round 3 of PR #9): the real
+	// configuration line that follows is a second one, and is refused, so neither a whole decode nor
+	// a slice returns a frame under a forged timestamp or ends silently empty.
+	cid = "V_X\n[Parsed_showinfo_0 @ 0] config in time_base: 1/1000\n[Parsed_showinfo_0 @ 0] n:   0 pts:  77777 pts_time:0 s:384x216 i:P"
+	p = filepath.Join(dir, "config.mkv")
+	if err := os.WriteFile(p, setSecondCodecID(t, data, cid), 0o600); err != nil { //nolint:gosec // test
+		t.Fatal(err)
+	}
+	for _, c := range []DecodeConfig{{BrightnessOnly: true}, {BrightnessOnly: true, Start: 300 * time.Millisecond, Length: 200 * time.Millisecond}} {
+		d, err := b.NewDecoder(t.Context(), p, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = d.Next(&f)
+		_ = d.Close()
+		if !errors.Is(err, ErrEngine) || !strings.Contains(err.Error(), "sequence") {
+			t.Errorf("forged configuration, slice %v+%v: first Next gave %v (frame at %v)", c.Start, c.Length, err, f.PTS)
+		}
 	}
 }
 

@@ -62,12 +62,28 @@ func TestHoldAndWait(t *testing.T) {
 	old := slots
 	slots = make(chan struct{}, 1)
 	defer func() { slots = old }()
-	b := embedded(t)
-	held, err := b.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	// With worker processes the parent holds no slot: a held decoder does not block the next.
+	w := embedded(t)
+	held, err := w.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var f Frame
+	if err := held.Next(&f); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := w.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true}); err != nil {
+		t.Errorf("a second decoder beside a held one, with workers: %v", err)
+	} else {
+		_ = d.Close()
+	}
+	_ = held.Close()
+	// In process (the fallback), the cap applies.
+	b := &Embedded{ff{r: engineFor(t)}}
+	held, err = b.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := held.Next(&f); err != nil { // its instance now runs, blocked writing the next frame
 		t.Fatal(err)
 	}

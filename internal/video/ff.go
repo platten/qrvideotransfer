@@ -95,10 +95,12 @@ func (b *ff) NewEncoder(ctx context.Context, path string, c EncodeConfig) (Encod
 	pr, pw := io.Pipe()
 	e := &pipeEncoder{c: c, bits: max(c.BitDepth, 8), pw: pw, tmp: tmp, out: filepath.Join(tmp, name), path: path,
 		even: format == "h264", done: make(chan struct{})}
+	stop := context.AfterFunc(ctx, func() { _ = pr.CloseWithError(ctx.Err()) })
 	go func() {
+		defer stop()
 		e.err = run(ctx, b.r, job{prog: "ffmpeg", args: func(_, out string) []string {
 			return encodeArgs(c, out+"/"+name, format)
-		}, outDir: tmp, stdin: pr, progress: progInput})
+		}, outDir: tmp, stdin: pr, progress: progInput, trusted: true})
 		_ = pr.CloseWithError(errors.Join(e.err, io.ErrClosedPipe))
 		close(e.done)
 	}()
@@ -177,11 +179,21 @@ func (b *ff) Concat(ctx context.Context, runs []string, path string, fps int) er
 		return err
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
+	// The runs reach the engine through a pipe that cancellation closes, as an encoder's frames do:
+	// the instance runs in this process with close-on-cancel off, so that is how it stops.
+	pr, pw := io.Pipe()
+	go func() {
+		_, err := io.Copy(pw, io.MultiReader(rs...))
+		_ = pw.CloseWithError(err)
+	}()
+	stop := context.AfterFunc(ctx, func() { _ = pr.CloseWithError(ctx.Err()) })
+	defer stop()
+	defer func() { _ = pr.Close() }()
 	err = run(ctx, b.r, job{prog: "ffmpeg", args: func(_, out string) []string {
 		return []string{"-nostdin", "-hide_banner", "-nostats", "-loglevel", "error", "-fflags", "+genpts",
 			"-f", "h264", "-framerate", strconv.Itoa(fps), "-i", "pipe:0", "-map", "0:v:0", "-c", "copy",
 			"-use_editlist", "0", "-f", "mp4", "-y", out + "/out.mp4"}
-	}, outDir: tmp, stdin: io.MultiReader(rs...), progress: progInput})
+	}, outDir: tmp, stdin: pr, progress: progInput, trusted: true})
 	if err != nil {
 		return err
 	}
@@ -266,7 +278,7 @@ func startDecoder(ctx context.Context, r runner, path string, p probeInfo, c Dec
 		m: &meter{}, done: make(chan struct{})}
 	go func() {
 		err := run(ctx, r, job{prog: "ffmpeg", args: func(in, _ string) []string { return decodeArgs(in, p, c, pix) },
-			input: path, stdout: pw, stderr: d.ts, progress: progFrames, meter: d.m})
+			input: path, stdout: pw, stderr: d.ts, progress: progFrames, meter: d.m, maxOutput: maxOutput(p, c)})
 		if err == nil && d.ts.overflow() {
 			err = fmt.Errorf("%w: frame timestamps lost", ErrEngine)
 		}
@@ -275,6 +287,20 @@ func startDecoder(ctx context.Context, r runner, path string, p probeInfo, c Dec
 		close(d.done)
 	}()
 	return d
+}
+
+// maxOutput is the raw output MaxDecodedPixelsPerInputByte allows for a file, plus one frame: the
+// bound a worker process enforces by itself.
+func maxOutput(p probeInfo, c DecodeConfig) int64 {
+	n := float64(p.Width) * float64(p.Height)
+	if !c.BrightnessOnly {
+		n += 2 * float64(p.Width/2) * float64(p.Height/2)
+	}
+	if p.BitDepth > 8 {
+		n *= 2
+	}
+	frames := MaxDecodedPixelsPerInputByte*float64(p.Size)/(float64(p.Width)*float64(p.Height)) + 1
+	return int64(min(frames*n, 1<<62))
 }
 
 // pipeDecoder reads length-checked raw frames from an engine instance.
@@ -509,10 +535,16 @@ func (s *showinfo) parse(l string) {
 	}
 	l = l[m[1]:]
 	if v, ok := strings.CutPrefix(l, "config in time_base: "); ok {
+		// The filter is configured once: a reconfiguration happens only when the picture size changes,
+		// which is refused anyway, so a second configuration line means one of the two was forged
+		// (a container's codec name, say, printed into the log before the real one).
+		if s.configured && s.bad == nil {
+			s.bad = fmt.Errorf("%w: frame timestamp lines out of sequence (a second filter configuration)", ErrEngine)
+		}
 		a, b, _ := strings.Cut(strings.TrimSuffix(field(v), ","), "/")
 		s.tbN, _ = strconv.ParseInt(a, 10, 64)
 		s.tbD, _ = strconv.ParseInt(b, 10, 64)
-		s.configured, s.next = true, 0 // a new filter instance counts from 0
+		s.configured, s.next = true, 0
 		return
 	}
 	n, ok1 := strings.CutPrefix(l, "n:")

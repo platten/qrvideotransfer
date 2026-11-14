@@ -43,6 +43,17 @@ type job struct {
 	// check, when set, is called at every watchdog tick with the time the instance has run, not
 	// counting time waiting on qrvt or for a slot; an error cancels the instance with it as cause.
 	check func(m *meter, active time.Duration) error
+	// maxOutput bounds standard output in bytes in a worker process (0: none).
+	maxOutput int64
+	// module names a test module a worker runs instead of the engine (tests only).
+	module string
+	// trusted marks a job whose input is qrvt's own (encoding, joining runs). It runs in this
+	// process with close-on-cancel off: a worker would cost 11-15% (docs/spikes/S1.md section 13)
+	// and there is no hostile input to guard against. Nothing can force it to stop, the watchdog
+	// included: it stops when its input closes, so the caller gives it an input that cancellation
+	// closes (NewEncoder and Concat do, with context.AfterFunc). While its guest computes it can
+	// delay this process's garbage collection (docs/SECURITY.md T1).
+	trusted bool
 }
 
 // stallTimeout is EngineStallTimeout; tests shorten it.

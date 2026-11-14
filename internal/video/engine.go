@@ -34,29 +34,40 @@ const EngineSHA256 = "357dd97d37f5fa01b45865bc5d6e90a9538e8bff236de7f1c143a3bc86
 type engine struct {
 	rt wazero.Runtime
 	cm wazero.CompiledModule
+	// guarded engines run with close-on-cancel, in qrvt's own process, when no worker process can be
+	// started. Unguarded ones run in a worker process, which the parent kills, or in qrvt's process
+	// for trusted jobs (encoding qrvt's own frames). In a process, at most EngineInstances() run at
+	// once, whichever kind.
+	guarded bool
+}
+
+type engineKey struct {
+	cacheDir string
+	guarded  bool
 }
 
 var engines struct {
 	sync.Mutex
-	m map[string]*engine
+	m map[engineKey]*engine
 }
 
 // loadEngine returns the process's engine for a compilation cache directory ("" for none), compiling
-// it on first use.
-func loadEngine(ctx context.Context, cacheDir string) (*engine, error) {
+// it on first use. guarded selects close-on-cancel; only a worker process runs unguarded.
+func loadEngine(ctx context.Context, cacheDir string, guarded bool) (*engine, error) {
 	engines.Lock()
 	defer engines.Unlock()
-	if e := engines.m[cacheDir]; e != nil {
+	k := engineKey{cacheDir, guarded}
+	if e := engines.m[k]; e != nil {
 		return e, nil
 	}
-	e, err := newEngine(ctx, cacheDir, true)
+	e, err := newEngine(ctx, cacheDir, guarded)
 	if err != nil {
 		return nil, err
 	}
 	if engines.m == nil {
-		engines.m = map[string]*engine{}
+		engines.m = map[engineKey]*engine{}
 	}
-	engines.m[cacheDir] = e
+	engines.m[k] = e
 	return e, nil
 }
 
@@ -84,10 +95,14 @@ func newEngine(ctx context.Context, cacheDir string, closeOnDone bool) (*engine,
 	if err != nil {
 		return nil, err
 	}
-	cfg := wazero.NewRuntimeConfig().
-		WithCloseOnContextDone(closeOnDone).
-		WithMemoryLimitPages(EngineMemoryLimit / 65536).
-		WithMemoryCapacityFromMax(true)
+	return newEngineFrom(ctx, cacheDir, closeOnDone, b)
+}
+
+// newEngineFrom compiles module b in a new runtime. When the compilation cache cannot be written
+// (read-only, or on Windows a file another process is renaming into place at the same moment), it
+// compiles again without the cache.
+func newEngineFrom(ctx context.Context, cacheDir string, closeOnDone bool, mod []byte) (*engine, error) {
+	cfg := engineConfig(closeOnDone)
 	if cacheDir != "" {
 		if c, err := wazero.NewCompilationCacheWithDir(cacheDir); err == nil {
 			cfg = cfg.WithCompilationCache(c)
@@ -97,12 +112,24 @@ func newEngine(ctx context.Context, cacheDir string, closeOnDone bool) (*engine,
 	if err != nil {
 		return nil, err
 	}
-	cm, err := rt.CompileModule(ctx, b)
+	cm, err := rt.CompileModule(ctx, mod)
 	if err != nil {
 		_ = rt.Close(ctx)
+		if cacheDir != "" {
+			return newEngineFrom(ctx, "", closeOnDone, mod)
+		}
 		return nil, err
 	}
-	return &engine{rt: rt, cm: cm}, nil
+	return &engine{rt: rt, cm: cm, guarded: closeOnDone}, nil
+}
+
+// engineConfig is the runtime configuration: 512 MiB of linear memory per instance, reserved up
+// front, and close-on-cancel when guarded.
+func engineConfig(closeOnDone bool) wazero.RuntimeConfig {
+	return wazero.NewRuntimeConfig().
+		WithCloseOnContextDone(closeOnDone).
+		WithMemoryLimitPages(EngineMemoryLimit / 65536).
+		WithMemoryCapacityFromMax(true)
 }
 
 // defaultCacheDir is where compiled code is kept: qrvt/wazero under the user's cache directory, or

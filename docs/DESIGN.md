@@ -459,11 +459,21 @@ Each engine instance adds its linear memory, which spike S1 measured at 155 MB (
 (10-bit) when decoding 4K HEVC and 140-240 MB when encoding 4K, within a reserved limit of 512 MiB per
 instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of the 21 runs where it
 was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). The default worker count is the CPU count, reduced so that the workers, each counted at the
-worst measured engine figure, 920 MB, stay within half of the machine's physical memory, and to at
-most `video.EngineInstances()`, one fewer than GOMAXPROCS (at least one). The cap is a real
-defence: uncapped, stops were up to 8 times late on a CI runner (section 12).
-`internal/video` enforces it itself; further instances wait their turn, with no limit but the
-context, so a worker must not hold more decoders open than the cap without reading them. The opt-in
+worst measured engine figure, 920 MB, stay within half of the machine's physical memory. Each
+decoding instance runs in its own worker process (section 12), which the operating system schedules,
+so the worker count is not capped below the CPU count: a decoding worker spends about 300 ms of engine
+time per 4K frame, against a few milliseconds of qrvt's own work on the same frame in the parent
+(the frame's copy through the pipe, 10-37 ms at 4K, overlaps the next frame's decoding), so one
+worker per core keeps every core busy, and vision on the same cores only fills the gaps. A worker's
+peak resident memory measured 190 MB (1080p H.264), 310 MB (4K HEVC 8-bit) and 403 MB (4K HEVC
+10-bit), on one machine (the S1 development machine, spike S1 section 13), not on the CI runners;
+920 MB per worker stays the conservative count, because the whole 512 MiB reservation can
+become resident (spike S1). On a machine with 16 GB and 16 cores that allows 8 workers. Instances in
+qrvt's own process (encoding, `Concat`, and every instance when no worker process can be started) are capped
+at `video.EngineInstances()`, one fewer than GOMAXPROCS (at least one). The cap is a real defence:
+uncapped, stops were up to 8 times late on a CI runner (section 12). `internal/video` enforces it
+itself; further instances wait their turn, with no limit but the context, so on that fallback path a
+worker must not hold more decoders open than the cap without reading them. The opt-in
 HEVC fast path of section 12 is not counted: its memory is not bounded against a crafted stream, which
 is why it is opt-in and only for recordings the user made themselves.
 
@@ -760,8 +770,8 @@ Costs a user should expect:
   a cost above about 10% goes to the owner. Measured (spike S1 report, section 10): **75-91%**, far
   above that: decoding 1080p H.264 22.3 -> 5.6 fps, 4K HEVC 8-bit 3.08 -> 0.28 fps, 10-bit
   3.02 -> 0.29 fps; encoding 1080p 7.7 -> 0.87 fps, 4K 2.1 -> 0.22 fps (one instance, medians of
-  three). Reported to the owner, who chose worker processes (the engine in a child process with the
-  option off, killed by the watchdog), built in a separate change; until it lands the option stays on.
+  three). Reported to the owner, who chose **worker processes** instead; the option is now used only
+  when no worker can be started (below).
   wazero v1.12.0 implements the option by calling a check through a trampoline at every loop
   back-edge (`internal/engine/wazevo/frontend/lower.go`, `OpcodeLoop` with `ensureTermination`),
   so the cost depends on the work: a crafted stream whose decoding is mostly picture-filling loops ran
@@ -770,7 +780,7 @@ Costs a user should expect:
   its turn, the module's first compilation) it is not stalled, unless qrvt is itself waiting on it for
   a frame's timestamp; that wait also ends at the stall limit or at cancellation, and cancelling a
   decode closes its pipe (`context.AfterFunc`), so an instance blocked writing a frame stops too.
-  Encoding instances count a frame taken as progress. At most GOMAXPROCS - 1 instances run at once
+  Encoding and `Concat` instances are not stopped by the watchdog (below). At most GOMAXPROCS - 1 instances run at once
   (`video.EngineInstances()`, at least one), and an instance waiting for its turn is not stalled. The
   cap was added after a 30 s stall on the 4-vCPU CI runners stopped after 79 s, reasoning that compiled
   Wasm cannot be preempted. That reasoning does not hold while close-on-cancel is on: wazero then
@@ -782,7 +792,60 @@ Costs a user should expect:
   were stopped on time (`TestWatchdogUnderLoad` asserts the capped case and logs the uncapped one).
   The cap stays as a real defence. Its hazard: waiting for a turn has no limit but the
   context, so a caller holding that many decoders open without reading them waits for ever on the next
-  (`TestHoldAndWait`). The worker count of section 8 does not exceed it.
+  (`TestHoldAndWait`). This cap applies to instances in qrvt's own process (section 8).
+- **Worker processes.** Every decoding and probing instance (and the fast path's copy instance) runs
+  in a child process: qrvt re-executes its own binary with the reserved first argument
+  `__qrvt-engine-worker`, which the root package's `EngineWorker` hook recognises first thing in main,
+  before any flag parsing, so help, completion and the man page never see it. The worker's runtime
+  has close-on-cancel **off**, so it runs at full speed; the parent's watchdog and cancellation kill
+  the process and wait for it. The job (program, arguments, input path, output directory, cache
+  directory, an output bound) travels over the worker's standard input as one length-prefixed JSON
+  message, never in its arguments or environment, and the worker validates it as untrusted input. The
+  job carries the protocol's version; a worker refuses any other (the executable on disk may have been
+  replaced by another release while qrvt runs), and the parent, given that refusal as the worker's
+  first message, treats it as a failure to start: the job runs in process (*Fallback*, below). The
+  program's standard input, if any, is sent only once the worker reports the engine loaded. The
+  worker keeps every control: the read-only single-file counting view, the 512 MiB ceiling, and
+  `MaxDecodedPixelsPerInputByte` as a bound on its output. Results come back as typed, length-prefixed
+  messages (output, log, input reads, exit status) that the parent bounds before allocating and
+  sanitises before printing; a lying worker can end a job, not make the parent allocate. The worker
+  gets an empty environment (on Windows only `SYSTEMROOT`, `TEMP`, `TMP`), its working directory in the
+  temporary directory, and no descriptors or handles but its three standard ones: on Unix it closes,
+  as it starts, every descriptor above 2 without close-on-exec (any one qrvt itself inherited, which
+  exec passes on; Go opens its own with the flag), and on Windows Go passes a child only the handles
+  it names. It exits by itself the moment its
+  standard input closes, which happens when the parent exits or dies, and runs with GOMAXPROCS of at
+  least 2 so that the goroutine watching the pipe can run while the engine occupies a core; on Windows
+  it is also placed in a kill-on-close Job Object: it is created suspended and resumed only once it is
+  in the job, so it never runs outside it (if it cannot be assigned it runs without one). That exit is best effort: with close-on-cancel off
+  a spinning guest never returns to Go, and it also blocks Go's stop-the-world garbage collection, so
+  while it spins the worker's own timers and goroutines cannot be trusted. The parent's kill is the
+  control. Loading and compiling the engine, which on a first run
+  of a slow machine takes longer than 30 s, is not a stall: the worker sends a ready message once the
+  engine is loaded (before any guest code runs), the watchdog counts from then on, and the start and
+  loading phase is bounded by `video.EngineLoadLimit`, 10 minutes, after which the worker is killed.
+  Compiling in qrvt's own process is not a stall either and has no limit but the context. Measured on
+  one machine (the S1 development machine, spike S1 section 13), not on the CI runners, against the
+  engine in process with the option off: 1080p H.264 decoding 9% slower (most of it the 0.42-0.50 s
+  start-up on a 13 s run), 4K HEVC 8-bit 2% faster and 10-bit 6% slower, all within 10%; a second
+  run after the PR #9 merge gave 5%, 2% and 4% slower, with a start-up of 0.27-0.29 s.
+  - *Encoding and `Concat` stay in process* with close-on-cancel off: through a worker encoding cost
+    11-15% (above the 5% bar), and their input is qrvt's own frames and runs, not a file from outside.
+    They have no forced stop: neither the watchdog nor cancellation can interrupt their guest.
+    Cancelling closes their input (`context.AfterFunc`), which stops them at their next read, within a
+    frame. While their guest computes it delays qrvt's own stop-the-world garbage collection (up to
+    about 0.5 s for a 4K frame), and a guest that spun would stall it, and with it the whole process;
+    that matters to a host that encodes and decodes in one process (SECURITY.md T1).
+  - *Fallback.* When the host never called the hook, its executable cannot be found or a worker
+    cannot be started, the instance runs in qrvt's process with close-on-cancel on, under the
+    `EngineInstances()` cap: the same guarantees, 4 to 11 times slower. `video.WorkerStatus` then
+    returns the reason, which the pipeline reports as a warning (`WarnEngineInProcess`).
+  - *Not claimed.* A worker is the same binary with the same privileges as qrvt; worker processes
+    bound hangs and memory and keep a stuck engine from blocking qrvt, but they are not an operating
+    system sandbox. The WebAssembly sandbox is still what confines the decoder.
+  - *Compilation cache.* wazero writes each cache file to a temporary name and renames it, so workers
+    compiling at the same time on first use are safe on Linux and macOS; on Windows a rename over a
+    file in use can fail, and a failed cache write now means compiling again without the cache.
 
 Rejected as a foundation: the pure-Go H.264 stack (`oops1/go.264`, `go-avkit/*`). An independent check
 found it is one author's 2.5-month-old project that links glibc on Linux through purego and silently
@@ -1042,7 +1105,11 @@ What the named types carry:
 
 **GUI readiness** rests on three rules. The core does no terminal I/O and never exits the process. All
 progress is typed events delivered to a callback. Cancellation is by `context`. A Go GUI links the root
-package directly; any other GUI runs the binary with `--json` and reads events.
+package directly; any other GUI runs the binary with `--json` and reads events. One exception, by
+design: `func EngineWorker()` must be the first call in every host's `main`. In an ordinary process it
+returns at once, having enabled engine worker processes (section 12); in a process started as a worker
+it runs that worker's job and exits the process. A host that does not call it still works, with the
+engine in process and slower, and decodes report a warning.
 
 **Concurrency rule.** Workers share no mutable state. Each owns its engine instance and buffers, and
 passes results through channels to a single goroutine that owns the accumulators and stores.
@@ -1358,3 +1425,5 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, CI on PR #9: sections 8 and 12 correct the instance cap's description: on the macos-26-intel runner GOMAXPROCS + 1 uncapped spinning instances took 16.8 s against a 2 s limit, so the cap is a mitigation, not a harmless precaution |
 | 2026-11-14 | M1 stream D, round 2 of the review of PR #9: section 8 calls the instance cap a real defence (uncapped, stops were up to 8 times late on a CI runner); section 12 adds the 8K UHD capture limit in either orientation, corrects the `showinfo` injection wording (an unknown Matroska CodecID is logged from the start of a line) and adds the frame-number sequence check and the slice-end count check, and restates the cap's evidence |
 | 2026-11-14 | M1 stream G follow-up 2: section 17 states that an advisory for wazero or go-ffmpreg (GitHub alert or CI scan) is fixed by hand straight away with S1 re-run, how the Fedora and Arch Linux container digests are refreshed and that the containers run read-only and without new privileges, and adds the HEVC fast-path test step and fuzz tag (stream D, PR #9) |
+| 2026-11-13 | M1 stream D, worker processes (owner's decision after the close-on-cancel measurement): section 8 re-derives the worker count for workers (no GOMAXPROCS cap; 920 MB each, measured 190-403 MB) and keeps the cap for instances in qrvt's process; section 12 adds worker processes (protocol, isolation, termination, fallback, what is not claimed, the compile cache) and keeps encoding in process with close-on-cancel off (15% cost through a worker); section 14 adds the `EngineWorker` hook as the one exception to "never exits the process" |
+| 2026-11-14 | M1 stream D, review of PR #15: section 8 marks the worker memory figures as measured on one machine (the S1 development machine), not on the CI runners, and counts `Concat` among the in-process instances. Section 12: the worker speed figures are marked the same way, with the second run's figures; the job carries a protocol version, which a worker of another version refuses and the parent takes for a failure to start; standard input is sent only after the ready message; on Unix the worker closes every inherited descriptor above 2 as it starts; on Windows it is created suspended and resumed only once in its Job Object; the loading phase is bounded by `video.EngineLoadLimit`, and compiling in qrvt's process has no limit but the context; encoding and `Concat` stay in process with no forced stop, stop on cancellation by having their input closed, and delay (or, spinning, would stall) qrvt's own garbage collection; the watchdog is no longer described as covering encoding |

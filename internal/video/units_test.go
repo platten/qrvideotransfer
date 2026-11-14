@@ -394,15 +394,16 @@ func TestShowinfo(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
+	// A second configuration line is refused: ffmpeg reconfigures the filter only when the frames
+	// change size, format or aspect ratio, which a recording does not do, so one of the two lines was
+	// forged (review round 3 of PR #9).
 	s = newShowinfo()
 	for _, l := range []string{"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 0 s:2x2", "n: 1 pts: 1 s:2x2",
-		"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 2 s:2x2"} { // a reconfigured filter counts from 0
+		"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 2 s:2x2"} {
 		s.parse("[Parsed_showinfo_1 @ 0x2] " + l)
 	}
-	for i := range 3 {
-		if c, err := s.pop(t.Context(), done, time.Minute); err != nil || c.pts != int64(i) {
-			t.Errorf("after a reconfiguration, %d: %+v %v", i, c, err)
-		}
+	if _, err := s.pop(t.Context(), done, time.Minute); !errors.Is(err, ErrEngine) || !strings.Contains(err.Error(), "second filter configuration") {
+		t.Errorf("after a second configuration: %v", err)
 	}
 	for _, c := range []struct {
 		ts   frameTS

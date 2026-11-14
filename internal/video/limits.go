@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Limits of docs/SECURITY.md section 5. None of them can be raised by a flag.
 const (
 	// EngineStallTimeout is how long an engine instance may go without progress before it is
 	// cancelled: no complete, timestamped output frame when decoding, no input read when probing, no
-	// growth of the output file when copying a stream for the HEVC fast path, no input frame taken
-	// when encoding.
+	// growth of the output file when copying a stream for the HEVC fast path. It does not stop an
+	// encoding or Concat instance, which runs in qrvt's own process with no forced stop.
 	EngineStallTimeout = 30 * time.Second
 
 	// EngineProbeTime bounds a probe's running time, not counting time spent waiting for an instance
@@ -136,7 +137,9 @@ func checkSize(w, h int) error {
 }
 
 // sanitise makes text that came from a video file or an engine safe to put in an error message:
-// control characters become spaces and the result is at most n bytes.
+// control characters become spaces, invalid UTF-8 becomes U+FFFD, and the result is the last n bytes
+// at most, cut on a character boundary (a cut inside a character would leave a stray byte, which
+// may be a C1 control such as 0x9b).
 func sanitise(s string, n int) string {
 	s = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
@@ -147,6 +150,9 @@ func sanitise(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if len(s) > n {
 		s = s[len(s)-n:]
+		for len(s) > 0 && !utf8.RuneStart(s[0]) {
+			s = s[1:]
+		}
 	}
 	return s
 }
