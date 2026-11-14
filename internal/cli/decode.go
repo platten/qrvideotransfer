@@ -41,9 +41,10 @@ func (a *app) decodeCmd() *cobra.Command {
 		"When given, the transfer must be signed by one of these keys.\nExample: --verify-key alice.pub --verify-key bob.pub")
 	fs.StringVar(&f.maxSize, "max-size", "16GiB", "Largest total size that may be unpacked, with a unit: B, KiB, MiB, GiB, TiB "+
 		"(K, M, G, T mean the same) or kB, MB, GB, TB.\nExample: --max-size 500MB")
-	fs.IntVar(&f.maxEntries, "max-entries", 0, "Largest number of files and folders that may be unpacked, 1 to 1000000; "+
-		"the limit on the manifest's size, 64 MiB at most, rises in proportion. 0 uses the default, about 100,000.\n"+
-		"Example: --max-entries 500000")
+	fs.IntVar(&f.maxEntries, "max-entries", 0, fmt.Sprintf("Largest number of files and folders that may be unpacked, 1 to 1000000; "+
+		"the manifest may then hold N x 64 MiB / 1000000 bytes, at most 64 MiB. "+
+		"0 uses the default: %d entries and %d bytes of manifest.\nExample: --max-entries 500000",
+		qrvt.DefaultMaxEntries, qrvt.DefaultMaxManifestBytes))
 	fs.BoolVar(&f.overwrite, "overwrite", false, "Allow existing files in the output folder to be replaced.\nExample: --overwrite")
 	fs.StringVar(&f.stateDir, "state-dir", "", "Keep progress in this folder, to resume an interrupted decode or merge recordings over several runs.\n"+
 		"Example: --state-dir .qrvt-state")

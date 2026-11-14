@@ -144,15 +144,21 @@ func keyBytes(line, prefix string) ([]byte, bool) {
 }
 
 // readSignKey reads --sign-key and returns its key line, trimmed. It warns, through the renderer,
-// when the file is readable by others (SECURITY.md T10).
+// when the file is readable by others (SECURITY.md T10). No error shows the value.
 func (a *app) readSignKey(path string) ([]byte, error) {
-	b, st, err := readKeyFile("--sign-key "+path, path)
+	if strings.HasPrefix(strings.TrimSpace(path), privatePrefix) {
+		return nil, usagef("--sign-key: give the path of the key file, not the key")
+	}
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil, usagef("--sign-key: no such file %s", hidden)
+	}
+	b, st, err := readKeyFile("--sign-key", path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w %s", err, hidden)
 	}
 	line := strings.TrimSpace(string(b))
 	if _, ok := keyBytes(line, privatePrefix); !ok {
-		return nil, usagef("--sign-key %s: not a qrvt private key", path)
+		return nil, usagef("--sign-key: not a qrvt private key %s", hidden)
 	}
 	if runtime.GOOS != "windows" && st.Mode().Perm()&0o077 != 0 {
 		a.warnings = append(a.warnings, qrvt.Warning{Code: warnReadableKey,

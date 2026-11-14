@@ -744,7 +744,7 @@ qrvt profiles | version | completion | man
 | `--passphrase-file` | encode, decode | none | Read the passphrase from the first line of a file instead of prompting. On encode it needs `--encrypt` |
 | `--verify-key` | decode | none | Trusted public key, as a key file or the key line itself; may be repeated. When given, the transfer must be signed by one of them |
 | `--max-size` | decode | 16 GiB | Largest total size that may be unpacked, with a unit: `B`, `K`/`KiB`, `M`/`MiB`, `G`/`GiB`, `T`/`TiB` (binary) or `kB`, `MB`, `GB`, `TB` (decimal) |
-| `--max-entries` | decode | about 100,000 | Largest number of manifest entries that may be unpacked, 1-1,000,000; the manifest-size limit rises in proportion, to at most 64 MiB. A manifest over the limit fails with guidance naming this flag |
+| `--max-entries` | decode | 100,000 (`DefaultMaxEntries`), with a manifest of at most 6,710,886 bytes (`DefaultMaxManifestBytes`, 64 MiB / 10) | Largest number of manifest entries that may be unpacked, 1-1,000,000; the manifest may then hold N x 64 MiB / 1,000,000 bytes, at most 64 MiB. A manifest over either limit fails with guidance naming this flag |
 | `--overwrite` | decode | off | Allow existing files in the output folder to be replaced |
 | `--state-dir` | decode | none | Keep progress for resuming and merging |
 | `--report` | decode | none | Write a JSON report of the decode |
@@ -840,7 +840,7 @@ type DecodeOptions struct {
     Passphrase       func() (string, error)
     VerifyKeys       [][]byte // non-empty: the transfer must be signed by one of these
     MaxSize          int64
-    MaxEntries       int      // manifest entries that may be unpacked; 0: the default, about 100,000; at most 1,000,000 (flag --max-entries)
+    MaxEntries       int      // manifest entries that may be unpacked (flag --max-entries); 0: DefaultMaxEntries (100,000) and DefaultMaxManifestBytes (6,710,886); N: N x 64 MiB / 1,000,000 bytes of manifest; at most 1,000,000 and 64 MiB
     Overwrite        bool
     Report           string   // optional path for a JSON report
     Backend          string
@@ -1259,3 +1259,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream F: section 13 resolves what the command line left open: the `--resolution` presets (with `2160p` as another name for `4k`) and its use by `calibrate make` for the monitor resolution; ranges for `--fps` (1-240) and `--jobs` (0-1024, 0 the CPU count); `--hdr` replaces `--mode`; `--passphrase-file` reads the first line and needs `--encrypt` on encode; `--verify-key` takes a key file or a key line; the `--max-size` units; which output flags exclude each other; where plain, summary and JSON output go and the JSON schema; the hidden `demo` command; required `-o`; and the exit codes |
 | 2026-11-13 | M1 stream F, PR #11 review: section 13 says that with `--json` nothing goes to standard error, that a failure before the job starts is a single error line, and that warnings are events |
 | 2026-11-14 | M1 stream F, PR #11 round 2: section 13 adds `--max-entries` (the owner's decision: default manifest limits about a tenth of the format's, raised by one flag), mapped to `DecodeOptions.MaxEntries`, which section 14 shows |
+| 2026-11-14 | M1 stream F, PR #11 round 3: sections 13 and 14 give the exact manifest defaults, the root constants `DefaultMaxEntries` (100,000) and `DefaultMaxManifestBytes` (6,710,886, 64 MiB / 10), and the scaling rule of `--max-entries` (N x 64 MiB / 1,000,000 bytes, at most 64 MiB) |
