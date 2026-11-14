@@ -404,25 +404,60 @@ The stream is what the outer code protects. Its length L includes every field be
   `type` is `file` or `dir`. `size` and `sha256` are present for files only. Only the low 9 bits of
   `mode` are meaningful.
 - The tar stream contains exactly the manifest's entries, in the same order, with the same paths, as
-  regular files and directories only.
+  regular files and directories only. A directory's tar name is its path followed by one `/`; a
+  decoder also accepts it without the `/`.
+- The archive is exactly the archive length of the header: decompression must yield neither more nor
+  fewer bytes.
 
 **What an encoder writes.**
 
 - Each input named on the command line is stored under its base name: the file `a/b/c.txt` becomes
-  `c.txt`; the directory `a/b/d` becomes `d`, and everything beneath it becomes `d/...`.
+  `c.txt`; the directory `a/b/d` becomes `d`, and everything beneath it becomes `d/...`. The base name
+  is taken from the absolute path, so `.` is stored under the name of the folder it names; a root
+  folder has no base name and stops the encode.
 - Every directory that contains an entry is itself an entry.
 - Entries are sorted by path, compared byte by byte. A directory therefore precedes its contents.
 - Two inputs with the same base name, or any path that breaks the path rules below, stop the encode
-  with an error. Nothing is renamed silently.
+  with an error. The error lists every path that breaks a path rule, each with the rule it breaks, not
+  only the first. Nothing is renamed silently.
 - `mtime` is in whole seconds, UTC, written as RFC 3339 with a `Z` suffix.
 - The manifest is written with its keys in the order shown above and no whitespace between tokens.
 - Tar headers carry the path, size, the low 9 mode bits and the modification time. User and group ids
   are 0 and their names empty.
+- Links and special files (devices, FIFOs, sockets) are not entries; the encoder skips them with a
+  warning.
+- Default compression: the first 4 MiB of the archive are compressed with zstd; the archive is stored
+  with compression 0 unless that sample shrinks by at least 2%, and with zstd otherwise. zstd uses a
+  window of 8 MiB and xz a dictionary of 8 MiB; age uses scrypt work factor 18. These are also the
+  largest values a decoder accepts (below). An xz body is exactly one xz stream, with no stream
+  padding, holding exactly one block whose single filter is LZMA2. Within the block, the first LZMA2
+  chunk resets the dictionary, no later chunk does, and only the first LZMA chunk sets the
+  properties, with lc + lp and pb at most 4. An LZMA chunk that resets the state without new
+  properties (control 0xA0 to 0xBF) comes only directly after an uncompressed chunk, and at most
+  once per 32 KiB of uncompressed-chunk data so far in the block; and a run of uncompressed chunks
+  after the first starts only once 32 KiB of uncompressed-chunk data per earlier run precede it.
+  qrvt's encoder writes one block and no such state reset; it and XZ Utils write uncompressed runs
+  of about 60 KiB or more except at the end of the data, and XZ Utils writes state resets only
+  directly after them. Accepting more blocks, resets or runs let a small stream make a decoder
+  allocate a new dictionary, new probability tables or a new copy buffer for every few bytes of
+  input.
 
 **What a decoder rejects.** A wrong magic or stream version; an unknown compression value; any flag bit
 other than 0x01 and 0x02; a non-zero reserved byte; a stream whose length L is not exactly `24 + Lb`,
-plus 96 when the signed flag is set; a manifest that is not valid JSON, has a key other than those
-shown, or has a version other than 1.
+plus 96 when the signed flag is set; a manifest that is not valid UTF-8 JSON, has a key other than those
+shown or any key twice in one object, writes `version`, `size` or `mode` other than as an integer
+without fraction or exponent, has an `mtime` that is not RFC 3339, a `sha256` that is not 64 lowercase
+hexadecimal digits, or a version other than 1; a tar entry that is not the next manifest entry with
+the same type and size, or that follows the last one; a file whose SHA-256 differs from the manifest.
+It also rejects, before allocating for them: a zstd frame whose window (or, for a single-segment
+frame, content size) exceeds 8 MiB; an xz block whose filter is not LZMA2 alone or whose dictionary
+exceeds 8 MiB; an xz body with anything after its one stream (a second stream, stream padding or
+other bytes); an xz body with a second block, refused at its block header; an LZMA2 chunk that
+breaks the chunk rules above; an xz LZMA2 chunk whose data the LZMA decoder does not consume exactly (a chunk that
+declares more compressed bytes than its decoder uses, or fewer than it needs); an xz block whose
+check, padding or declared sizes are wrong, or an index or footer that does not match the blocks;
+an age header whose scrypt work factor exceeds 18. Any conforming pax tar is accepted;
+the tar bytes need not match those of the reference encoder.
 
 **Order of checks.** A decoder must check the descriptor's stream hash over the whole recovered stream,
 then the stream header, then the signature when one is present or required, and only then decrypt,
@@ -432,13 +467,23 @@ decompress and unpack. It must validate the entire manifest before writing any f
 
 - relative, with `/` as the only separator; no empty, `.` or `..` component;
 - valid UTF-8 in Unicode normalisation form C;
-- no NUL, no character below U+0020, no U+007F, no backslash, no colon;
+- no NUL, no character below U+0020, no U+007F, no backslash, no colon, and none of `<`, `>`, `"`, `|`,
+  `?`, `*`, which Windows cannot store;
 - no component ending in a space or a dot;
-- no component that is a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`),
-  compared without regard to case and ignoring anything from the first dot;
+- no component that is a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`,
+  `COM0`-`COM9`, `LPT0`-`LPT9`, and `COM` or `LPT` followed by `¹`, `²` or `³`), compared without regard
+  to case after removing anything from the first dot and any spaces before it;
 - each component at most 255 bytes and the whole path at most 4,096 bytes;
-- no two entries equal after Unicode case folding;
-- no entry whose parent path is an entry of type `file`.
+- at most 64 components. There are two reasons. On macOS, and partly on Windows, the time spent on
+  each path component grows with the depth of the folder, so a deep manifest within the size limits
+  could keep extraction busy for hours (SECURITY.md section 5). And a tree far deeper than
+  operating-system shells handle is a nuisance payload in itself;
+- no two entries equal after Unicode case folding: full case folding exactly as CaseFolding.txt
+  statuses C and F (so `Straße` equals `STRASSE`, and the Cherokee small letters fold to the capital
+  ones, U+AB70 to U+13A0), then normalisation form C;
+- every folder that contains an entry is itself an entry of type `dir`, compared after the same
+  folding. This refuses an entry beneath a file at any depth, and bounds the folders a decoder creates
+  by the number of entries.
 
 ## 13. Test vectors
 
@@ -452,7 +497,7 @@ and reviewed by hand against this document:
 | Shuffle(10, 1) and the first 4 SplitMix64 outputs for state 0 | Section 1 |
 | LDPC (`ldpc.json`, frozen in M1): for each inner code, an all-zero shard and a fixed pseudo-random shard (big-endian SplitMix64 outputs from state = inner-code id) to sent bits, packed most significant bit first with zero padding; and `H c = 0` for both | Section 8 |
 | Frame: fixed stream, session and seed to the SHA-256 of the luma plane of frames 0 and 1, for Gray2, Gray4 and RGB8 at 480p | Sections 4 to 11 |
-| Stream: fixed inputs to stream bytes, unsigned and signed with a fixed key; one manifest per path rule that must be refused | Section 12 |
+| Stream (`stream.json`): fixed inputs to stream bytes with compression 0, unsigned and signed with a fixed key (seed bytes 0 to 31); zstd, xz and age-encrypted streams of the same inputs that must still decode; one manifest per path rule that must be refused, and manifests at the edge of a rule that must be accepted (a file of exactly 64 components). The tar bytes are those Go's `archive/tar` writes for the headers section 12 lists (pax format, with a pax record only where ustar cannot hold a field, such as a long or non-ASCII path). An encoder that wants identical bytes must match that; a decoder accepts any conforming pax tar | Section 12 |
 | Reference video: a small encoded MP4 that every later release must decode | Whole format |
 
 Worked numbers for cross-checking, at 480 x 270, Gray4, `normal`, parity 20:
@@ -501,3 +546,10 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-13 | M0 spikes: section 3 allows H.264 Main as well as High profile (the encoder's fastest settings turn off the 8x8 transform, so x264 signals Main, a subset of High); section 14 records the S1 result for the modulation 4 codec. No value a decoder relies on changed |
 | 2026-11-13 | M1 render: section 4.5 states mid-grey in a 10-bit frame (luma 504, chroma 512); the 8-bit rule was silent on it. No value a decoder relies on changed |
 | 2026-11-13 | M1 stream B: section 8 names the matrices' data file and its SHA-256, states that the parity bits are unique, and gives the CRC-32C of the all-zero shards; section 13 freezes the LDPC vectors in `testdata/golden/ldpc.json` and says how the pseudo-random shard is made and how sent bits are packed in the file. No value changed |
+| 2026-11-13 | M1 stream A: section 12 stream vectors frozen (`testdata/golden/stream.json`, reproduced by an independent script that recomputes the Ed25519 signature). Section 12 states: a directory's tar name ends in `/` (accepted without); decompression must yield exactly the archive length; `.` is stored under its folder's name and a root folder is refused; links and special files are skipped with a warning; the default compression rule and the zstd window, xz dictionary and scrypt work factor written; the decoder's manifest strictness (UTF-8, no repeated keys, plain integers, RFC 3339 `mtime`, lowercase `sha256`) and tar checks; case folding is full Unicode folding followed by NFC; "file under a file" applies at any depth. Section 13's stream row names the file and its contents |
+| 2026-11-13 | M1 stream A, review of PR 7: section 12 path rules also refuse `<`, `>`, `"`, `|`, `?`, `*`, `CONIN$`, `CONOUT$`, `COM` and `LPT` with a superscript digit, and device names followed by spaces. Case folding is stated as exactly CaseFolding.txt C and F (the Cherokee small letters fold to the capitals). "No entry beneath a file" becomes "every folder that contains an entry is an entry of type `dir`", which the encoder already wrote. The decoder rejects a zstd window over 8 MiB, an xz dictionary over 8 MiB or a filter other than LZMA2, and a scrypt work factor over 18, and accepts any conforming pax tar. Section 13 says where the frozen tar bytes come from; the golden file gains the new refused manifests. The frozen streams did not change |
+| 2026-11-13 | M1 stream A, review of PR 7 round 2: section 12 says an xz body is exactly one xz stream, with no stream padding, whose blocks each have the single filter LZMA2. The decoder rejects anything after that stream: a second stream, stream padding or other bytes |
+| 2026-11-13 | M1 stream A, PR 7, path depth: section 12 adds the path rule "at most 64 components", with its two reasons (time per component grows with depth on macOS and partly on Windows; a tree far deeper than shells handle is a nuisance payload), and says the encoder's refusal lists every path that breaks a rule with the rule it breaks. Section 13: `stream.json` gains a refused manifest at 65 components and a list of manifests that must be accepted, with one at exactly 64; the "path over 4096 bytes" vector now has 17 components so that it breaks only the length rule. The frozen streams did not change |
+| 2026-11-14 | M1 stream A, second independent review of PR 7: section 12 says the decoder rejects an xz LZMA2 chunk whose data the LZMA decoder does not consume exactly, and a block whose check, padding or declared sizes are wrong, or an index or footer that does not match the blocks (the reference decoder now parses the xz container itself). `COM0` and `LPT0` are device names too; section 13's `stream.json` gains their refused manifests. The frozen streams did not change |
+| 2026-11-14 | M1 stream A, third independent review of PR 7: section 12 says an xz body holds exactly one block (the encoder always wrote one), refused at a second block header, and states the chunk rules: the first chunk resets the dictionary, no later chunk does, only the first LZMA chunk sets properties, and lc + lp and pb are at most 4. The reason: accepting many blocks let a small stream make a decoder allocate a new 8 MiB dictionary per block. XZ Utils output with several blocks (multithreaded, `--block-size`, `--block-list`) is no longer accepted. The frozen streams did not change |
+| 2026-11-14 | M1 stream A, fourth independent review of PR 7: section 12 limits LZMA state resets without new properties (control 0xA0 to 0xBF) to directly after an uncompressed chunk, once per 32 KiB of uncompressed-chunk data, and a new run of uncompressed chunks to once per 32 KiB of uncompressed-chunk data before it; it says qrvt's encoder writes one block, replacing "one block is what every encoder writes" (XZ Utils 5.8.4 splits its output even at -0 and -1) |

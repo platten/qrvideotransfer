@@ -48,6 +48,7 @@ func (e *UnsafeArchiveError) Error() string {
 type LimitError struct {
 	Limit      string
 	Value, Max int64
+	Flag       string // the command-line flag that raises the limit, such as "--max-size"; "" for none
 }
 
 // Error implements the error interface.

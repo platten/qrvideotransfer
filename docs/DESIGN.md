@@ -276,14 +276,17 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
 - Encoder (`internal/fec/ldpc`): systematic, through the dual-diagonal parity structure; the first
   parity block is the sum of the per-row syndromes of the information part, each later one follows
   from the row before.
-- Decoder: layered normalised min-sum, one layer per block row, scaling 0.75 (computed as
-  floor(3m/4)), 8-bit soft bits, int16 messages, at most 25 iterations (`ldpc.MaxIterations`). The
+- Decoder: layered normalised min-sum, one layer per block row, scaling 13/16 (computed as
+  floor(13m/16)), 8-bit soft bits multiplied by 4 on entry so that small messages keep their
+  precision, int16 messages, at most 25 iterations (`ldpc.MaxIterations`). M1 shipped scaling 0.75
+  (floor(3m/4)) on the soft bits as given; the follow-up below replaced it by measurement. The
   checks are tested before the first iteration (a clean codeword costs 0 iterations) and after each
   one, stopping when all pass; then the CRC. Block columns that are entirely shortened are left out of
   the schedule; the known-zero bits of the one partly shortened column always send the largest
-  magnitude with sign 0, so the checks can never flip them. Posteriors are clamped to +-8,191, which
-  keeps every message within int16 without saturation (|R| <= 24,573, |L - R| <= 32,764), so no input
-  can overflow; a fuzz target checks that arbitrary soft bits never panic and stop within the cap.
+  magnitude with sign 0, so the checks can never flip them. Posteriors are clamped to +-8,191 and
+  check-to-variable magnitudes to 24,573, which keeps every message within int16 without saturation
+  (|L - R| <= 32,764), so no input can overflow; a fuzz target checks that arbitrary soft bits never
+  panic and stop within the cap.
   A `Code` holds its working memory and belongs to one worker.
 - Speed (spike S3, `normal` code, one core, sent bits): 7.6 Mbit/s at a fixed 10 iterations in portable
   Go, against a threshold of 20 Mbit/s, which is **not met**; 18.6 Mbit/s with the experimental
@@ -297,6 +300,10 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   against 8.2-10.8 and 13.0-16.0 for the production decoder in the same session: the same speed within
   the noise. Both are below S3's own figures (13.4 and 19.4) because the machine was shared with other
   jobs during M1; the S3 verdict (threshold not met per core) stands. No SIMD path was written.
+- Speed after the decoder follow-up (`BenchmarkDecodeCandidates`, the same 64 codewords, M1 and new
+  decoder in 5 alternating runs pinned to one core, median): 12.9 against 12.2 Mbit/s at Eb/N0 2.5 dB
+  (5.73 against 6.03 mean iterations) and 19.7 against 18.9 Mbit/s at 3.0 dB (3.55 against 3.67): the
+  new decoder is no slower, because it needs fewer iterations.
 - Release builds must not depend on a Go experiment or an amd64-only package. The portable decoder is
   the default on all six targets; a SIMD path may exist only as an optional build behind a build tag,
   tested to give output identical to the portable decoder.
@@ -307,44 +314,45 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   frame errors in 1,000 frames per rate; 20,000 frames with `QRVT_LONG_TESTS=1`). Measured
   (`TestErrorRateCurves`, 4,000 frames per 0.1 dB step), Eb/N0 at FER 1e-2:
 
-  | Rate | Published | Source | Measured |
-  | --- | --- | --- | --- |
-  | 1/2 | 1.81 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 1.82 dB |
-  | 2/3 | 2.32 dB | [B], flooding sum-product, 20 iterations | 2.23 dB |
-  | 3/4 | 2.84 dB | [B], flooding sum-product, 20 iterations | 2.77 dB |
-  | 5/6 | 3.70 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 3.53 dB |
+  | Rate | Published | Source | Measured (decoder of the follow-up) | Measured (M1 decoder) |
+  | --- | --- | --- | --- | --- |
+  | 1/2 | 1.81 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 1.51 dB | 1.82 dB |
+  | 2/3 | 2.32 dB | [B], flooding sum-product, 20 iterations | 2.23 dB | 2.23 dB |
+  | 3/4 | 2.84 dB | [B], flooding sum-product, 20 iterations | 2.76 dB | 2.77 dB |
+  | 5/6 | 3.70 dB | [A] Fig. 4, layered offset min-sum, 12 iterations | 3.50 dB | 3.53 dB |
 
   [A] Balatsoukas-Stimming, Giard, Burg, "Comparison of Polar Decoders with Existing Low-Density
   Parity-Check and Turbo Decoders", arXiv:1702.04707v2, 2017, curve "IEEE 802.11n (I = 12)", BPSK,
   Eb/N0. [B] S. Tavildar, github.com/tavildar/LDPC, `results/wifi_ldpc_qpsk.png`, curves N = 1944, one
   bit per real dimension, Eb/N0; the only source found for rates 2/3 and 3/4, and not peer-reviewed.
   Each published value is a log-linear interpolation between the two bracketing points of the curve.
-  Our decoder is within 0.2 dB of every reference (better than [A] and [B] where it runs more
-  iterations). A cross-check from Roth et al., IEEE ASSCC 2010, Fig. 5 (Z = 81, 10 iterations of a
+  Our decoder is within 0.3 dB of every reference and never behind it (it runs more iterations than
+  [A] and [B]). A cross-check from Roth et al., IEEE ASSCC 2010, Fig. 5 (Z = 81, 10 iterations of a
   5-bit offset min-sum) gives 2.16 dB and 3.71 dB for rates 1/2 and 5/6.
 - The shortened inner codes that ship (ids 1-4) have no published curves, so they are checked against
   the binary-input AWGN capacity limit for their rate, counted with the CRC: R = (8S + 32) / N sent
   bits (`TestShortenedErrorRate`, the weaker check). Measured (BPSK, AWGN, same channel as above):
 
-  | Code | R | Capacity limit | FER 1e-2 at Eb/N0 | Gap | Es/N0 at FER 1e-2 |
-  | --- | --- | --- | --- | --- | --- |
-  | 1 `fast` | 0.829 | 2.32 dB | 3.46 dB | 1.14 dB | 2.64 dB |
-  | 2 `normal` | 0.685 | 1.17 dB | 2.48 dB | 1.31 dB | 0.84 dB |
-  | 3 | 0.620 | 0.79 dB | 2.07 dB | 1.28 dB | -0.01 dB |
-  | 4 `robust` | 0.359 | -0.40 dB | 2.20 dB | 2.60 dB | -2.25 dB |
+  | Code | R | Capacity limit | FER 1e-2 at Eb/N0 | Gap | Es/N0 at FER 1e-2 | M1 decoder: Eb/N0, gap |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | 1 `fast` | 0.829 | 2.32 dB | 3.44 dB | 1.12 dB | 2.63 dB | 3.46, 1.14 dB |
+  | 2 `normal` | 0.685 | 1.17 dB | 2.49 dB | 1.32 dB | 0.85 dB | 2.48, 1.31 dB |
+  | 3 | 0.620 | 0.79 dB | 2.10 dB | 1.31 dB | 0.02 dB | 2.07, 1.28 dB |
+  | 4 `robust` | 0.359 | -0.40 dB | 1.35 dB | 1.75 dB | -3.10 dB | 2.20, 2.60 dB |
 
   Es/N0 = Eb/N0 + 10 log10(R) is per sent bit, which is what the noise of a cell sets. The test
-  asserts FER below 1e-2 at the limit plus 2.5 dB for codes 1-3. **With the shipped decoder, `robust`
-  misses that fallback criterion by about 0.1 dB, and the cause is the decoder, not the code.** For
-  `robust` the test is a regression check at the limit plus 2.8 dB, on 10,000 frames because its
-  waterfall is shallow.
+  asserts FER below 1e-2 at the limit plus 2.5 dB for all four codes. With the M1 decoder `robust`
+  missed that criterion by about 0.1 dB, and the cause was the decoder, not the code; with the decoder
+  of the follow-up it meets it with 0.75 dB to spare, and a regression check holds it at the limit
+  plus 2.1 dB (the measured 1.75 dB plus 0.3 dB of margin, 5,000 frames because its waterfall is
+  shallow). Codes 1-3 moved by at most 0.03 dB, within the resolution of these sweeps.
 - Decoder comparison (`TestMinSumVariants`, `QRVT_LONG_TESTS=1`; a test-only floating-point reference
   with the same layered schedule; 4,000 frames per 0.1 dB step, the same frames for every decoder; Eb/N0
   at FER 1e-2, each code's capacity gap in brackets):
 
   | Decoder | `robust` (4) | code 3 | `normal` (2) | `fast` (1) |
   | --- | --- | --- | --- | --- |
-  | Shipped: int16, x0.75 as floor(3m/4), 25 iterations | 2.26 (2.66) | 2.07 (1.29) | 2.49 (1.32) | 3.48 (1.16) |
+  | M1 decoder: int16, x0.75 as floor(3m/4), 25 iterations | 2.26 (2.66) | 2.07 (1.29) | 2.49 (1.32) | 3.48 (1.16) |
   | Sum-product, 50 iterations, float LLRs | 1.13 (1.53) | 1.97 (1.18) | 2.43 (1.25) | 3.41 (1.10) |
   | Sum-product, 50 iterations, the shipped 8-bit soft bits | 1.14 | 1.98 | 2.42 | 3.42 |
   | Min-sum x0.75, float, 25 iterations | 1.96 | 2.07 | 2.49 | 3.46 |
@@ -354,17 +362,73 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   | Offset min-sum, 0.25 LLR, float, 25 iterations | 1.33 | 2.20 | 2.62 | 3.50 |
   | Offset min-sum, 0.5 LLR, float, 25 iterations | 1.33 | 2.07 | 2.51 | 3.47 |
 
-  For codes 1-3 the shipped decoder is within 0.1 dB of sum-product, and x0.75 is the best of the
+  For codes 1-3 the M1 decoder is within 0.1 dB of sum-product, and x0.75 is the best of the
   min-sum variants. For `robust` it is 1.13 dB behind sum-product. About 0.3 dB of that is integer
   truncation: floor(3m/4) of small messages at the low Es/N0 where `robust` works (the float model of
-  the same algorithm is at 1.96 dB, and soft bits at 8 or 16 per unit of LLR instead of 4 bring the
-  shipped decoder to 2.09 and 2.02 dB). About 0.6 dB is the normalisation: after shortening, `robust`'s
-  checks keep only 5 to 7 unshortened variables, and min-sum over few inputs needs less damping than
-  x0.75. Offset min-sum with 0.5 LLR, the most uniform variant, is within 0.03 dB of x0.75 on codes 1-3
-  and 0.6 dB better on `robust`. The 8-bit soft bits cost nothing (sum-product on them equals
-  sum-product on float LLRs). Not changed in M1: changing the decoder changes no format bit, and the
-  choice is the designer's. `robust` buys its 2.24 dB of Es/N0 over code 3 with 56% of the payload per
-  sent bit.
+  the same algorithm is at 1.96 dB, and soft bits at 8 or 16 per unit of LLR instead of 4 bring the M1
+  decoder to 2.09 and 2.02 dB, `TestSoftBitUnits`). About 0.6 dB is the normalisation: after
+  shortening, `robust`'s checks keep only 5 to 7 unshortened variables, and min-sum over few inputs
+  needs less damping than x0.75. The 8-bit soft bits cost nothing (sum-product on them equals
+  sum-product on float LLRs).
+- Decoder follow-up (after M1, designer's decision; no format bit changes). Two integer candidates
+  in shipping form were measured on the same frames (`TestDecoderCandidates`, `QRVT_LONG_TESTS=1`,
+  20,000 frames per 0.1 dB step, sum-product on the first 4,000), with the soft bits handed to the
+  decoder multiplied by 0.5, 1 and 2 relative to their true LLRs before quantisation and clipping
+  (that is 2, 4 and 8 steps per unit of LLR). Eb/N0 in dB at FER 1e-2 / 1e-3:
+
+  | Decoder | Scale | `robust` | code 3 | `normal` | `fast` |
+  | --- | --- | --- | --- | --- | --- |
+  | M1: x0.75 | 0.5 | 2.60 / 3.05 | 2.13 / 2.34 | 2.50 / 2.71 | 3.51 / 3.72 |
+  | | 1 | 2.28 / 2.80 | 2.08 / 2.26 | 2.47 / 2.68 | 3.48 / 3.71 |
+  | | 2 | 2.11 / 2.64 | 2.07 / 2.26 | 2.46 / 2.66 | 3.47 / 3.71 |
+  | A1: offset 1 step | 0.5 | 1.37 / 1.60 | 2.09 / 2.29 | 2.49 / 2.72 | 3.49 / 3.72 |
+  | | 1 | 1.34 / 1.60 | 2.20 / 2.40 | 2.58 / 2.81 | 3.53 / 3.75 |
+  | | 2 | 1.50 / 1.76 | 2.34 / 2.54 | 2.70 / 2.92 | 3.58 / 3.79 |
+  | A2: offset 2 steps (0.5 LLR) | 0.5 | 2.20 / 2.38 | 2.28 / 2.42 | 2.63 / 2.82 | 3.58 / 3.77 |
+  | | 1 | 1.34 / 1.61 | 2.07 / 2.26 | 2.48 / 2.71 | 3.48 / 3.71 |
+  | | 2 | 1.34 / 1.62 | 2.19 / 2.38 | 2.58 / 2.81 | 3.52 / 3.75 |
+  | A3: offset 3 steps | 0.5 | 3.16 / 3.32 | 2.76 / 2.88 | 3.03 / 3.19 | 3.84 / 3.99 |
+  | | 1 | 1.68 / 1.90 | 2.11 / 2.29 | 2.50 / 2.71 | 3.49 / 3.70 |
+  | | 2 | 1.29 / 1.54 | 2.11 / 2.31 | 2.51 / 2.75 | 3.49 / 3.73 |
+  | **B: x13/16, soft bits x4 inside** | 0.5 | 1.47 / 1.89 | 2.08 / 2.27 | 2.47 / 2.68 | 3.47 / 3.69 |
+  | | 1 | 1.41 / 1.82 | 2.09 / 2.28 | 2.48 / 2.67 | 3.46 / 3.69 |
+  | | 2 | 1.39 / 1.77 | 2.09 / 2.27 | 2.48 / 2.70 | 3.46 / 3.67 |
+  | Sum-product, float, 50 iterations | 0.5 | 1.72 / 1.84 | 2.60 / 2.71 | 2.95 / 3.05 | 3.82 / 3.94 |
+  | | 1 | 1.13 / 1.41 | 1.96 / 2.13 | 2.37 / 2.61 | 3.43 / 3.68 |
+  | | 2 | 1.42 / 1.66 | 2.25 / 2.43 | 2.61 / 2.76 | 3.53 / 3.77 |
+
+  A2 with the soft bits multiplied by 4 inside (offset 8) gives exactly A2's results: offset min-sum
+  scales exactly, so up-scaling buys it nothing, and integer A2 at scale 1 (1.34 dB) equals its float
+  model (1.33 dB). Frames that converged to a wrong codeword (every check satisfied, information wrong;
+  CRC-32C catches them), summed over the sweep: none for any decoder on codes 2 and 3; on `robust` 1
+  for A1 (scale 1), A2 and A3 (scale 2 each), none for B, M1 and sum-product; on `fast`, at high error
+  rates, 5-7 per scale for every min-sum decoder including M1 and B (0 for A3 at scale 0.5), and 0-1 for sum-product.
+
+  **Choice: B, one factor for all codes.** At scale 1 it keeps codes 1-3 within 0.02 dB of M1 at FER
+  1e-2 and is no slower (above). **It does not meet the hard requirement "no worse than M1 at FER
+  1e-3" strictly.** A paired comparison (`TestPairedM1B`, the same 400,000 frames through both
+  decoders, McNemar's z over the frames only one of them gets wrong, positive meaning B worse) gives:
+
+  | Code | Eb/N0 | M1 FER | B FER | Only M1 wrong | Only B wrong | z |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | `robust` | 1.7 dB | 8.62e-2 | 1.42e-3 | 33,925 | 5 | -184.1 |
+  | `robust` | 1.9 dB | 4.10e-2 | 4.38e-4 | 16,236 | 0 | -127.4 |
+  | 3 | 2.2 dB | 2.39e-3 | 2.71e-3 | 283 | 411 | +4.9 |
+  | 3 | 2.3 dB | 7.60e-4 | 7.72e-4 | 113 | 118 | +0.3 |
+  | `normal` | 2.6 dB | 2.43e-3 | 2.79e-3 | 196 | 338 | +6.1 |
+  | `normal` | 2.7 dB | 7.10e-4 | 7.88e-4 | 67 | 98 | +2.4 |
+  | `fast` | 3.6 dB | 2.85e-3 | 2.22e-3 | 324 | 75 | -12.5 |
+  | `fast` | 3.7 dB | 9.45e-4 | 6.75e-4 | 137 | 29 | -8.4 |
+
+  Near FER 1e-3, B is slightly but significantly worse than M1 on code 3 and on `normal`, and
+  clearly better on `fast` and on `robust`. The size of the loss, read from the local slope of each
+  curve (FER falls by a factor of 3.1 per 0.1 dB on code 3 and 3.4 on `normal` here), is 0.011 dB on
+  code 3 at 2.2 dB (0.001 dB, not significant, at 2.3 dB), 0.011 dB on `normal` at 2.6 dB and 0.008 dB at 2.7 dB. **The designer accepted
+  this trade with an explicit tolerance: at FER 1e-3 the decoder must be within 0.02 dB of the
+  previous decoder on every code**, which B meets, in return for 0.87 dB on `robust` at scale 1. It has the smallest worst case over the
+  three scales (1.47 dB, against 1.50 for A1, which also fails code 2 by 0.11 dB, 2.20 for A2 and 3.16
+  for A3): offset min-sum depends on the soft-bit scale, normalised min-sum does not. `robust` buys its
+  3.1 dB of Es/N0 over code 3 with 56% of the payload per sent bit.
 - Codeword bits are spread over the whole frame by a pseudo-random permutation with a per-frame rotation,
   so glare in one corner costs every codeword a little instead of a few codewords everything.
 - No mature Go library does soft-decision LDPC, so this is written in the repository. The DVB-S2
@@ -395,7 +459,11 @@ Each engine instance adds its linear memory, which spike S1 measured at 155 MB (
 (10-bit) when decoding 4K HEVC and 140-240 MB when encoding 4K, within a reserved limit of 512 MiB per
 instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of the 21 runs where it
 was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). The default worker count is the CPU count, reduced so that the workers, each counted at the
-worst measured engine figure, 920 MB, stay within half of the machine's physical memory. The opt-in
+worst measured engine figure, 920 MB, stay within half of the machine's physical memory, and to at
+most `video.EngineInstances()`, one fewer than GOMAXPROCS (at least one). The cap is a real
+defence: uncapped, stops were up to 8 times late on a CI runner (section 12).
+`internal/video` enforces it itself; further instances wait their turn, with no limit but the
+context, so a worker must not hold more decoders open than the cap without reading them. The opt-in
 HEVC fast path of section 12 is not counted: its memory is not bounded against a crafted stream, which
 is why it is opt-in and only for recordings the user made themselves.
 
@@ -437,7 +505,8 @@ For each capture:
    remove peaks standing above the noise, and re-estimate. Moire and backlight flicker are a few plane
    waves and show up as such peaks.
 7. **Soft bits.** For each bit, the difference between the best matching level with that bit 0 and with
-   that bit 1, scaled by the variance, as a clipped 8-bit value. Saturated cells give zero.
+   that bit 1, scaled by the variance, as a clipped 8-bit value in units of a quarter nat
+   (`modem.LLRScale`). Saturated cells give zero.
 8. **Assign and sum.** Apply the phase rules of section 7 and add into the code frame's accumulator.
 
 | Distortion | Handled by |
@@ -518,11 +587,36 @@ Costs a user should expect:
   and 0.63 fps). Without the 8x8 transform the stream is Main profile. Workers each encode a run of
   frames to an elementary stream; all-intra streams with identical parameter sets concatenate validly,
   and one final copy pass wraps them in MP4. Each run has an even number of frames, because x264
-  alternates `idr_pic_id` between 0 and 1 and consecutive IDR pictures must differ in it.
+  alternates `idr_pic_id` between 0 and 1 and consecutive IDR pictures must differ in it. In
+  `internal/video` an encoder writes an MP4 (`-use_editlist 0`) or, for a run, an H.264 elementary
+  stream (`.h264`) whose `Close` refuses an odd frame count (`ErrOddRun`); `Concat` wraps the runs
+  into the MP4 with `-c copy`. The caller builds the `yuv420p` planes; input and output are tagged
+  BT.709 limited range, so ffmpeg converts nothing. `--hdr` (M6) can use 10-bit input, encoded as
+  High 10.
 - **Reading.** Each worker decodes its own time slice to raw frames, without auto-rotation, brightness
   only for grey modes. Captures identify themselves, so slices overlap freely and order does not matter.
   Every codec, HEVC included, is decoded by the embedded engine inside the sandbox. That is the
   owner's decision for version 1.
+  - *How a slice is read* (M1). Decoding starts 1 s before the slice (`-noaccurate_seek -ss`, with
+    `-copyts`) and frames before it are dropped by qrvt: ffmpeg seeks to the random access point whose
+    decode time precedes the target, and at an open-GOP point (an HEVC CRA picture) the leading
+    pictures before it in display order cannot be decoded, which in the HEVC test clip lost frames
+    after the target. Each frame's timestamp is read from the `showinfo` filter's log line
+    (`checksum=0`) in the stream's time base, so slices that partition the duration decode every frame
+    exactly once, and decoding stops at the slice's end. `-fps_mode passthrough`: ffmpeg's default
+    for raw output would duplicate frames to fill gaps in the timestamps. Output is in the source's
+    own pixel format (`yuv420p`, `yuvj420p`, `yuv420p10le`) or its Y plane alone (`gray`,
+    `gray10le`, through `extractplanes=y`), so ffmpeg converts neither range nor depth; other formats
+    are read as brightness only, 10-bit output needs a 10-bit source, and more than 10 bits is
+    refused. The picture may be at most 8K UHD in either orientation (longer side 7,680, shorter
+    side 4,320). Every frame must keep the probed size; a change mid-stream stops the decode. A
+    `showinfo` line is recognised only at the start of a line (`[Parsed_showinfo_N @ address] n:`),
+    which keeps out container metadata (printed indented) but not every text from the file: an
+    unknown Matroska CodecID is logged from the start of a line and may hold a newline. So frame
+    lines must also number 0, 1, 2 ... after each configuration line, and one out of sequence fails
+    the decode; more timestamp lines than frames, at the end of the file or of a slice, is refused. Frames are read straight into the caller's planes through a 256 KiB buffer,
+    with no frame-sized buffer of the decoder's own. An odd width or height is refused from the
+    probe, since 4:2:0 chroma would be mis-framed.
   - *Engine speed at 4K HEVC* (spike S1, one instance, luma only, medians of five runs): 8-bit 3.9 fps,
     or 4.5 with `-skip_loop_filter all`; 10-bit 3.6 fps, or 3.35 with it. The 4 fps target is not met
     without skipping the loop filter; with it, it is met for 8-bit only, narrowly (3.8-4.7). Skipping
@@ -558,8 +652,22 @@ Costs a user should expect:
     - 10 s per picture. The decoder cannot be cancelled, so at the first picture that exceeds it the
       whole decode stops with an error naming the limit; no abandoned decoder is left running while work
       continues.
-    - On any error, panic or refused stream the slice is decoded by the engine. CI decodes the test
-      clips with both and requires identical output.
+    - On any error, panic or refused stream the rest of the slice is decoded by the engine (from just
+      after the last frame returned). CI decodes the test clips with both and requires identical
+      output (`TestFastPathMatchesEngine`, whole and in slices, 8 and 10 bits).
+    - *As built in M1.* The fast path is compiled only with the build tag `unsandboxedhevc` (tests:
+      `-tags unsandboxedhevc,noasm`); other builds, releases included, refuse `--unsandboxed-hevc`
+      (`video.ErrUnsupported`). The tag goes once the assembly question below is settled. A
+      parameter set that declares a size, chroma format or bit depth other than the probed one sends
+      the slice to the engine rather than starting a new decoder. The copy instance also writes each
+      packet's timestamps (`framemd5`), and each picture is tagged with its access unit's index, so
+      the fast path's timestamps equal the engine's. The time limit runs from a picture's first slice
+      on a single decoder goroutine; at the limit that goroutine is abandoned and the decode fails.
+      The copy instance's temporary directory may hold at most twice the input's size plus 64 MiB
+      (`video.FastPathCopySize`, checked once a second). When the engine takes over, the old decoder
+      is abandoned without a flush. A CI step runs the package's tests with
+      `-tags unsandboxedhevc,noasm,nounsafe` on all six runners, and `tools/dev fuzz` adds the tag, so
+      `FuzzFastPathNAL` is fuzzed.
     - The decoder's assembly is excluded, and the flag does not ship until it can be. Its `noasm` build
       tag is global: `klauspost/reedsolomon` and
       `klauspost/compress` also honour it (and `klauspost/cpuid`, which then reports no CPU features).
@@ -608,12 +716,18 @@ Costs a user should expect:
       without assembly, which is the encoder's own input and outside this question. Stream G sets the
       release build's tags; until it does, the default path keeps the libraries' assembly.
 - **Backends.** One interface with three implementations: embedded (default), an external `ffmpeg`
-  process for `--ffmpeg system`, and a raw-frame file backend for tests.
+  process for `--ffmpeg system`, and a raw-frame file backend for tests (`video.New`,
+  `NewEmbedded`, `NewSystem`, `NewRaw`). The native backend runs the same arguments, with paths given
+  as `file:` URLs, and takes `ffprobe` from beside the chosen `ffmpeg`, else from `PATH`.
 - **Start-up.** The compiled module is cached on disk, so only the first run pays for compilation
   (spike S1: 7-9 s first, under 3 s cached).
 - **Loading.** `go-ffmpreg/embed` decompresses the module in its `init`, costing 0.25 s and about 70 MB
   at every start, even for `--help`. `internal/video` loads the compressed module itself, on first use,
-  and passes it to `go-ffmpreg/wasm`.
+  and passes it to `go-ffmpreg/wasm`: it embeds a byte-for-byte copy of go-ffmpreg v0.6.22's
+  `embed/ffmpreg.wasm.gz` (7.8 MB), checks the SHA-256 of the decompressed module
+  (`357dd97d…bc766`, `video.EngineSHA256`) before compiling it, and keeps one compiled module per
+  process. A test compares the copy with the module cache's file. The compilation cache is
+  `qrvt/wazero` under `os.UserCacheDir()`.
 - **Memory.** Each instance's linear memory is reserved at its limit, 512 MiB for decoding and
   encoding, which is also its ceiling (SECURITY.md section 5): `WithMemoryLimitPages(8192)` with
   `WithMemoryCapacityFromMax`, never grown by reallocation, since otherwise the discarded copies double
@@ -623,19 +737,52 @@ Costs a user should expect:
   wrapper mounted with `FSConfig.WithFSMount` that exposes that one file and counts its reads. When
   encoding it sees one output directory. The instance that copies an HEVC stream out of its container
   for the fast path sees the input the same way, read-only, and one temporary directory, writable, where
-  its output file goes; nothing else. It has no network and a memory ceiling.
+  its output file goes; nothing else. It has no network and a memory ceiling. Every job that reads a
+  recording passes `-protocol_whitelist file,pipe` and
+  `-format_whitelist mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,mpegts,h264,hevc`, ffmpeg 5.1's names for
+  the demuxers of MP4 and MOV, Matroska and WebM, MPEG-TS and the H.264 and HEVC elementary streams
+  (a test checks them against the engine's list); the native backend gets the same. ffmpeg detects an
+  HLS playlist whatever the extension, and a 110-byte live playlist named `.mp4` held ffprobe for more
+  than 8 minutes, rereading it every 29 s with each read counting as progress. A probe is also bounded
+  at 15 s of running time and 4 x the file's size + 16 MiB of reads (SECURITY.md section 5); probes of
+  the S1 and S2 files took at most 1.2 s and read at most 1.07 times the file.
 - **Watchdog.** qrvt creates the wazero runtime and passes it to go-ffmpreg, with
   `RuntimeConfig.WithCloseOnContextDone(true)`: without it, cancelling a context cannot interrupt
   running Wasm. An instance that makes no progress for 30 s is cancelled and the decode stops with an
-  error naming the limit (SECURITY.md section 5, `EngineStallTimeout`). Progress is an output frame
-  when decoding; input read through the counting `fs.FS` view when probing, so one mechanism gives both
+  error naming the limit (SECURITY.md section 5, `EngineStallTimeout`). Progress is a complete output
+  frame with its `showinfo` timestamp when decoding, counted by the reader; input read through the counting `fs.FS` view when probing, so one mechanism gives both
   the narrow view and the progress signal; and growth of the output file when copying. The watchdog
   bounds stalls, not total time: `MaxDecodedPixelsPerInputByte` (10,000) refuses a file whose probe
   promises more decoded pixels per input byte than that, before decoding starts, and stops a decode
   that exceeds it later in case the probe was lied to. Spike S1 measured at most 75.5 pixels per byte
   on its clips and the S2 pattern files. The option adds periodic checks to the
   compiled code, so M1 stream D re-runs the S1 decode and encode figures with it on and records both;
-  a cost above about 10% goes to the owner. The implementation and its test are M1 stream D work.
+  a cost above about 10% goes to the owner. Measured (spike S1 report, section 10): **75-91%**, far
+  above that: decoding 1080p H.264 22.3 -> 5.6 fps, 4K HEVC 8-bit 3.08 -> 0.28 fps, 10-bit
+  3.02 -> 0.29 fps; encoding 1080p 7.7 -> 0.87 fps, 4K 2.1 -> 0.22 fps (one instance, medians of
+  three). Reported to the owner, who chose worker processes (the engine in a child process with the
+  option off, killed by the watchdog), built in a separate change; until it lands the option stays on.
+  wazero v1.12.0 implements the option by calling a check through a trampoline at every loop
+  back-edge (`internal/engine/wazevo/frontend/lower.go`, `OpcodeLoop` with `ensureTermination`),
+  so the cost depends on the work: a crafted stream whose decoding is mostly picture-filling loops ran
+  13 times slower (1.1-1.3 s off, 15-17 s on). The watchdog
+  ticks once a second, and while an instance waits on qrvt (a full output pipe, an empty input pipe,
+  its turn, the module's first compilation) it is not stalled, unless qrvt is itself waiting on it for
+  a frame's timestamp; that wait also ends at the stall limit or at cancellation, and cancelling a
+  decode closes its pipe (`context.AfterFunc`), so an instance blocked writing a frame stops too.
+  Encoding instances count a frame taken as progress. At most GOMAXPROCS - 1 instances run at once
+  (`video.EngineInstances()`, at least one), and an instance waiting for its turn is not stalled. The
+  cap was added after a 30 s stall on the 4-vCPU CI runners stopped after 79 s, reasoning that compiled
+  Wasm cannot be preempted. That reasoning does not hold while close-on-cancel is on: wazero then
+  returns to Go at every loop back-edge for its check (done in Go so that it can be preempted,
+  `call_engine.go`, `ExitCodeCheckModuleExitCode`), and without the cap the watchdog still stops
+  every instance, but not promptly: uncapped, stops were up to 8 times late on a CI runner
+  (macos-26-intel, GOMAXPROCS + 1 spinning instances, 16.8 s against a 2 s limit), while the capped
+  run stayed within its bound; on a 16-thread development machine GOMAXPROCS + 2 uncapped instances
+  were stopped on time (`TestWatchdogUnderLoad` asserts the capped case and logs the uncapped one).
+  The cap stays as a real defence. Its hazard: waiting for a turn has no limit but the
+  context, so a caller holding that many decoders open without reading them waits for ever on the next
+  (`TestHoldAndWait`). The worker count of section 8 does not exceed it.
 
 Rejected as a foundation: the pure-Go H.264 stack (`oops1/go.264`, `go-avkit/*`). An independent check
 found it is one author's 2.5-month-old project that links glibc on Linux through purego and silently
@@ -666,10 +813,10 @@ qrvt profiles | version | completion | man
 
 | Flag | Command | Default | Meaning |
 | --- | --- | --- | --- |
-| `--resolution` | encode | `1080p` | Preset or `WxH` |
-| `--fps` | encode | `12` | Display frame rate |
+| `--resolution` | encode, calibrate make | `1080p` | Preset (`480p`, `720p`, `1080p`, `1440p`, `4k` or `2160p`) or `WxH`. For `calibrate make`, the monitor's resolution |
+| `--fps` | encode | `12` | Display frame rate, 1-240 |
 | `--mode` | encode | `gray4` | `gray4`, `bw` or `color` |
-| `--hdr` | encode | off | Experimental 10-bit output |
+| `--hdr` | encode | off | Experimental 10-bit output; replaces `--mode`, and giving both is an error |
 | `--protection` | encode | `normal` | `fast`, `normal` or `robust` |
 | `--parity` | encode | `20` | Parity shards as a percentage of data shards, 5-100 |
 | `--cell` | encode | `4` | Cell size in pixels: 4, 8, 12 or 16. The video size is reduced to a multiple of it, and the size used is reported |
@@ -677,20 +824,32 @@ qrvt profiles | version | completion | man
 | `--encrypt` | encode | off | Encrypt with a passphrase, prompted for unless `--passphrase-file` is given |
 | `--sign-key` | encode | none | Sign with this private key |
 | `--dry-run` | encode | off | Print video length, file size and expected filming time, then stop |
-| `--passphrase-file` | encode, decode | none | Read the passphrase from a file instead of prompting |
-| `--verify-key` | decode | none | Trusted public key; may be repeated. When given, the transfer must be signed by one of them |
-| `--max-size` | decode | 16 GiB | Largest total size that may be unpacked |
+| `--passphrase-file` | encode, decode | none | Read the passphrase from the first line of a file instead of prompting. On encode it needs `--encrypt` |
+| `--verify-key` | decode | none | Trusted public key, as a key file or the key line itself; may be repeated. When given, the transfer must be signed by one of them |
+| `--max-size` | decode | 16 GiB | Largest total size that may be unpacked, with a unit: `B`, `K`/`KiB`, `M`/`MiB`, `G`/`GiB`, `T`/`TiB` (binary) or `kB`, `MB`, `GB`, `TB` (decimal) |
+| `--max-entries` | decode | 100,000 (`DefaultMaxEntries`), with a manifest of at most 6,710,886 bytes (`DefaultMaxManifestBytes`, 64 MiB / 10) | Largest number of manifest entries that may be unpacked, 1-1,000,000; the manifest may then hold N x 64 MiB / 1,000,000 bytes, at most 64 MiB. A manifest over either limit fails with guidance naming this flag |
 | `--overwrite` | decode | off | Allow existing files in the output folder to be replaced |
 | `--state-dir` | decode | none | Keep progress for resuming and merging |
 | `--report` | decode | none | Write a JSON report of the decode |
-| `--ffmpeg` | all | `embedded` | `embedded`, `system` or a path. `system` runs outside the sandbox: for recordings the user made themselves |
-| HEVC fast-path flag `--unsandboxed-hevc` | decode, inspect, calibrate read | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three |
-| `--jobs` | all | CPU count | Worker count |
-| `--json`, `--plain`, `--quiet`, `--verbose` | all | | Output style |
+| `--ffmpeg` | all | `embedded` | `embedded`, `system` (`ffmpeg` and `ffprobe` from `PATH`) or the path of an `ffmpeg` (its `ffprobe` beside it, else from `PATH`). `system` and a path run outside the sandbox: for recordings the user made themselves. The help text says both |
+| HEVC fast-path flag `--unsandboxed-hevc` | decode, inspect, calibrate read | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three. Present only in builds with the `unsandboxedhevc` tag until the decoder's assembly can be excluded; other builds refuse it |
+| `--jobs` | all | CPU count | Worker count, 0-1024; 0 is the CPU count, reduced to fit memory |
+| `--json`, `--plain`, `--quiet`, `--verbose` | all | | Output style. `--json` excludes `--plain` and `--quiet`; `--quiet` excludes `--verbose` |
 
 - **Dashboard.** Built with Charm v2 (bubbletea, bubbles, lipgloss): source, video and signal panels, one
   bar per stage, rate and time remaining, and on decode a block map that fills in. When output is not a
-  terminal it prints plain lines; `--json` prints one JSON event per line.
+  terminal it prints plain lines; `--json` prints one JSON event per line. Plain progress lines and
+  warnings go to standard error and the summary to standard output; `--json` writes only to standard
+  output, a start line, every event, then a summary or an error line, following the committed schema
+  `internal/cli/ui/events.schema.json`, with nothing on standard error; a failure before the job
+  starts, such as a usage error, is a single error line, and warnings are events. A hidden `qrvt demo` command plays a recorded decode through
+  any of the three, for trying the display without a recording.
+- **Output folder and inputs.** `-o` is required by every command that writes. Inputs, recordings, key
+  files and `--ffmpeg` paths are checked before any work starts; every bad flag is a usage error naming
+  the flag, the value and the accepted range.
+- **Exit codes.** 0 success; 1 other failure; 2 bad command line; 3 not enough data yet (record more
+  and try again); 4 wrong passphrase, or a bad or missing signature; 5 input refused (unsafe archive, a
+  limit, an unsupported version); 130 stopped by the user.
 - **Help.** Each flag has a long description, default, range and example. `--help`, the man page and the
   website are generated from one definition (cobra with fang), so they cannot drift.
 - **Failure guidance.** A decode that falls short says what is missing and what to do, for example
@@ -764,6 +923,7 @@ type DecodeOptions struct {
     Passphrase       func() (string, error)
     VerifyKeys       [][]byte // non-empty: the transfer must be signed by one of these
     MaxSize          int64
+    MaxEntries       int      // manifest entries that may be unpacked (flag --max-entries); 0: DefaultMaxEntries (100,000) and DefaultMaxManifestBytes (6,710,886); N: N x 64 MiB / 1,000,000 bytes of manifest; at most 1,000,000 and 64 MiB
     Overwrite        bool
     Report           string   // optional path for a JSON report
     Backend          string
@@ -1059,7 +1219,7 @@ by GoReleaser).
 - **Each pull request** (`ci.yml`): lint; tests on Linux, macOS and Windows for amd64 and arm64; race
   detector; coverage gate; vulnerability scan; static-build check for all six targets; release snapshot;
   licence-compatibility check; workflow policy and actionlint; short fuzz runs (10 s per target); docs
-  build once the website exists (M7). Builds and ordinary tests run with `CGO_ENABLED=0`. The race
+  build once the website exists (M8). Builds and ordinary tests run with `CGO_ENABLED=0`. The race
   detector needs cgo on most systems and does not support windows/arm64, so race tests run with cgo on
   the other five runners. Tests, the coverage gate, race tests and fuzzing are built with the release
   build tags (`RELEASE_TAGS`), so CI tests what ships; one amd64 runner also tests the untagged build.
@@ -1078,9 +1238,10 @@ by GoReleaser).
 - **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
   Dependabot for Go modules and actions, except wazero and go-ffmpreg: every engine speed, memory and
   sandbox figure of spike S1 was measured on their pinned versions, so they are updated by hand, with
-  stream D re-running the S1 measurements, no later than M7. An advisory for either module, whether
-  from a GitHub alert or from the CI vulnerability scan, is fixed by hand straight away, with the S1
-  measurements re-run. govulncheck over the default build (the
+  stream D re-running the S1 measurements, before the final security pass (M7) so that the pass
+  covers the shipped engine. An advisory for either module, whether from a GitHub alert or from the CI
+  vulnerability scan, is fixed by hand straight away, with the S1 measurements re-run. govulncheck over
+  the default build (the
   action, on all six runners) and over the release build (`tools/dev vulncheck`, for linux, darwin and
   windows). Every action is pinned by a full commit SHA with a
   version comment, every workflow declares top-level permissions (jobs widen them only where needed),
@@ -1099,7 +1260,7 @@ by GoReleaser).
   build's Go build tags are defined once, as `RELEASE_TAGS` in `.goreleaser.yaml` (`noasm,nounsafe`),
   and `tools/dev build` uses the same set.
 - **Docs**: a website built from `docs/` and published to GitHub Pages on each release
-  (`pages.yml`, a skeleton until M7), containing the user guide, this design, the format specification
+  (`pages.yml`, a skeleton until M8), containing the user guide, this design, the format specification
   and an architecture guide.
 
 GoReleaser was chosen because it covers every channel above in one configuration; the alternative is
@@ -1119,8 +1280,8 @@ writing each package format by hand.
 | M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings |
 | M6 | 1 GB scale, resuming with `--state-dir`; experimental `--hdr` |
 | G2 | The owner films one large transfer |
-| M7 | Website, packaging, signing, release dry run |
-| M8 | Final security pass, then the first release candidate |
+| M7 | Final security pass |
+| M8 | Website, packaging, signing, release dry run, a delta security review of everything since M7, then the first release candidate |
 
 Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 
@@ -1177,10 +1338,23 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream E: section 15 moves interference fringes from the optics stage to the sensor stage (their amplitude is in code values), completes the presets with a second table (panel black and response, capture jitter, exposure gain, colour matrix, colour noise reduction, veiling glare), and states how each parameter is read and the values every preset shares (panel scan-out, flicker frequency, field of view, shake walk, distortion convention, glare patch, recorder stand-in step) |
 | 2026-11-13 | M1 stream E review: section 15 adds the panel scan rotation (0 in every preset) and says player tearing is not modelled; noise is exact Gaussian and jitter is clipped at 4 times its RMS; HLG output applies the BT.2087 primaries matrix first; noise and fringe amplitudes are stated as per-channel full-range units (about 0.64 and 0.86 times in brightness codes); the field of view is 70.0 degrees; the readout wording and the quantiser-step figures are corrected |
 | 2026-11-13 | M1 stream B: section 8 describes the encoder and the decoder as built (int16 bounds, pinned shortened bits, check before the first iteration), records the production decoder's speed beside the S3 decoder, and records the error-rate test: published FER 1e-2 points for the four 802.11n n = 1944 mother codes with their sources, our measured points (all within 0.2 dB), and the shortened codes' points; section 12 records the `noasm`/`nounsafe` measurement and the decision that the whole release can be built with `-tags noasm,nounsafe` |
-| 2026-11-13 | M1 stream B, review of PR #8: section 8 checks the four shipped inner codes against the binary-input AWGN capacity limit with the rate counted with the CRC (codes 1-3 within 2.5 dB; `robust` 2.60 dB away, missing that criterion by about 0.1 dB because of the frozen shortening), corrects the Es/N0 values for the CRC, and states the shard store's sparse file on Windows and its 64 GiB stream cap; section 12 limits the `noasm,nounsafe` claim to the three `klauspost` libraries and calls Reed-Solomon reconstruction marginally below the bar, accepted because it is 30-50 times faster than LDPC decoding |
+| 2026-11-13 | M1 stream B, review of PR #8: section 8 checks the four shipped inner codes against the binary-input AWGN capacity limit with the rate counted with the CRC (codes 1-3 within 2.5 dB; `robust` 2.60 dB away, missing that criterion by about 0.1 dB because of the frozen shortening; corrected below: the cause was the decoder), corrects the Es/N0 values for the CRC, and states the shard store's sparse file on Windows and its 64 GiB stream cap; section 12 limits the `noasm,nounsafe` claim to the three `klauspost` libraries and calls Reed-Solomon reconstruction marginally below the bar, accepted because it is 30-50 times faster than LDPC decoding |
 | 2026-11-13 | M1 stream B, designer's follow-up on PR #8: section 8 compares the shipped decoder with a test-only sum-product reference and min-sum variants on the four inner codes, and corrects the cause of `robust`'s capacity gap: the decoder (integer truncation about 0.3 dB, normalisation x0.75 about 0.6 dB), not the shortening; the shipped decoder is unchanged pending the designer's decision |
 | 2026-11-13 | M1 stream B, designer's note on PR #8: section 12 states that Reed-Solomon reconstruction with `noasm` measured 45-49 MB/s per core in the worst case, below the bar of about 50 MB/s, and why the tags are accepted anyway (seconds of Reed-Solomon against hours of video decoding; 30-50 times faster than one core of LDPC) |
 | 2026-11-13 | M1 stream G: section 16 says `install-tools` downloads the pinned tools as release archives with pinned SHA-256 (go-licenses through `go install`) and lists the new `tools/dev` tasks; section 17 names the workflows, the nightly placeholders, the workflow policy and its test, the licence allow-list (GPL-2.0 excluded), release-please being off until the owner enables it, provenance for every checksummed file, and `RELEASE_TAGS` in `.goreleaser.yaml` as the one definition of the release build tags, set to `noasm,nounsafe`, with which CI tests, measures coverage and fuzzes (one runner also tests untagged) |
 | 2026-11-13 | M1 stream G follow-up: section 16 adds the `vulncheck` task and govulncheck v1.9.0; section 17 scans the release build with govulncheck, lints both builds, and runs `setup.sh` in Fedora and Arch Linux containers |
 | 2026-11-13 | M1 stream G follow-up: section 17 says Dependabot ignores wazero and go-ffmpreg, which are updated by hand with the S1 measurements re-run (stream D) no later than M7 |
+| 2026-11-13 | Decoder follow-up to M1 stream B (designer's decision): section 8 records the measured candidates (offset min-sum 1-3 steps, normalised x13/16 with soft bits x4 inside, M1 and sum-product) at soft-bit scales 0.5, 1 and 2, FER 1e-2 and 1e-3, wrong-codeword counts and the choice of x13/16 for all codes; the decoder description, the measured points of the mother and shortened codes (`robust` now 1.75 dB from capacity, meeting the 2.5 dB criterion) and the speed are updated. No format bit changes |
+| 2026-11-14 | Review of PR #14: section 8 replaces the FER 1e-3 statement with the paired comparison (`TestPairedM1B`, 400,000 frames per point): B is significantly behind M1 near FER 1e-3 on code 3 and `normal` (about 0.01 dB, z up to +6.1) and better on `fast` and `robust`; the tolerance is the designer's decision, pending |
+| 2026-11-14 | Designer's decision on PR #14: section 8 records that candidate B was accepted with an explicit tolerance (at FER 1e-3 within 0.02 dB of the previous decoder on every code), the measured losses near FER 1e-3 (0.011 dB on code 3 and `normal`) and the 0.87 dB gain on `robust` |
+| 2026-11-13 | M1 stream F: section 13 resolves what the command line left open: the `--resolution` presets (with `2160p` as another name for `4k`) and its use by `calibrate make` for the monitor resolution; ranges for `--fps` (1-240) and `--jobs` (0-1024, 0 the CPU count); `--hdr` replaces `--mode`; `--passphrase-file` reads the first line and needs `--encrypt` on encode; `--verify-key` takes a key file or a key line; the `--max-size` units; which output flags exclude each other; where plain, summary and JSON output go and the JSON schema; the hidden `demo` command; required `-o`; and the exit codes |
+| 2026-11-13 | M1 stream F, PR #11 review: section 13 says that with `--json` nothing goes to standard error, that a failure before the job starts is a single error line, and that warnings are events |
+| 2026-11-14 | M1 stream F, PR #11 round 2: section 13 adds `--max-entries` (the owner's decision: default manifest limits about a tenth of the format's, raised by one flag), mapped to `DecodeOptions.MaxEntries`, which section 14 shows |
+| 2026-11-14 | M1 stream F, PR #11 round 3: sections 13 and 14 give the exact manifest defaults, the root constants `DefaultMaxEntries` (100,000) and `DefaultMaxManifestBytes` (6,710,886, 64 MiB / 10), and the scaling rule of `--max-entries` (N x 64 MiB / 1,000,000 bytes, at most 64 MiB) |
+| 2026-11-14 | The owner swapped the last two milestones: M7 is the final security pass and M8 the website, packaging, signing and release dry run (section 18 and the M7/M8 references in section 17); the engine pins are updated before the security pass |
+| 2026-11-14 | Section 10 step 7 names the soft-bit scale (`modem.LLRScale`, a quarter nat); a repeated sentence in section 8 removed |
+| 2026-11-13 | M1 stream D: section 8 caps the worker count at `video.EngineInstances()` (GOMAXPROCS - 1), because compiled Wasm cannot be preempted and instances on every P starved the watchdog on the 4-vCPU CI runners. Section 12 records the engine as built: the embedded copy of the module and its hash check, the encoder's MP4 and even-length `.h264` runs with `Concat`, how slices are read (1 s preroll with `-noaccurate_seek`, `-copyts`, `showinfo` timestamps, `-fps_mode passthrough`, source pixel format, size changes refused), the instance cap, and the measured cost of `WithCloseOnContextDone` (75-91% on decoding, reported to the owner; kept on); the HEVC fast path is compiled only with the `unsandboxedhevc` tag, sends parameter sets that differ from the probe to the engine, takes timestamps from `framemd5`, and times each picture from its first slice. Section 13: the `--ffmpeg` row says where `ffprobe` comes from and that a path also runs outside the sandbox; the `--unsandboxed-hevc` row says the flag exists only in tagged builds |
+| 2026-11-14 | M1 stream D, review of PR #9: section 8 calls the instance cap a precaution and states that workers must not hold more decoders open than the cap without reading them. Section 12: how a slice is read adds the anchored `showinfo` match, the refusal of extra timestamp lines and of odd sizes, and reading frames straight into the caller's planes; the sandbox adds the protocol and format whitelists (the HLS playlist that held ffprobe for 8 minutes) and the probe's bounds; the watchdog counts a complete, timestamped frame, does not excuse an instance qrvt is waiting on, closes the pipe on cancellation, and gives the true reason the cap is not needed with close-on-cancel and its hold-and-wait hazard; the fast path's as-built list adds the copy-size bound, the abandon without a flush, the CI step and the fuzz tag |
+| 2026-11-14 | M1 stream D, CI on PR #9: sections 8 and 12 correct the instance cap's description: on the macos-26-intel runner GOMAXPROCS + 1 uncapped spinning instances took 16.8 s against a 2 s limit, so the cap is a mitigation, not a harmless precaution |
+| 2026-11-14 | M1 stream D, round 2 of the review of PR #9: section 8 calls the instance cap a real defence (uncapped, stops were up to 8 times late on a CI runner); section 12 adds the 8K UHD capture limit in either orientation, corrects the `showinfo` injection wording (an unknown Matroska CodecID is logged from the start of a line) and adds the frame-number sequence check and the slice-end count check, and restates the cap's evidence |
 | 2026-11-14 | M1 stream G follow-up 2: section 17 states that an advisory for wazero or go-ffmpreg (GitHub alert or CI scan) is fixed by hand straight away with S1 re-run, how the Fedora and Arch Linux container digests are refreshed and that the containers run read-only and without new privileges, and adds the HEVC fast-path test step and fuzz tag (stream D, PR #9) |

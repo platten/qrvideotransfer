@@ -3,15 +3,16 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"os"
+
+	"github.com/platten/qrvideotransfer/internal/cli"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
 func main() {
-	if _, err := fmt.Fprintln(os.Stdout, "qrvt", version); err != nil {
-		os.Exit(1)
-	}
+	err := cli.Execute(context.Background(), cli.NewEnv(version), os.Args[1:])
+	os.Exit(cli.ExitCode(err))
 }
