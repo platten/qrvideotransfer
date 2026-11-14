@@ -121,9 +121,9 @@ jobs:
   # Runs the stand-alone setup scripts as a new developer would, non-interactively and with --spike,
   # on a runner without the pinned Go (no setup-go here: the runner's own Go is a different version,
   # so the scripts must download and verify Go 1.27.4 themselves), then checks independently that
-  # every pinned version is in place. Not exercised on hosted runners: installing git (it is
-  # preinstalled on all three images, so the scripts only report it) and the dnf and pacman paths of
-  # setup.sh (no Fedora or Arch runners).
+  # every pinned version is in place. Installing git is not exercised here (it is preinstalled on
+  # all three images, so the scripts only report it); the setup-scripts-container job covers it,
+  # with the dnf and pacman paths.
   setup-scripts:
     name: setup scripts (${{ matrix.os }})
     strategy:
@@ -181,6 +181,40 @@ jobs:
           if (-not ((ffmpeg -hide_banner -encoders 2>$null) -match 'libx265')) { throw 'ffmpeg has no libx265' }
           if (-not ((wasmtime --version) -match ' 50\.0\.1')) { throw 'wrong wasmtime' }
 
+  # Runs scripts/setup.sh --yes in Fedora and Arch Linux containers (images pinned by digest), which
+  # have neither Go nor git, so the dnf and pacman paths install git and the script downloads Go.
+  # Without --spike: ffmpeg with libx265 on Fedora needs RPM Fusion, which the script only advises.
+  setup-scripts-container:
+    name: setup scripts (${{ matrix.distro }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: fedora
+            image: fedora:45@sha256:a7d72ba2745b100a3351087472e5ee7b2450af7cf331e7673007e3817612839c
+          - distro: archlinux
+            image: archlinux:latest@sha256:d4594bb2300cba11f41c2f27923eb56f63d9988909c402f9c95517d1e362c899
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: scripts/setup.sh --yes, then check the installed versions
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -e GOFLAGS=-buildvcs=false "$IMAGE" sh -euc '
+            scripts/setup.sh --yes
+            export PATH="$HOME/.local/go1.27.4/bin:$PATH"
+            test "$(go env GOVERSION)" = go1.27.4
+            export PATH="$(go env GOPATH)/bin:$PATH"
+            go run ./tools/dev check-tools
+          '
+        env:
+          IMAGE: ${{ matrix.image }}
+
   release-snapshot:
     name: release snapshot
     runs-on: ubuntu-24.04
@@ -219,9 +253,9 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Install actionlint and go-licenses
+      - name: Install actionlint, go-licenses and govulncheck
         timeout-minutes: 5
-        run: go run ./tools/dev install-tools -only actionlint,go-licenses
+        run: go run ./tools/dev install-tools -only actionlint,go-licenses,govulncheck
 
       # Every action pinned by a commit that its version comment's tag names, top-level
       # permissions in every workflow, no pull_request_target; then actionlint.
@@ -232,6 +266,12 @@ jobs:
       - name: Licence compatibility (GPL-3.0-or-later)
         timeout-minutes: 10
         run: go run ./tools/dev licenses
+
+      # The govulncheck action in the check job scans the default build; this scans the release
+      # build (RELEASE_TAGS) for linux, darwin and windows.
+      - name: Vulnerability scan of the release build
+        timeout-minutes: 10
+        run: go run ./tools/dev vulncheck
 
       # There is no docs build yet: the website and its tool arrive in milestone M7.
 
