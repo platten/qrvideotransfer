@@ -27,7 +27,7 @@ type Verified struct {
 // keys ([ErrMissingSignature]); there is no mode that accepts a missing signature when keys are given.
 func Verify(ctx context.Context, stream io.ReaderAt, streamLen int64, trusted []ed25519.PublicKey) (*Verified, error) {
 	if streamLen > MaxStreamLen {
-		return nil, &LimitError{"stream length", streamLen, MaxStreamLen}
+		return nil, &LimitError{"stream length", streamLen, MaxStreamLen, ""}
 	}
 	if streamLen < HeaderSize {
 		return nil, fmt.Errorf("%w: stream shorter than its header", ErrFormat)
@@ -93,6 +93,7 @@ type UnpackOptions struct {
 	VerifyKeys []ed25519.PublicKey    // non-empty: the stream must be signed by one of these
 	MaxSize    int64                  // largest archive and total file size; 0: DefaultMaxSize
 	Overwrite  bool                   // replace existing regular files
+	MaxEntries int64                  // raises the manifest limits (--max-entries); 0: the defaults
 	Progress   func(Progress)         // called from Unpack's goroutine; nil allowed
 }
 
@@ -116,7 +117,7 @@ func Unpack(ctx context.Context, stream io.ReaderAt, streamLen int64, o UnpackOp
 	}
 	h := v.Header
 	if max := maxSize(o); h.ArchiveLen > max {
-		return nil, &LimitError{"archive length", h.ArchiveLen, max}
+		return nil, &LimitError{"archive length", h.ArchiveLen, max, ""}
 	}
 	var body io.Reader = io.NewSectionReader(stream, HeaderSize, h.BodyLen)
 	if h.Encrypted {
@@ -178,7 +179,7 @@ func unpackArchive(ctx context.Context, r io.Reader, archiveLen int64, o UnpackO
 	}
 	ml := int64(binary.BigEndian.Uint32(lb[:]))
 	if ml > MaxManifestBytes {
-		return nil, &LimitError{"manifest size", ml, MaxManifestBytes}
+		return nil, &LimitError{"manifest size", ml, MaxManifestBytes, ""}
 	}
 	if ml > archiveLen-4 {
 		return nil, fmt.Errorf("%w: the manifest runs past the archive", ErrFormat)
@@ -289,7 +290,7 @@ func (e *exactReader) Read(p []byte) (int, error) {
 		k, err := io.ReadFull(e.r, b[:])
 		switch {
 		case k > 0:
-			return 0, &LimitError{"archive length", e.limit + 1, e.limit}
+			return 0, &LimitError{"archive length", e.limit + 1, e.limit, ""}
 		case errors.Is(err, io.EOF):
 			return 0, io.EOF
 		}
@@ -311,3 +312,9 @@ func (e *exactReader) Read(p []byte) (int, error) {
 	}
 	return k, err
 }
+
+// limits are the manifest limits of one decode.
+type limits struct{ entries, bytes int64 }
+
+// manifestLimits returns the manifest limits for o. Stub.
+func manifestLimits(UnpackOptions) limits { return limits{MaxManifestEntries, MaxManifestBytes} }

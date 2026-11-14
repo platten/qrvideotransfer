@@ -75,7 +75,7 @@ func writeString(b *bytes.Buffer, s string) {
 // see [ValidateManifest].
 func ParseManifest(b []byte) ([]Entry, error) {
 	if len(b) > MaxManifestBytes {
-		return nil, &LimitError{"manifest size", int64(len(b)), MaxManifestBytes}
+		return nil, &LimitError{"manifest size", int64(len(b)), MaxManifestBytes, ""}
 	}
 	if !utf8.Valid(b) {
 		return nil, manifestErr("not valid UTF-8")
@@ -200,7 +200,7 @@ func (p parser) entries() ([]Entry, error) {
 	var es []Entry
 	for p.d.More() {
 		if len(es) == MaxManifestEntries {
-			return nil, &LimitError{"manifest entries", MaxManifestEntries + 1, MaxManifestEntries}
+			return nil, &LimitError{"manifest entries", MaxManifestEntries + 1, MaxManifestEntries, ""}
 		}
 		e, err := p.entry()
 		if err != nil {
@@ -322,7 +322,7 @@ func manifestProblems(entries []Entry, maxSize int64, all bool) ([]*UnsafeArchiv
 			continue
 		}
 		if e.Size > maxSize-total {
-			return probs, &LimitError{"unpacked size", satAdd(total, e.Size), maxSize}
+			return probs, &LimitError{"unpacked size", satAdd(total, e.Size), maxSize, ""}
 		}
 		total += e.Size
 		k := foldKey(e.Path)

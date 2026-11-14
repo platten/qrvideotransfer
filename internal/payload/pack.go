@@ -189,11 +189,11 @@ func writeStream(ctx context.Context, dst io.ReadWriteSeeker, srcs []source, o P
 		}
 	}
 	if len(entries) > MaxManifestEntries {
-		return nil, &LimitError{"manifest entries", int64(len(entries)), MaxManifestEntries}
+		return nil, &LimitError{"manifest entries", int64(len(entries)), MaxManifestEntries, ""}
 	}
 	manifest := MarshalManifest(entries)
 	if len(manifest) > MaxManifestBytes {
-		return nil, &LimitError{"manifest size", int64(len(manifest)), MaxManifestBytes}
+		return nil, &LimitError{"manifest size", int64(len(manifest)), MaxManifestBytes, ""}
 	}
 	var pass string
 	if o.Passphrase != nil {
@@ -250,7 +250,7 @@ func writeStream(ctx context.Context, dst io.ReadWriteSeeker, srcs []source, o P
 	}
 	h.ArchiveLen, h.BodyLen = arch.n, body.n
 	if h.StreamLen() > MaxStreamLen {
-		return nil, &LimitError{"stream length", h.StreamLen(), MaxStreamLen}
+		return nil, &LimitError{"stream length", h.StreamLen(), MaxStreamLen, ""}
 	}
 
 	hb := h.Marshal()
@@ -375,3 +375,6 @@ func (c ctxReader) Read(p []byte) (int, error) {
 	}
 	return c.r.Read(p)
 }
+
+// receiverWarning returns a warning when a manifest exceeds the decoder's default limits. Stub.
+func receiverWarning(entries, size int) *Warning { return nil }

@@ -10,11 +10,18 @@ import (
 const (
 	DefaultMaxSize     = 16 << 30  // unpacked size when UnpackOptions.MaxSize is 0 (--max-size)
 	MaxStreamLen       = 64 << 30  // stream length L
-	MaxManifestBytes   = 64 << 20  // manifest JSON
-	MaxManifestEntries = 1_000_000 // manifest entries
-	ScryptWorkFactor   = 18        // log2 of the scrypt cost written, and the largest accepted
-	MaxZstdWindow      = 8 << 20   // largest zstd window accepted, and the window SpeedBestCompression uses
-	XZDictCap          = 8 << 20   // xz dictionary written and the largest accepted
+	MaxManifestBytes   = 64 << 20  // manifest JSON: the format limit (FORMAT.md section 12)
+	MaxManifestEntries = 1_000_000 // manifest entries: the format limit
+
+	// The manifest limits when UnpackOptions.MaxEntries is 0, a tenth of the format limits, rounded
+	// down (SECURITY.md section 5). They equal the root package's constants of the same names, which
+	// this package may not import.
+	DefaultMaxEntries       = 100_000
+	DefaultMaxManifestBytes = 6_710_886
+
+	ScryptWorkFactor = 18      // log2 of the scrypt cost written, and the largest accepted
+	MaxZstdWindow    = 8 << 20 // largest zstd window accepted, and the window SpeedBestCompression uses
+	XZDictCap        = 8 << 20 // xz dictionary written and the largest accepted
 )
 
 // Sentinel errors. Test with errors.Is.
@@ -91,6 +98,7 @@ func (e *ExistsError) Error() string {
 type LimitError struct {
 	Limit      string
 	Value, Max int64
+	Flag       string // the command-line flag that raises the limit; empty when it cannot be raised
 }
 
 // Error implements the error interface.
@@ -115,8 +123,9 @@ type WarningCode string
 
 // Warning codes.
 const (
-	WarnSkippedFile WarningCode = "SkippedFile" // a link or special file was not packed
-	WarnKeyReadable WarningCode = "KeyReadable" // a private key file is readable by others
+	WarnSkippedFile   WarningCode = "SkippedFile"   // a link or special file was not packed
+	WarnKeyReadable   WarningCode = "KeyReadable"   // a private key file is readable by others
+	WarnReceiverLimit WarningCode = "ReceiverLimit" // the receiver must raise a default limit
 )
 
 // Warning is a condition the caller should report that does not stop the work.
