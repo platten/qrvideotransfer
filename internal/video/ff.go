@@ -525,10 +525,16 @@ func (s *showinfo) parse(l string) {
 	}
 	l = l[m[1]:]
 	if v, ok := strings.CutPrefix(l, "config in time_base: "); ok {
+		// The filter is configured once: a reconfiguration happens only when the picture size changes,
+		// which is refused anyway, so a second configuration line means one of the two was forged
+		// (a container's codec name, say, printed into the log before the real one).
+		if s.configured && s.bad == nil {
+			s.bad = fmt.Errorf("%w: frame timestamp lines out of sequence (a second filter configuration)", ErrEngine)
+		}
 		a, b, _ := strings.Cut(strings.TrimSuffix(field(v), ","), "/")
 		s.tbN, _ = strconv.ParseInt(a, 10, 64)
 		s.tbD, _ = strconv.ParseInt(b, 10, 64)
-		s.configured, s.next = true, 0 // a new filter instance counts from 0
+		s.configured, s.next = true, 0
 		return
 	}
 	n, ok1 := strings.CutPrefix(l, "n:")
