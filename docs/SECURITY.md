@@ -296,7 +296,7 @@ root package, `cmd/` and `internal/` that fails if any package other than `inter
 `os/exec`, or if any package imports `unsafe`. Developer tooling under `tools/` and throwaway code under
 `spikes/` are outside that rule, since they must launch other programs.
 
-## 10. Final security pass (milestone M8)
+## 10. Final security pass (milestone M7)
 
 The pass happens when the tool is feature-complete and before the first release candidate is tagged.
 
@@ -315,6 +315,10 @@ The pass happens when the tool is feature-complete and before the first release 
    the reviewer's confirmation that the fix holds.
 5. **Exit.** No open finding of high or medium severity; every section 9 test passes on all three
    systems; the limits table matches the constants in the code.
+6. **Delta review before the release candidate (M8).** Code and workflows change after the pass. Before
+   the release candidate is prepared, an independent reviewer examines everything merged since the pass
+   ended (release workflows, packaging configuration, signing steps, and any code touched), with the
+   same exit: no open finding of high or medium severity.
 
 Severity: *high* breaks a guarantee in section 1; *medium* weakens a defence in section 4 without yet
 breaking a guarantee, or is a denial of service that stays within the limits; *low* is everything else.
@@ -322,7 +326,7 @@ breaking a guarantee, or is a denial of service that stays within the limits; *l
 ## 11. Reporting a vulnerability
 
 Report privately through the repository's "Report a vulnerability" page (GitHub private vulnerability
-reporting), not in a public issue. The root `SECURITY.md` created in milestone M7 repeats this
+reporting), not in a public issue. The root `SECURITY.md` created in milestone M8 repeats this
 instruction and states which versions receive fixes.
 
 ## Change log
@@ -343,6 +347,7 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | M1 stream A, third independent review of PR 7: section 5's xz row says a body holds exactly one block, so one LZMA2 decoder and one dictionary per body, with the reason (a new 8 MiB dictionary per block let 100,000 tiny blocks cost 78 s and 785 GB of allocation), the chunk rules, and states live memory and total allocation separately as measured (one dictionary, one chunk and fixed buffers live; allocation under 1 MiB, or the dictionary plus 1 MiB, independent of stream length; 12 MiB for 500,000 one-byte chunks), with the fuzz target's allocation bound |
 | 2026-11-14 | M1 stream A, fourth independent review of PR 7: section 5's xz row adds the limits on LZMA state resets and on new uncompressed runs, with the library allocations they bound, and states only bounds that hold: live memory; total allocation as derived from the rules plus the measured fixed cost per LZMA chunk (about 200 bytes, which no rule limits); the measured figures for the review streams; and the fuzz target's check described as a check of the inputs it tries |
 | 2026-11-14 | M1 stream F, PR #11 round 3 (the owner's decision): section 5 gives the manifest default as 100,000 entries and 6,710,886 bytes (a tenth of the format limit), raised by `--max-entries` up to 1,000,000 entries and 64 MiB; two limits now have a flag, the unpacked size and the manifest |
+| 2026-11-14 | The owner swapped the last two milestones: the final security pass is M7 (section 10), and the root `SECURITY.md` comes with M8; M8 adds a delta security review of everything merged after the pass |
 | 2026-11-13 | M1 stream D: T1 adds that the input view's files have no write methods and that the fast path exists only in `unsandboxedhevc` builds. Section 5: `EngineStallTimeout` counts a frame taken when encoding, ignores time spent waiting on qrvt, and relies on at most GOMAXPROCS - 1 instances running at once; `MaxDecodedPixelsPerInputByte` gives where the frame count comes from, that the headroom applies to recordings mostly showing the code, the trimming advice, and the work bound (about 5 instance-minutes per MB at 4K); the capture size is checked from the probe and size changes stop a decode; the fast path refuses parameter sets that differ from the probe and times each picture from its first slice. Sections 9.1, 9.3 and 9.5 name the implemented tests and their results |
 | 2026-11-14 | M1 stream D, review of PR #9: T1 adds the protocol and format whitelists on every job that reads a recording (an HLS playlist named `.mp4` had held ffprobe for more than 8 minutes), the probe's bounds, closing the output pipe on cancellation, and the copy instance's size bound; the fast-path subsection states that bound. Section 5: decoding progress is a complete, timestamped frame, and qrvt waiting on an instance for a timestamp does not count as the instance waiting on qrvt; the instance cap is described as a precaution (with close-on-cancel, compiled loops return to Go at every back-edge; the CI delay that prompted it was more likely load), with the hold-and-wait hazard; new rows for the probe (`EngineProbeTime` 15 s, `MaxProbeReads` 4 x size + 16 MiB, with the measurements) and the fast path's copy size (`FastPathCopySize`, 2 x input + 64 MiB); the engine memory row gives a decoder's host memory at the capture limit (201 MB of planes, the frame-sized pipe buffer removed); odd picture sizes are refused. Section 9.1: the fuzz task builds with the fast-path tag. Section 9.2 adds the HLS playlist; section 9.3 names the decoder-stall, metadata-injection, capture-limit and new fast-path tests; section 9.5 states where the 1 GiB is and is not shown |
 | 2026-11-14 | M1 stream D, CI on PR #9: section 5 corrects the instance cap's description: without it the watchdog still stops every instance, but on the macos-26-intel runner GOMAXPROCS + 1 uncapped spinning instances took 16.8 s against a 2 s limit, so the cap is a mitigation, not only a precaution |

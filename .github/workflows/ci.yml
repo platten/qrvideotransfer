@@ -281,7 +281,7 @@ jobs:
         timeout-minutes: 10
         run: go run ./tools/dev vulncheck
 
-      # There is no docs build yet: the website and its tool arrive in milestone M7.
+      # There is no docs build yet: the website and its tool arrive in milestone M8.
 
   fuzz:
     name: fuzz (short)

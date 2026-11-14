@@ -425,7 +425,7 @@ shortened so that each codeword carries exactly one shard and a CRC-32C.
   curve (FER falls by a factor of 3.1 per 0.1 dB on code 3 and 3.4 on `normal` here), is 0.011 dB on
   code 3 at 2.2 dB (0.001 dB, not significant, at 2.3 dB), 0.011 dB on `normal` at 2.6 dB and 0.008 dB at 2.7 dB. **The designer accepted
   this trade with an explicit tolerance: at FER 1e-3 the decoder must be within 0.02 dB of the
-  previous decoder on every code**, which B meets, in return for 0.87 dB on `robust`. It improves `robust` by 0.87 dB at scale 1 and has the smallest worst case over the
+  previous decoder on every code**, which B meets, in return for 0.87 dB on `robust` at scale 1. It has the smallest worst case over the
   three scales (1.47 dB, against 1.50 for A1, which also fails code 2 by 0.11 dB, 2.20 for A2 and 3.16
   for A3): offset min-sum depends on the soft-bit scale, normalised min-sum does not. `robust` buys its
   3.1 dB of Es/N0 over code 3 with 56% of the payload per sent bit.
@@ -505,7 +505,8 @@ For each capture:
    remove peaks standing above the noise, and re-estimate. Moire and backlight flicker are a few plane
    waves and show up as such peaks.
 7. **Soft bits.** For each bit, the difference between the best matching level with that bit 0 and with
-   that bit 1, scaled by the variance, as a clipped 8-bit value. Saturated cells give zero.
+   that bit 1, scaled by the variance, as a clipped 8-bit value in units of a quarter nat
+   (`modem.LLRScale`). Saturated cells give zero.
 8. **Assign and sum.** Apply the phase rules of section 7 and add into the code frame's accumulator.
 
 | Distortion | Handled by |
@@ -1218,7 +1219,7 @@ by GoReleaser).
 - **Each pull request** (`ci.yml`): lint; tests on Linux, macOS and Windows for amd64 and arm64; race
   detector; coverage gate; vulnerability scan; static-build check for all six targets; release snapshot;
   licence-compatibility check; workflow policy and actionlint; short fuzz runs (10 s per target); docs
-  build once the website exists (M7). Builds and ordinary tests run with `CGO_ENABLED=0`. The race
+  build once the website exists (M8). Builds and ordinary tests run with `CGO_ENABLED=0`. The race
   detector needs cgo on most systems and does not support windows/arm64, so race tests run with cgo on
   the other five runners. Tests, the coverage gate, race tests and fuzzing are built with the release
   build tags (`RELEASE_TAGS`), so CI tests what ships; one amd64 runner also tests the untagged build.
@@ -1232,7 +1233,7 @@ by GoReleaser).
 - **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
   Dependabot for Go modules and actions, except wazero and go-ffmpreg: every engine speed, memory and
   sandbox figure of spike S1 was measured on their pinned versions, so they are updated by hand, with
-  stream D re-running the S1 measurements, no later than M7; govulncheck over the default build (the
+  stream D re-running the S1 measurements, before the final security pass (M7) so that the pass covers the shipped engine; govulncheck over the default build (the
   action, on all six runners) and over the release build (`tools/dev vulncheck`, for linux, darwin and
   windows). Every action is pinned by a full commit SHA with a
   version comment, every workflow declares top-level permissions (jobs widen them only where needed),
@@ -1251,7 +1252,7 @@ by GoReleaser).
   build's Go build tags are defined once, as `RELEASE_TAGS` in `.goreleaser.yaml` (`noasm,nounsafe`),
   and `tools/dev build` uses the same set.
 - **Docs**: a website built from `docs/` and published to GitHub Pages on each release
-  (`pages.yml`, a skeleton until M7), containing the user guide, this design, the format specification
+  (`pages.yml`, a skeleton until M8), containing the user guide, this design, the format specification
   and an architecture guide.
 
 GoReleaser was chosen because it covers every channel above in one configuration; the alternative is
@@ -1271,8 +1272,8 @@ writing each package format by hand.
 | M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings |
 | M6 | 1 GB scale, resuming with `--state-dir`; experimental `--hdr` |
 | G2 | The owner films one large transfer |
-| M7 | Website, packaging, signing, release dry run |
-| M8 | Final security pass, then the first release candidate |
+| M7 | Final security pass |
+| M8 | Website, packaging, signing, release dry run, a delta security review of everything since M7, then the first release candidate |
 
 Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 
@@ -1342,6 +1343,8 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream F, PR #11 review: section 13 says that with `--json` nothing goes to standard error, that a failure before the job starts is a single error line, and that warnings are events |
 | 2026-11-14 | M1 stream F, PR #11 round 2: section 13 adds `--max-entries` (the owner's decision: default manifest limits about a tenth of the format's, raised by one flag), mapped to `DecodeOptions.MaxEntries`, which section 14 shows |
 | 2026-11-14 | M1 stream F, PR #11 round 3: sections 13 and 14 give the exact manifest defaults, the root constants `DefaultMaxEntries` (100,000) and `DefaultMaxManifestBytes` (6,710,886, 64 MiB / 10), and the scaling rule of `--max-entries` (N x 64 MiB / 1,000,000 bytes, at most 64 MiB) |
+| 2026-11-14 | The owner swapped the last two milestones: M7 is the final security pass and M8 the website, packaging, signing and release dry run (section 18 and the M7/M8 references in section 17); the engine pins are updated before the security pass |
+| 2026-11-14 | Section 10 step 7 names the soft-bit scale (`modem.LLRScale`, a quarter nat); a repeated sentence in section 8 removed |
 | 2026-11-13 | M1 stream D: section 8 caps the worker count at `video.EngineInstances()` (GOMAXPROCS - 1), because compiled Wasm cannot be preempted and instances on every P starved the watchdog on the 4-vCPU CI runners. Section 12 records the engine as built: the embedded copy of the module and its hash check, the encoder's MP4 and even-length `.h264` runs with `Concat`, how slices are read (1 s preroll with `-noaccurate_seek`, `-copyts`, `showinfo` timestamps, `-fps_mode passthrough`, source pixel format, size changes refused), the instance cap, and the measured cost of `WithCloseOnContextDone` (75-91% on decoding, reported to the owner; kept on); the HEVC fast path is compiled only with the `unsandboxedhevc` tag, sends parameter sets that differ from the probe to the engine, takes timestamps from `framemd5`, and times each picture from its first slice. Section 13: the `--ffmpeg` row says where `ffprobe` comes from and that a path also runs outside the sandbox; the `--unsandboxed-hevc` row says the flag exists only in tagged builds |
 | 2026-11-14 | M1 stream D, review of PR #9: section 8 calls the instance cap a precaution and states that workers must not hold more decoders open than the cap without reading them. Section 12: how a slice is read adds the anchored `showinfo` match, the refusal of extra timestamp lines and of odd sizes, and reading frames straight into the caller's planes; the sandbox adds the protocol and format whitelists (the HLS playlist that held ffprobe for 8 minutes) and the probe's bounds; the watchdog counts a complete, timestamped frame, does not excuse an instance qrvt is waiting on, closes the pipe on cancellation, and gives the true reason the cap is not needed with close-on-cancel and its hold-and-wait hazard; the fast path's as-built list adds the copy-size bound, the abandon without a flush, the CI step and the fuzz tag |
 | 2026-11-14 | M1 stream D, CI on PR #9: sections 8 and 12 correct the instance cap's description: on the macos-26-intel runner GOMAXPROCS + 1 uncapped spinning instances took 16.8 s against a 2 s limit, so the cap is a mitigation, not a harmless precaution |
