@@ -43,8 +43,11 @@ var (
 	compressions = map[string]qrvt.Compression{"auto": qrvt.CompressAuto, "zstd": qrvt.CompressZstd, "xz": qrvt.CompressXZ, "none": qrvt.CompressNone}
 )
 
-// maxEntries is the format's limit on manifest entries (SECURITY.md section 5).
-const maxEntries = 1_000_000
+// The format's limits on the manifest (SECURITY.md section 5): entries and size in MiB.
+const (
+	maxEntries     = 1_000_000
+	maxManifestMiB = 64
+)
 
 // maxDimension bounds a requested width or height before any other check.
 const maxDimension = 16384
