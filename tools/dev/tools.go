@@ -113,6 +113,10 @@ var tools = []tool{
 		// Licence-compatibility check. It publishes no binaries; building it takes seconds.
 		name: "go-licenses", version: "2.0.1", pkg: "github.com/google/go-licenses/v2@v2.0.1",
 	},
+	{
+		// Vulnerability scan of the release build (its tags); no published binaries either.
+		name: "govulncheck", version: "1.9.0", pkg: "golang.org/x/vuln/cmd/govulncheck@v1.9.0",
+	},
 }
 
 // toolNamed returns the pinned tool with the given name; it panics on a name not in the table,

@@ -3,7 +3,7 @@
 # absent. Prints everything it will install, and asks, before installing anything.
 #
 #   scripts/setup.sh            Go 1.27.4 and git, then `go run ./tools/dev install-tools`
-#                               (golangci-lint, GoReleaser, syft, actionlint, go-licenses)
+#                               (golangci-lint, GoReleaser, syft, actionlint, go-licenses, govulncheck)
 #   scripts/setup.sh --spike    also a native ffmpeg with an HEVC encoder (libx265) and the
 #                               wasmtime command-line runner, which only spike S1 needs
 #   --yes                       do not ask (required when stdin is not a terminal)
@@ -102,7 +102,12 @@ add() { plan="$plan
 need_pkg() {
 	[ -n "$pm" ] || die "$1 is missing and no supported package manager (brew, apt, dnf, pacman) was found"
 	pkgs="$pkgs $(pkgname "$1")"
-	add "$1 from $pm"
+	if [ "$pm" = pacman ]; then
+		# Arch supports no partial upgrades: syncing the package database means upgrading the system.
+		add "$1 from pacman (pacman -Syu, which also upgrades the installed packages)"
+	else
+		add "$1 from $pm"
+	fi
 }
 
 # Go.
@@ -149,10 +154,10 @@ if [ $go_install = 0 ]; then
 	tools=$(PATH="${gobin:+$gobin:}$PATH" go run ./tools/dev install-tools -dry-run)
 	case $tools in
 	*"Will install"*) add "$(printf '%s' "$tools" | sed -n '2,$p' | sed 's/^ *//' | paste -sd ';' -)" ;;
-	*) say "ok  pinned tools (golangci-lint, GoReleaser, syft, actionlint, go-licenses)" ;;
+	*) say "ok  pinned tools (golangci-lint, GoReleaser, syft, actionlint, go-licenses, govulncheck)" ;;
 	esac
 else
-	add "then, if missing, the pinned tools of tools/dev: golangci-lint, GoReleaser, syft and actionlint (release archives, SHA-256 checked) and go-licenses (go install)"
+	add "then, if missing, the pinned tools of tools/dev: golangci-lint, GoReleaser, syft and actionlint (release archives, SHA-256 checked) and go-licenses and govulncheck (go install)"
 fi
 
 if [ -z "$plan" ]; then
@@ -186,7 +191,7 @@ if [ -n "$pkgs" ]; then
 	brew) brew install $pkgs ;;
 	apt) $sudo apt-get update && $sudo apt-get install -y $pkgs ;;
 	dnf) $sudo dnf install -y $pkgs ;;
-	pacman) $sudo pacman -S --needed --noconfirm $pkgs ;;
+	pacman) $sudo pacman -Syu --needed --noconfirm $pkgs ;;
 	esac
 fi
 
