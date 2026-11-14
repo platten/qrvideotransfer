@@ -50,6 +50,7 @@ type xzReader struct {
 	csize, usize       int64 // declared in its header; -1 when absent
 	data, out, pending int64 // LZMA2 bytes and output so far; output still to come from the chunk
 	feed               bytes.Reader
+	props              bool // an LZMA chunk has set the properties
 
 	blocks  uint64    // blocks decoded
 	records hash.Hash // SHA-256 of each block's unpadded and uncompressed size
@@ -122,6 +123,9 @@ func (x *xzReader) next() error {
 		if b == 0 {
 			return x.index()
 		}
+		if x.blocks > 0 {
+			return xzErr("more than one block (FORMAT.md section 12 allows exactly one)")
+		}
 		h := make([]byte, (int(b)+1)*4)
 		h[0] = b
 		if err := x.full(h[1:]); err != nil {
@@ -130,7 +134,7 @@ func (x *xzReader) next() error {
 		if x.csize, x.usize, x.dict, err = checkBlockHeader(h); err != nil {
 			return err
 		}
-		x.hdrSize, x.data, x.out, x.lz, x.state = int64(len(h)), 0, 0, nil, xzChunk
+		x.hdrSize, x.data, x.out, x.lz, x.props, x.state = int64(len(h)), 0, 0, nil, false, xzChunk
 		if x.sum != nil {
 			x.sum.Reset()
 		}
@@ -174,42 +178,80 @@ func (x *xzReader) streamHeader() error {
 
 // chunk parses one LZMA2 chunk. A chunk with output is handed to the block's decoder; the end
 // marker ends the block, whose sizes, padding and check are verified.
+//
+// As every encoder writes a block, the first chunk resets the dictionary, no later chunk does, and
+// only the first LZMA chunk sets the properties (the library reallocates its state for each one).
+// Consecutive uncompressed chunks are handed to the decoder as one chunk of up to 64 KiB, because
+// the library allocates a 32 KiB copy buffer for each uncompressed chunk it reads.
 func (x *xzReader) chunk() error {
 	c, err := x.r.ReadByte()
 	if err != nil {
 		return xzErr("truncated")
 	}
-	var hdr []byte
+	reset := c == 1 || c >= 0xe0
 	switch {
 	case c == 0:
 		return x.endBlock()
-	case c == 1 || c == 2: // uncompressed, with or without a dictionary reset
-		hdr = []byte{c, 0, 0}
-	case c >= 0x80: // LZMA; with new properties when bit 6 is set
-		hdr = []byte{c, 0, 0, 0, 0}
-		if c&0x40 != 0 {
-			hdr = append(hdr, 0)
-		}
-	default:
+	case x.data == 0 && !reset:
+		return xzErr("the block's first LZMA2 chunk does not reset the dictionary")
+	case x.data > 0 && reset:
+		return xzErr("an LZMA2 chunk resets the dictionary after the block's first chunk")
+	case c >= 0xc0 && x.props:
+		return xzErr("an LZMA2 chunk changes the properties after the block's first LZMA chunk")
+	case c == 1 || c == 2:
+		return x.uncompressed(c)
+	case c < 0x80:
 		return xzErr("bad LZMA2 chunk header %#x", c)
+	}
+	hdr := []byte{c, 0, 0, 0, 0}
+	if c >= 0xc0 {
+		hdr, x.props = append(hdr, 0), true
 	}
 	if err := x.full(hdr[1:]); err != nil {
 		return err
 	}
-	out := int64(binary.BigEndian.Uint16(hdr[1:3])) + 1
-	in := out
-	if c >= 0x80 {
-		out += int64(c&0x1f) << 16
-		in = int64(binary.BigEndian.Uint16(hdr[3:5])) + 1
-	}
-	chunk := make([]byte, len(hdr)+int(in))
+	out := int64(c&0x1f)<<16 | int64(binary.BigEndian.Uint16(hdr[1:3])) + 1
+	chunk := make([]byte, len(hdr)+int(binary.BigEndian.Uint16(hdr[3:5]))+1)
 	copy(chunk, hdr)
 	if err := x.full(chunk[len(hdr):]); err != nil {
 		return err
 	}
 	x.data += int64(len(chunk))
+	return x.hand(chunk, out)
+}
+
+// uncompressed reads an uncompressed chunk of control byte c and the uncompressed chunks (control 2)
+// that directly follow it, up to 64 KiB of data, and hands them to the decoder as one chunk.
+func (x *xzReader) uncompressed(c byte) error {
+	chunk := []byte{c, 0, 0}
+	for {
+		var s [2]byte
+		if err := x.full(s[:]); err != nil {
+			return err
+		}
+		n := int(binary.BigEndian.Uint16(s[:])) + 1
+		k := len(chunk)
+		chunk = append(chunk, make([]byte, n)...)
+		if err := x.full(chunk[k:]); err != nil {
+			return err
+		}
+		x.data += int64(3 + n)
+		if next, err := x.r.Peek(3); err != nil || next[0] != 2 ||
+			len(chunk)-3+int(binary.BigEndian.Uint16(next[1:]))+1 > 1<<16 {
+			break
+		}
+		_, _ = x.r.Discard(1)
+	}
+	out := len(chunk) - 3
+	binary.BigEndian.PutUint16(chunk[1:], uint16(out-1)) //nolint:gosec // at most 64 KiB, checked above
+	return x.hand(chunk, int64(out))
+}
+
+// hand gives one chunk, header included, to the block's decoder, creating it at the first chunk.
+func (x *xzReader) hand(chunk []byte, out int64) error {
 	x.feed.Reset(chunk)
 	x.pending = out
+	var err error
 	if x.lz == nil {
 		if x.lz, err = newLZMA2(&x.feed, max(x.dict, lzma.MinDictCap)); err != nil {
 			return xzErr("LZMA2: %v", err)
