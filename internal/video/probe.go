@@ -33,7 +33,7 @@ var probeTime = EngineProbeTime
 
 // observeProbe, when set, is told each probe's active time at every watchdog tick. TEMPORARY
 // measurement for the review of PR #20; removed before review.
-var observeProbe func(active time.Duration)
+var observeProbe func(r runner, path string, active time.Duration)
 
 // maxProbeOutput bounds what is read from ffprobe.
 const maxProbeOutput = 1 << 20
@@ -61,7 +61,7 @@ func probe(ctx context.Context, r runner, path string) (probeInfo, error) {
 	check := probeLimits(st.Size(), probeTime)
 	if observeProbe != nil { // TEMPORARY measurement
 		inner := check
-		check = func(m *meter, active time.Duration) error { observeProbe(active); return inner(m, active) }
+		check = func(m *meter, active time.Duration) error { observeProbe(r, path, active); return inner(m, active) }
 	}
 	err = run(ctx, r, job{prog: "ffprobe", args: func(in, _ string) []string { return probeArgs(in) },
 		input: path, stdout: out, progress: progReads, check: check})
