@@ -711,7 +711,10 @@ Costs a user should expect:
   temporary directory, and no handles but its three standard ones. It exits by itself the moment its
   standard input closes, which happens when the parent exits or dies, and runs with GOMAXPROCS of at
   least 2 so that the goroutine watching the pipe runs while the engine occupies a core; on Windows it
-  is also placed in a kill-on-close Job Object. Measured (spike S1 section 13), against the engine in
+  is also placed in a kill-on-close Job Object. Loading and compiling the engine, which on a first run
+  of a slow machine takes longer than 30 s, is not a stall: the worker sends a ready message once the
+  engine is loaded, the watchdog counts from then on, and the loading phase has its own limit of 10
+  minutes (the same holds for compiling in qrvt's process). Measured (spike S1 section 13), against the engine in
   process with the option off: 1080p H.264 decoding 9% slower (most of it the 0.42-0.50 s start-up
   on a 13 s run), 4K HEVC 8-bit 2% faster and 10-bit 6% slower, all within 10%.
   - *Encoding stays in process* with close-on-cancel off: through a worker it cost 15% (above the 5%
