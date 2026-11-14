@@ -280,7 +280,6 @@ func TestCancel(t *testing.T) {
 	start := time.Now()
 	cancel()
 	wg.Wait()
-	measureStop("TestCancel", time.Since(start), 5*time.Second) // TEMPORARY measurement
 	if el := time.Since(start); el > 5*time.Second {
 		t.Errorf("instances stopped %v after the cancel", el)
 	}

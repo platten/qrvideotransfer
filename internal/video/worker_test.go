@@ -57,7 +57,7 @@ func TestMain(m *testing.M) {
 		w, _ := currentWorkers()
 		w.env = workerEnv()
 	}
-	os.Exit(measureReport(m.Run())) // TEMPORARY measurement
+	os.Exit(m.Run())
 }
 
 // hostileWorker misbehaves in the way named. It first says the engine is loaded, as a worker does
@@ -213,7 +213,6 @@ func TestWorkerSpin(t *testing.T) {
 	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
 		t.Fatalf("got %v", err)
 	}
-	measureStop("TestWorkerSpin", ps.since()-EngineStallTimeout, 5*time.Second) // TEMPORARY measurement
 	// Timed from the worker's start, after any wait for a slot. The watchdog may last have seen the
 	// instance waiting up to one tick before that start, so the stop may come a tick under the limit.
 	if el := ps.since(); el < EngineStallTimeout-watchTick || el > EngineStallTimeout+5*time.Second {
@@ -599,7 +598,6 @@ func TestWorkerCancel(t *testing.T) {
 	}
 	_ = d.Close()
 	_ = e.Close()
-	measureStop("TestWorkerCancel", time.Since(start), 5*time.Second) // TEMPORARY measurement
 	if el := time.Since(start); el > 5*time.Second {
 		t.Errorf("stopped %v after the cancel", el)
 	}
