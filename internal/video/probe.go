@@ -26,6 +26,11 @@ type probeInfo struct {
 	Container string
 }
 
+// probeTime is EngineProbeTime. Tests built with the race detector lengthen it (race_test.go): there
+// every loop back-edge of the engine calls instrumented Go for close-on-cancel's check, so a probe
+// runs many times slower than in any build that ships.
+var probeTime = EngineProbeTime
+
 // maxProbeOutput bounds what is read from ffprobe.
 const maxProbeOutput = 1 << 20
 
@@ -50,7 +55,7 @@ func probe(ctx context.Context, r runner, path string) (probeInfo, error) {
 	}
 	out := &capped{max: maxProbeOutput}
 	err = run(ctx, r, job{prog: "ffprobe", args: func(in, _ string) []string { return probeArgs(in) },
-		input: path, stdout: out, progress: progReads, check: probeLimits(st.Size(), EngineProbeTime)})
+		input: path, stdout: out, progress: progReads, check: probeLimits(st.Size(), probeTime)})
 	if errors.Is(err, ErrEngine) {
 		return probeInfo{}, fmt.Errorf("%w: %w", ErrInvalidVideo, err)
 	}
