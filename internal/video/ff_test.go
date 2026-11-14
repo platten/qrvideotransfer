@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -225,15 +226,18 @@ func TestNativeBackend(t *testing.T) {
 	if _, err := s.Probe(t.Context(), p); err != nil {
 		t.Fatal(err)
 	}
-	// The native ffmpeg gets the same whitelists: the HLS playlist is refused at once.
-	hls := filepath.Join(t.TempDir(), "x.mp4")
+	// The native ffmpeg gets the same whitelists: the HLS playlist is refused at once, by the format
+	// whitelist (named .m3u8, which native ffmpeg 6.1 would otherwise open as HLS; named .mp4, it
+	// detects mov and fails without the whitelist being tested).
+	hls := filepath.Join(t.TempDir(), "x.m3u8")
 	if err := os.WriteFile(hls, []byte(hlsPlaylist), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	start := time.Now()
-	if _, err := s.Probe(ctx, hls); !errors.Is(err, ErrInvalidVideo) || time.Since(start) > 15*time.Second {
+	if _, err := s.Probe(ctx, hls); !errors.Is(err, ErrInvalidVideo) || !strings.Contains(err.Error(), "not on whitelist") ||
+		time.Since(start) > 15*time.Second {
 		t.Errorf("HLS playlist: %v after %v", err, time.Since(start))
 	}
 }
