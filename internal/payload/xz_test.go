@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"flag"
+	"fmt"
 	"hash/crc32"
 	"hash/crc64"
 	"io"
@@ -89,11 +90,23 @@ func TestXZDecodesEncoderOutput(t *testing.T) {
 // xzSample is the input of the fixtures in testdata/xz: a little incompressible data and 2.5 MiB of
 // text (several LZMA chunks of at most 2 MiB of output each). uncompressed.xz is 96 KiB of
 // incompressible data only, which xz stores as uncompressed LZMA2 chunks.
+//
+// mixed.xz interleaves stretches of incompressible data with text, so that XZ Utils writes
+// uncompressed chunks followed by LZMA chunks that reset the state (control 0xA0).
 func xzSample(name string) []byte {
-	if name == "uncompressed.xz" {
-		return pseudoRandom(96 << 10)
-	}
 	var b bytes.Buffer
+	switch name {
+	case "uncompressed.xz":
+		return pseudoRandom(96 << 10)
+	case "mixed.xz":
+		rnd := pseudoRandom(1 << 20)
+		for i, n := range []int{70000, 150000, 3000, 66000, 200000, 20000, 140000} {
+			b.Write(rnd[:n])
+			rnd = rnd[n:]
+			b.WriteString(strings.Repeat(fmt.Sprintf("qrvt payload text %d\n", i), 1000*(i%3+1)))
+		}
+		return b.Bytes()
+	}
 	b.Write(pseudoRandom(20 << 10))
 	for i := 0; b.Len() < 5<<19; i++ {
 		b.WriteString("qrvt payload line ")
@@ -104,10 +117,10 @@ func xzSample(name string) []byte {
 }
 
 // xzFixtures are the arguments of XZ Utils 5.x for each file in testdata/xz. To regenerate them, run
-// the test with -xz-samples DIR, which writes the two inputs to DIR, and then, for each file,
+// the test with -xz-samples DIR, which writes the three inputs to DIR, and then, for each file,
 // xz -c --format=xz ARGS < DIR/INPUT > testdata/xz/FILE (the input is uncompressed.bin for
-// uncompressed.xz and sample.bin otherwise). This package may not run programs itself (SECURITY.md
-// section 9.6).
+// uncompressed.xz, mixed.bin for mixed.xz and sample.bin otherwise). This package may not run
+// programs itself (SECURITY.md section 9.6).
 var xzFixtures = map[string][]string{
 	"check-none.xz":   {"-6", "--check=none"},
 	"check-crc32.xz":  {"-6", "--check=crc32"},
@@ -117,6 +130,7 @@ var xzFixtures = map[string][]string{
 	"threads.xz":      {"-6", "-T3", "--block-size=1MiB"}, // block headers carry both sizes
 	"block-list.xz":   {"-6", "--block-list=100,200,1MiB,0"},
 	"uncompressed.xz": {"-6"},
+	"mixed.xz":        {"-6", "-T1"}, // uncompressed chunks, then state resets
 }
 
 // xzMultiBlock are the fixtures with more than one block (11, 3 and 4), which a decoder refuses.
@@ -128,6 +142,7 @@ func TestXZDecodesXZUtilsOutput(t *testing.T) {
 	if *xzSamples != "" {
 		must(t, os.WriteFile(filepath.Join(*xzSamples, "sample.bin"), xzSample(""), 0o600))
 		must(t, os.WriteFile(filepath.Join(*xzSamples, "uncompressed.bin"), xzSample("uncompressed.xz"), 0o600))
+		must(t, os.WriteFile(filepath.Join(*xzSamples, "mixed.bin"), xzSample("mixed.xz"), 0o600))
 	}
 	for name := range xzFixtures {
 		in := xzSample(name)
@@ -421,6 +436,8 @@ func FuzzXZ(f *testing.F) {
 	f.Add(replaceBlockHeader(good, blockHeader(0, 0x21, 0x01, 40)))
 	f.Add(replaceBlockHeader(good, blockHeader(0x01, 0x03, 0x01, 0x00, 0x21, 0x01, 22)))
 	f.Add(append(bytes.Clone(good), good...))
+	f.Add(stateResets(f, 20)) // round-4 review: state resets
+	f.Add(tinyBlocks(20))     // round-3 review: many blocks
 	var caps []int
 	old := newLZMA2
 	f.Cleanup(func() { newLZMA2 = old })
