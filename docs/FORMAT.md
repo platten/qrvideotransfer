@@ -432,9 +432,15 @@ The stream is what the outer code protects. Its length L includes every field be
   largest values a decoder accepts (below). An xz body is exactly one xz stream, with no stream
   padding, holding exactly one block whose single filter is LZMA2. Within the block, the first LZMA2
   chunk resets the dictionary, no later chunk does, and only the first LZMA chunk sets the
-  properties, with lc + lp and pb at most 4. One block is what every encoder writes for a single
-  archive unless asked to split it; accepting more let a stream make a decoder allocate a new
-  dictionary for every few bytes of input.
+  properties, with lc + lp and pb at most 4. An LZMA chunk that resets the state without new
+  properties (control 0xA0 to 0xBF) comes only directly after an uncompressed chunk, and at most
+  once per 32 KiB of uncompressed-chunk data so far in the block; and a run of uncompressed chunks
+  after the first starts only once 32 KiB of uncompressed-chunk data per earlier run precede it.
+  qrvt's encoder writes one block and no such state reset; it and XZ Utils write uncompressed runs
+  of about 60 KiB or more except at the end of the data, and XZ Utils writes state resets only
+  directly after them. Accepting more blocks, resets or runs let a small stream make a decoder
+  allocate a new dictionary, new probability tables or a new copy buffer for every few bytes of
+  input.
 
 **What a decoder rejects.** A wrong magic or stream version; an unknown compression value; any flag bit
 other than 0x01 and 0x02; a non-zero reserved byte; a stream whose length L is not exactly `24 + Lb`,
@@ -546,3 +552,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-13 | M1 stream A, PR 7, path depth: section 12 adds the path rule "at most 64 components", with its two reasons (time per component grows with depth on macOS and partly on Windows; a tree far deeper than shells handle is a nuisance payload), and says the encoder's refusal lists every path that breaks a rule with the rule it breaks. Section 13: `stream.json` gains a refused manifest at 65 components and a list of manifests that must be accepted, with one at exactly 64; the "path over 4096 bytes" vector now has 17 components so that it breaks only the length rule. The frozen streams did not change |
 | 2026-11-14 | M1 stream A, second independent review of PR 7: section 12 says the decoder rejects an xz LZMA2 chunk whose data the LZMA decoder does not consume exactly, and a block whose check, padding or declared sizes are wrong, or an index or footer that does not match the blocks (the reference decoder now parses the xz container itself). `COM0` and `LPT0` are device names too; section 13's `stream.json` gains their refused manifests. The frozen streams did not change |
 | 2026-11-14 | M1 stream A, third independent review of PR 7: section 12 says an xz body holds exactly one block (the encoder always wrote one), refused at a second block header, and states the chunk rules: the first chunk resets the dictionary, no later chunk does, only the first LZMA chunk sets properties, and lc + lp and pb are at most 4. The reason: accepting many blocks let a small stream make a decoder allocate a new 8 MiB dictionary per block. XZ Utils output with several blocks (multithreaded, `--block-size`, `--block-list`) is no longer accepted. The frozen streams did not change |
+| 2026-11-14 | M1 stream A, fourth independent review of PR 7: section 12 limits LZMA state resets without new properties (control 0xA0 to 0xBF) to directly after an uncompressed chunk, once per 32 KiB of uncompressed-chunk data, and a new run of uncompressed chunks to once per 32 KiB of uncompressed-chunk data before it; it says qrvt's encoder writes one block, replacing "one block is what every encoder writes" (XZ Utils 5.8.4 splits its output even at -0 and -1) |
