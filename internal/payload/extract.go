@@ -409,6 +409,9 @@ func (x *extractor) close() {
 	_ = x.root.Close()
 }
 
+// linkUnsupported reports whether a link error means the file system has no hard links. Stub.
+func linkUnsupported(error) bool { return true }
+
 // at returns a path the extractor is about to pass to the operating system, after reporting it to
 // the counting seam of the tests.
 func at(path string) string {

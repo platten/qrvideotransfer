@@ -11,7 +11,7 @@ import (
 
 func TestValidatePath(t *testing.T) {
 	ok := []string{
-		"a", "a/b.txt", "docs/ünïcode.txt", "a b/c", ".hidden", "a.b.c", "CONSOLE", "com0", "lpt10",
+		"a", "a/b.txt", "docs/ünïcode.txt", "a b/c", ".hidden", "a.b.c", "CONSOLE", "com10", "lpt10",
 		"COM1x", "auxiliary.txt", "x/nulx", strings.Repeat("a", 255),
 		strings.Repeat(strings.Repeat("a", 250)+"/", 16) + strings.Repeat("a", 80), // 4,096 bytes
 		strings.Repeat("a/", 63) + "a",                                             // 64 components
@@ -27,7 +27,7 @@ func TestValidatePath(t *testing.T) {
 		"a\\b", "c:x", "C:", "a:b/c", "a\x00b", "a\x01", "\x1f", "a\x7fb", "a\x1b[31m",
 		"a\xffb", "\xc3", "é", // invalid UTF-8; NFD
 		"a ", "a /b", "a.", "a./b", "...", "x/b.",
-		"CON", "con", "Con.txt", "prn", "AUX", "nul", "NUL.tar.gz", "x/com1", "COM9.x", "lpt1", "LPT9",
+		"CON", "con", "Con.txt", "prn", "AUX", "nul", "NUL.tar.gz", "x/com1", "COM9.x", "lpt1", "LPT9", "COM0", "lpt0.txt", "x/Com0",
 		strings.Repeat("a", 256), strings.Repeat(strings.Repeat("a", 250)+"/", 16) + strings.Repeat("a", 81),
 		strings.Repeat("a/", 64) + "a", strings.Repeat("a/", 2048) + "a", // 65 and 2,049 components
 	}

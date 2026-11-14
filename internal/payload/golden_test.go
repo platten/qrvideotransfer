@@ -146,6 +146,8 @@ var refusedRules = []goldenRule{
 	{"file under a file at depth", "a", "a/b/c", 0},
 	{"folder not an entry", "a/b", "", 0},
 	{rule: "more than 64 components", depth: 65},
+	{"device name COM0", "COM0", "", 0},
+	{"device name LPT0 with extension", "lpt0.txt", "", 0},
 }
 
 func goldenTree() (tree, map[string]uint32) {

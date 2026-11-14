@@ -358,6 +358,20 @@ func TestCommitRollback(t *testing.T) {
 	}
 }
 
+// TestCommitLinkFails checks that a link error other than "not supported" stops the commit, which
+// is rolled back, instead of falling back to the check-then-rename.
+func TestCommitLinkFails(t *testing.T) {
+	t.Cleanup(func() { linkFile = defaultLinkFile })
+	boom := errors.New("input/output error")
+	linkFile = func(*os.Root, string, string) error { return &os.LinkError{Op: "link", Err: boom} }
+	stream := commitTree(t)
+	out := t.TempDir()
+	if _, err := unpack(stream, UnpackOptions{OutputDir: out}); !errors.Is(err, boom) {
+		t.Fatalf("link error: %v", err)
+	}
+	expectEmpty(t, out)
+}
+
 func TestCommitWithoutHardLinks(t *testing.T) {
 	t.Cleanup(func() { linkFile = defaultLinkFile })
 	linkFile = func(*os.Root, string, string) error { return &os.LinkError{Op: "link", Err: errors.ErrUnsupported} }

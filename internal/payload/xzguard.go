@@ -7,7 +7,14 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+
+	"github.com/ulikunitz/xz/lzma"
 )
+
+// newLZMA2 creates the LZMA2 decoder for one block's data; tests record the dictionary it is given.
+var newLZMA2 = func(r io.Reader, dictCap int) (io.Reader, error) {
+	return lzma.Reader2Config{DictCap: dictCap}.NewReader2(r)
+}
 
 // xzGuard passes one xz stream through unchanged while parsing its structure, and refuses a block
 // whose LZMA2 dictionary is larger than XZDictCap before the decoder sees the block header.
