@@ -115,11 +115,11 @@ func defaultCacheDir() string {
 	return filepath.Join(d, "qrvt", "wazero")
 }
 
-// slots holds one token per engine instance allowed to run: at most GOMAXPROCS - 1 at once. This is
-// a precaution, not what keeps the watchdog alive: with WithCloseOnContextDone(true) every loop
-// back-edge of the compiled code returns to Go for its check, where the scheduler can preempt it,
-// and GOMAXPROCS + 2 spinning instances without the cap were stopped on time. It would matter for
-// compiled code that never returns to Go, which is what close-on-cancel rules out.
+// slots holds one token per engine instance allowed to run: at most GOMAXPROCS - 1 at once. With
+// WithCloseOnContextDone(true) every loop back-edge of the compiled code returns to Go for its check,
+// where the scheduler can preempt it, so the watchdog stops every instance even without the cap;
+// but on a small, loaded machine (the macos-26-intel CI runner) uncapped spinning instances were
+// stopped 16.8 s after a 2 s limit, so the cap stays as a mitigation.
 var slots = make(chan struct{}, max(1, runtime.GOMAXPROCS(0)-1))
 
 // EngineInstances is how many engine instances may run at once: one fewer than GOMAXPROCS at

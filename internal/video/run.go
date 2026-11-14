@@ -118,11 +118,26 @@ func dirSize(dir string) int64 {
 	var n int64
 	es, _ := os.ReadDir(dir)
 	for _, e := range es {
-		if fi, err := e.Info(); err == nil && fi.Mode().IsRegular() {
-			n += fi.Size()
+		if e.Type().IsRegular() {
+			n += openSize(filepath.Join(dir, e.Name()))
 		}
 	}
 	return n
+}
+
+// openSize is a regular file's current size, taken from an open handle: on Windows the size a
+// directory listing reports lags behind a file that is still open for writing.
+func openSize(path string) int64 {
+	f, err := os.Open(path) //nolint:gosec // a file in our own temporary directory
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		return 0
+	}
+	return fi.Size()
 }
 
 // logTail keeps the last bytes written to it, for error messages.
