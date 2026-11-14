@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -49,6 +50,14 @@ func workerEnv() []string {
 
 // exec implements runner. The watchdog's cancellation kills the worker, then waits for it.
 func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string) (int, error) {
+	// Until the worker has started and loaded the engine (a first compilation takes seconds to
+	// minutes, and starting a process on a loaded machine can take seconds), it is not stalled;
+	// engineLoadLimit bounds that phase instead.
+	var ready atomic.Bool
+	var once sync.Once
+	m.waiting.Add(1)
+	loaded := func() { once.Do(func() { ready.Store(true); m.waiting.Add(-1) }) }
+	defer loaded()
 	in := ""
 	wj := workerJob{Prog: j.prog, CacheDir: cacheDir, MaxOutput: j.maxOutput, Reads: j.progress == progReads, Module: j.module}
 	var err error
@@ -96,7 +105,6 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 		case <-finished:
 		}
 	}()
-	var ready atomic.Bool
 	loadTimer := time.AfterFunc(engineLoadLimit, func() {
 		if !ready.Load() {
 			_ = cmd.Process.Kill() // never became ready
@@ -104,7 +112,7 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 	})
 	defer loadTimer.Stop()
 	go feedWorker(toWorker, msg, j.stdin)
-	rc, err := readWorker(bufio.NewReaderSize(fromWorker, 64<<10), j, m, &ready)
+	rc, err := readWorker(bufio.NewReaderSize(fromWorker, 64<<10), j, m, loaded)
 	close(finished)
 	_ = toWorker.Close() // the worker's lifeline: it exits when this closes
 	_ = cmd.Process.Kill()
@@ -141,18 +149,9 @@ func feedWorker(w io.Writer, job []byte, stdin io.Reader) {
 
 // readWorker dispatches the worker's messages until its exit message. Anything malformed ends the
 // job with an error, before any allocation larger than one bounded message.
-func readWorker(r io.Reader, j *job, m *meter, ready *atomic.Bool) (int, error) {
+func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 	var buf []byte
 	var reads int64
-	// Until the worker has loaded the engine (a first compilation takes seconds to minutes), it is
-	// not stalled; engineLoadLimit bounds that phase instead.
-	loading := true
-	m.waiting.Add(1)
-	defer func() {
-		if loading {
-			m.waiting.Add(-1)
-		}
-	}()
 	for {
 		var typ byte
 		var err error
@@ -179,11 +178,7 @@ func readWorker(r io.Reader, j *job, m *meter, ready *atomic.Bool) (int, error) 
 				reads = v
 			}
 		case msgReady:
-			if loading {
-				loading = false
-				ready.Store(true)
-				m.waiting.Add(-1)
-			}
+			loaded()
 		case msgExit:
 			if len(buf) < 4 {
 				return 0, fmt.Errorf("%w: worker protocol: short exit message", ErrEngine)
