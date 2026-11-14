@@ -199,35 +199,36 @@ func TestCapacityLimit(t *testing.T) {
 // the binary-input AWGN capacity limit for the code's rate.
 const capacityGap = 2.5
 
-// robustGap is the regression bound for code 4 (`robust`), which misses capacityGap with the shipped
-// decoder: it reaches FER 1e-2 about 2.6 dB from its limit (DESIGN.md section 8). The cause is the
-// decoder, not the code: sum-product reaches it 1.53 dB from the limit (TestMinSumVariants). The
-// normalisation 0.75 suits the other codes but not robust's low-degree checks, and floor(3m/4) on
-// small integer messages loses more. Its waterfall is shallow (FER about 5e-3 at 2.8 dB from the
-// limit), so the regression check uses 10,000 frames to keep 0.2 dB of margin over the measured gap.
-const robustGap = 2.8
+// robustGap is a tighter regression bound for code 4 (`robust`). With the M1 decoder (x0.75) it
+// reached FER 1e-2 2.6 dB from its limit and missed capacityGap; the cause was the decoder, not the
+// code (TestMinSumVariants). The decoder of the follow-up (x13/16, soft bits x4 inside) reaches it
+// about 1.8 dB from the limit (TestDecoderCandidates); the bound adds 0.3 dB of margin and uses 5,000
+// frames, because robust's waterfall is shallow.
+const robustGap = 2.1
 
 // TestShortenedErrorRate checks the four inner codes as they ship (rate including the CRC: info bits
 // over sent bits) against the binary-input AWGN capacity limit: FER below 1e-2, with 95% confidence,
-// at the limit plus capacityGap (robustGap for code 4). This is a weaker check than TestErrorRate; no
-// published curve exists for these shortened codes.
+// at the limit plus capacityGap, and for code 4 also at the limit plus robustGap. This is a weaker
+// check than TestErrorRate; no published curve exists for these shortened codes.
 func TestShortenedErrorRate(t *testing.T) {
-	for _, id := range ids {
-		c := mustNew(t, id)
+	checks := []struct {
+		id     uint8
+		gap    float64
+		frames int
+	}{{1, capacityGap, 1000}, {2, capacityGap, 1000}, {3, capacityGap, 1000}, {4, capacityGap, 1000}, {4, robustGap, 5000}}
+	for _, ck := range checks {
+		c := mustNew(t, ck.id)
 		rate := float64(c.info) / float64(c.N())
-		gap, frames := capacityGap, 1000
-		if id == 4 {
-			gap, frames = robustGap, 10000
-		}
+		frames := ck.frames
 		if long() {
 			frames = 20000
 		}
 		limit := maxErrors(frames, 1e-2, 0.05)
-		ebn0 := capacityLimit(rate) + gap
-		n := frameErrors(func() *Code { return mustNew(t, id) }, ebn0, frames, 3)
-		t.Logf("code %d: rate %.4f, capacity limit %.2f dB; %d frame errors in %d at %.2f dB", id, rate, capacityLimit(rate), n, frames, ebn0)
+		ebn0 := capacityLimit(rate) + ck.gap
+		n := frameErrors(func() *Code { return mustNew(t, ck.id) }, ebn0, frames, 3)
+		t.Logf("code %d: rate %.4f, capacity limit %.2f dB; %d frame errors in %d at %.2f dB", ck.id, rate, capacityLimit(rate), n, frames, ebn0)
 		if n > limit {
-			t.Errorf("code %d: %d frame errors in %d at Eb/N0 %.2f dB (%.1f dB above the capacity limit), more than %d", id, n, frames, ebn0, gap, limit)
+			t.Errorf("code %d: %d frame errors in %d at Eb/N0 %.2f dB (%.1f dB above the capacity limit), more than %d", ck.id, n, frames, ebn0, ck.gap, limit)
 		}
 	}
 }
