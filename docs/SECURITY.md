@@ -262,11 +262,17 @@ blocked writing a frame nobody reads; more timestamp lines than frames is refuse
 and at the end of a slice. Anchoring the showinfo match at the start of a line keeps out container
 metadata, which ffmpeg prints indented, but not all text from the file: some is logged from the start of
 a line, such as an unknown Matroska CodecID, which may hold a newline. Frame lines must therefore also
-count 0, 1, 2 ... after each configuration line, and a line out of sequence fails the decode.
+count 0, 1, 2 ... after the configuration line, frame lines before it are refused, and a second
+configuration line is refused too (ffmpeg configures the filter once for a recording: it reconfigures
+only when the frames change size, format or aspect ratio, and a size change stops the decode anyway).
+Any of these fails the decode at its next frame.
 `TestMetadataInjection` gives a clip container metadata shaped like a showinfo line and requires
 unchanged timestamps; `TestCodecIDInjection` (the reviewer's case) gives a Matroska file's second track
 a CodecID holding a newline and a showinfo line, and requires that no frame comes back mis-timed (the
-decode fails). `TestCaptureLimits` has the engine write a portrait-coded 4,320 x 7,680 clip, accepted,
+decode fails); a second case (review round 3 of PR #9) puts a forged configuration line before the
+forged frame, which before the second-configuration rule let a whole decode return its first frame at
+the forged time and a slice end silently empty, and requires that the first frame, of a whole decode
+and of a slice, already fails. `TestCaptureLimits` has the engine write a portrait-coded 4,320 x 7,680 clip, accepted,
 and clips one even step over on the longer and the shorter side, refused from the probe (the probe's
 unit test and the fast path's parameter-set test cover one sample over), and a stream whose picture
 size changes, which stops when it does. With the fast-path tag (a CI step runs these
@@ -373,3 +379,4 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | M1 stream D, CI on PR #9: sections 9.2 and 9.5 require the HLS playlist to be refused by the format whitelist, instead of within 5 s of wall time, which includes waiting for an instance slot |
 | 2026-11-14 | M1 stream D, CI on PR #9: section 5 states that tests built with the race detector use four times `EngineProbeTime`, and why |
 | 2026-11-13 | M1 stream D, worker processes: guarantee 1's basis includes the worker process; T1, section 5 and section 9.3 describe the worker, its fallback, its exit when the parent goes, and that it is not an operating-system sandbox |
+| 2026-11-14 | M1 stream D, review round 3 of PR #9: section 9.3 adds that a second showinfo configuration line is refused, and the test with a forged configuration line before a forged frame |
