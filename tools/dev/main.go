@@ -319,6 +319,8 @@ func licenses(args []string) error {
 	return nil
 }
 
+func fuzzTags(release string) string { return release }
+
 // fuzz runs every Fuzz target of the module, one at a time.
 func fuzz(args []string) error {
 	fs := newFlags("fuzz")

@@ -37,6 +37,15 @@ type job struct {
 	stderr   io.Writer // nil: kept in a short tail for the error message
 	progress progress
 	timeout  time.Duration // watchdog limit; 0 means EngineStallTimeout
+	check    func(m *meter, active time.Duration) error
+}
+
+var stallTimeout = EngineStallTimeout
+
+const formatWhitelist = ""
+
+func probeLimits(int64, time.Duration) func(*meter, time.Duration) error {
+	return func(*meter, time.Duration) error { return nil }
 }
 
 // runner runs jobs: the embedded engine or a native ffmpeg.

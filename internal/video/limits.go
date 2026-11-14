@@ -14,6 +14,12 @@ const (
 	// file when copying a stream for the HEVC fast path, no input frame taken when encoding.
 	EngineStallTimeout = 30 * time.Second
 
+	// EngineProbeTime bounds a probe's running time, not counting time spent waiting for an instance
+	// slot.
+	EngineProbeTime = 15 * time.Second
+	// MaxProbeReads bounds the bytes a probe reads from its input beyond four times the file's size.
+	MaxProbeReads = 16 << 20
+
 	// MaxDecodedPixelsPerInputByte bounds the work a file can demand: decoded luma samples over the
 	// file's size in bytes. It is checked from the probe before decoding and again while decoding.
 	MaxDecodedPixelsPerInputByte = 10_000

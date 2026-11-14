@@ -34,6 +34,9 @@ const (
 	fastMaxNAL = 64 << 20
 )
 
+// FastPathCopySize bounds the copy instance's temporary directory beyond twice the input's size.
+const FastPathCopySize = 64 << 20
+
 // FastPathPictureTime is the time a picture may take on the HEVC fast path. The decoder cannot be
 // cancelled, so the first picture that exceeds it stops the whole decode, leaving its goroutine
 // behind; the caller must not continue decoding in this process.

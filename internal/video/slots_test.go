@@ -1,6 +1,7 @@
 package video
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"sync"
@@ -40,5 +41,39 @@ func TestWatchdogUnderLoad(t *testing.T) {
 		if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
 			t.Errorf("instance %d: %v", i, err)
 		}
+	}
+}
+
+// TestHoldAndWait documents the instance cap's hazard (DESIGN.md section 12): a caller that keeps
+// EngineInstances() decoders open without reading them holds every slot, and its next probe or
+// decoder waits for a slot until its context ends; waiting for a slot is never a stall. Closing a
+// decoder frees its slot. Not parallel: it runs with a single slot.
+func TestHoldAndWait(t *testing.T) {
+	old := slots
+	slots = make(chan struct{}, 1)
+	defer func() { slots = old }()
+	b := embedded(t)
+	held, err := b.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f Frame
+	if err := held.Next(&f); err != nil { // its instance now runs, blocked writing the next frame
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	if _, err := b.NewDecoder(ctx, clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true}); !errors.Is(err, context.DeadlineExceeded) ||
+		time.Since(start) < 3*time.Second {
+		t.Errorf("waiting for the held slot: %v after %v", err, time.Since(start))
+	}
+	_ = held.Close()
+	d, err := b.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(decodeAll(t, d)); n != 24 {
+		t.Errorf("%d frames after the slot was freed", n)
 	}
 }

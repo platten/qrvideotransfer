@@ -14,6 +14,8 @@ type meter struct {
 	n       atomic.Int64
 	waiting atomic.Int32
 	extra   func() int64 // further progress, such as an output file's size; may be nil
+	reads   atomic.Int64
+	blocked atomic.Int32
 }
 
 func (m *meter) value() int64 {

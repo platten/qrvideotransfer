@@ -2,6 +2,7 @@ package video
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -223,6 +224,17 @@ func TestNativeBackend(t *testing.T) {
 	encodeCode(t, s, p, 64, 64, 4, 12, 2)
 	if _, err := s.Probe(t.Context(), p); err != nil {
 		t.Fatal(err)
+	}
+	// The native ffmpeg gets the same whitelists: the HLS playlist is refused at once.
+	hls := filepath.Join(t.TempDir(), "x.mp4")
+	if err := os.WriteFile(hls, []byte(hlsPlaylist), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	start := time.Now()
+	if _, err := s.Probe(ctx, hls); !errors.Is(err, ErrInvalidVideo) || time.Since(start) > 5*time.Second {
+		t.Errorf("HLS playlist: %v after %v", err, time.Since(start))
 	}
 }
 

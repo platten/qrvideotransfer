@@ -322,8 +322,8 @@ func (d *pipeDecoder) next(f *Frame) error {
 		}
 		return err
 	}
-	t, ok := d.ts.pop(d.done)
-	if !ok {
+	t, err := d.ts.pop(context.Background(), d.done, 0)
+	if err != nil {
 		return d.stop(fmt.Errorf("%w: a frame without a timestamp", ErrEngine))
 	}
 	if t.w != d.p.Width || t.h != d.p.Height {
@@ -478,22 +478,24 @@ func (s *showinfo) overflow() bool {
 	return s.over
 }
 
+var errNoTimestamp = fmt.Errorf("%w: a frame without a timestamp", ErrEngine)
+
 // pop returns the next frame's timestamp, waiting for it until done is closed.
-func (s *showinfo) pop(done <-chan struct{}) (frameTS, bool) {
+func (s *showinfo) pop(_ context.Context, done <-chan struct{}, _ time.Duration) (frameTS, error) {
 	select {
 	case t := <-s.q:
-		return t, true
+		return t, nil
 	default:
 	}
 	select {
 	case t := <-s.q:
-		return t, true
+		return t, nil
 	case <-done:
 		select {
 		case t := <-s.q:
-			return t, true
+			return t, nil
 		default:
-			return frameTS{}, false
+			return frameTS{}, errNoTimestamp
 		}
 	}
 }

@@ -257,6 +257,12 @@ func TestParseProbe(t *testing.T) {
 			t.Errorf("%s accepted", bad)
 		}
 	}
+	// 4:2:0 chroma planes of an odd-sized picture would be mis-framed.
+	for _, odd := range []string{`{"streams":[{"width":385,"height":216}]}`, `{"streams":[{"width":384,"height":215}]}`} {
+		if _, err := parseProbe([]byte(odd)); !errors.Is(err, ErrUnsupported) {
+			t.Errorf("%s: %v", odd, err)
+		}
+	}
 	p, err = parseProbe([]byte(`{"streams":[{"codec_name":"x\u001b[31m","width":2,"height":2,"r_frame_rate":"1000001/1",
 		"nb_frames":"-5","duration":"NaN","bit_rate":"-1","tags":{"rotate":"-90"},"side_data_list":[{"rotation":1e300}]}],
 		"format":{"duration":"5"}}`))
@@ -304,16 +310,46 @@ func TestShowinfo(t *testing.T) {
 	}
 	done := make(chan struct{})
 	close(done)
-	a, ok := s.pop(done)
-	if !ok || a.w != 384 || a.h != 216 || a.at() != 400*time.Millisecond {
-		t.Errorf("first: %+v", a)
+	a, err := s.pop(t.Context(), done, time.Minute)
+	if err != nil || a.w != 384 || a.h != 216 || a.at() != 400*time.Millisecond {
+		t.Errorf("first: %+v %v", a, err)
 	}
-	b, ok := s.pop(done)
-	if !ok || b.w != -1 {
-		t.Errorf("unparsable: %+v", b)
+	b, err := s.pop(t.Context(), done, time.Minute)
+	if err != nil || b.w != -1 {
+		t.Errorf("unparsable: %+v %v", b, err)
 	}
-	if _, ok := s.pop(done); ok {
-		t.Error("a third timestamp")
+	if _, err := s.pop(t.Context(), done, time.Minute); !errors.Is(err, errNoTimestamp) {
+		t.Errorf("a third timestamp: %v", err)
+	}
+	// Only a line that starts with the filter's own prefix is a frame: container metadata that
+	// ffmpeg prints (indented) cannot inject one. A native ffmpeg may print the address without 0x.
+	for _, l := range []string{
+		"    title           : [Parsed_showinfo_0 @ 0x1] n:   0 pts:   9 pts_time:0 s:384x216",
+		"x[Parsed_showinfo_0 @ 0x1] n: 0 pts: 9 s:2x2",
+		"[Parsed_showinfo_0 @ 0x1]   side data n: 0 pts: 9 s:2x2",
+		"[Parsed_showinfo_x @ 0x1] n: 0 pts: 9 s:2x2",
+	} {
+		s.parse(l)
+		if len(s.q) != 0 {
+			t.Fatalf("%q gave a timestamp", l)
+		}
+	}
+	s.parse("[Parsed_showinfo_12 @ 000001C2F3A0B2C0] n: 0 pts: 9 s:2x2")
+	if c, err := s.pop(t.Context(), done, time.Minute); err != nil || c.pts != 9 {
+		t.Errorf("native line: %+v %v", c, err)
+	}
+	// Waiting for a line ends at the stall limit, or at once when the context ends.
+	open := make(chan struct{})
+	start := time.Now()
+	var le *LimitError
+	if _, err := s.pop(t.Context(), open, 200*time.Millisecond); !errors.As(err, &le) || le.Limit != "EngineStallTimeout" ||
+		time.Since(start) < 200*time.Millisecond {
+		t.Errorf("no line: %v", err)
+	}
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(io.ErrClosedPipe)
+	if _, err := s.pop(ctx, open, time.Minute); !errors.Is(err, io.ErrClosedPipe) {
+		t.Errorf("cancelled: %v", err)
 	}
 	if !strings.Contains(s.String(), "other line") || len(s.String()) > logTailLen {
 		t.Errorf("tail %q", s.String())

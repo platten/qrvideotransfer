@@ -4,11 +4,14 @@ package video
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -178,6 +181,105 @@ func TestFastPathTimeLimit(t *testing.T) {
 		t.Error("the engine took over after an abandoned picture")
 	}
 	_ = d.Close()
+}
+
+// slowDecoder takes d over every call and decodes nothing.
+type slowDecoder struct{ d time.Duration }
+
+func (s slowDecoder) DecodeNAL(hevc.NALUnit) ([]*hevc.Picture, error) { time.Sleep(s.d); return nil, nil }
+func (slowDecoder) Flush() []*hevc.Picture                             { return nil }
+
+// TestFastPathSharedDeadline: the slices of one picture share its time (93b40a6): two slices of
+// 0.6 s each exceed a 1 s limit, although each alone is within it. Not parallel: it shortens the
+// limit.
+func TestFastPathSharedDeadline(t *testing.T) {
+	pictureTime = time.Second
+	defer func() { pictureTime = FastPathPictureTime }()
+	stream := append(nal(1, []byte{0x80, 0x10}), nal(1, []byte{0x00, 0x10})...) // first_slice_segment_in_pic_flag 1, then 0
+	d := &fastDecoder{ctx: t.Context(), nals: &nalReader{r: bytes.NewReader(stream)}, w: startWorker(slowDecoder{600 * time.Millisecond}), last: -1}
+	var f Frame
+	start := time.Now()
+	err := d.Next(&f)
+	var le *LimitError
+	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "FastPathPictureTime" || el < time.Second || el > 1500*time.Millisecond {
+		t.Errorf("got %v after %v", err, el)
+	}
+	_ = d.Close()
+}
+
+// flushDecoder fails at its fifth call; its Flush takes 5 s and is recorded.
+type flushDecoder struct {
+	calls   int
+	flushed atomic.Bool
+}
+
+func (f *flushDecoder) DecodeNAL(hevc.NALUnit) ([]*hevc.Picture, error) {
+	if f.calls++; f.calls == 5 {
+		return nil, errors.New("a bad slice")
+	}
+	return nil, nil
+}
+
+func (f *flushDecoder) Flush() []*hevc.Picture {
+	f.flushed.Store(true)
+	time.Sleep(5 * time.Second)
+	return nil
+}
+
+// TestFastPathRelease: when the engine takes over, the old decoder is abandoned without a flush,
+// which could take a picture's whole time. Not parallel: it replaces newNALDecoder.
+func TestFastPathRelease(t *testing.T) {
+	f := fastBackend(t)
+	dec := &flushDecoder{}
+	newNALDecoder = func(int) (nalDecoder, error) { return dec, nil }
+	defer func() { newNALDecoder = func(n int) (nalDecoder, error) { return newH265(n) } }()
+	d, err := f.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fr Frame
+	start := time.Now()
+	if err := d.Next(&fr); err != nil || d.(*fastDecoder).fellBack == nil {
+		t.Fatalf("no fallback: %v", err)
+	}
+	if el := time.Since(start); dec.flushed.Load() || el > 3*time.Second {
+		t.Errorf("the old decoder was flushed (%v), the first frame took %v", dec.flushed.Load(), el)
+	}
+	_ = d.Close()
+}
+
+// TestFastPathCopyLimit: the copy instance is stopped when its temporary directory grows beyond
+// twice the input's size plus FastPathCopySize.
+func TestFastPathCopyLimit(t *testing.T) {
+	t.Parallel()
+	grow := fakeRunner(func(ctx context.Context, j *job, _ *meter) (int, error) {
+		f, err := os.Create(filepath.Join(j.outDir, "s.hevc"))
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = f.Close() }()
+		chunk := make([]byte, 1<<20)
+		for n := 0; ctx.Err() == nil; n++ {
+			if n < 200 {
+				_, _ = f.Write(chunk)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return 0, nil
+	})
+	p := probeInfo{ClipInfo: ClipInfo{Codec: "hevc", Width: 64, Height: 64, BitDepth: 8}, PixFmt: "yuv420p", Size: 1000}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := newFastDecoder(ctx, &ff{r: grow, fast: true}, "x", p, DecodeConfig{})
+	var le *LimitError
+	if el := time.Since(start); !errors.As(err, &le) || le.Limit != "FastPathCopySize" || le.Max != 2*1000+FastPathCopySize || el > 5*time.Second {
+		t.Errorf("got %v after %v", err, el)
+	}
+	if a := copyArgs("IN", "OUT", p, DecodeConfig{}); slices.Index(a, "-format_whitelist") > slices.Index(a, "IN") ||
+		a[slices.Index(a, "-format_whitelist")+1] != formatWhitelist || a[slices.Index(a, "-protocol_whitelist")+1] != "file,pipe" {
+		t.Errorf("copy arguments %q", a)
+	}
 }
 
 // TestSPSLimits checks the parameter-set parser against the committed clips and crafted sets.
