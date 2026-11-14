@@ -92,6 +92,15 @@ func TestWorkerProtocol(t *testing.T) {
 	if _, _, err := readMsg(bytes.NewReader([]byte{'Q', 0, 0, 0, 0}), nil, workerLimit); !errors.Is(err, ErrEngine) {
 		t.Errorf("unknown type: %v", err)
 	}
+	if _, _, err := readMsg(bytes.NewReader([]byte{0x9b, 0, 0, 0, 0}), nil, workerLimit); !printable(err.Error()) {
+		t.Errorf("unknown type 0x9b: %q", err)
+	}
+	// sanitise cuts on a character boundary, so no stray byte of a character is left.
+	for _, s := range []string{"aۛaa", "ۛ" + strings.Repeat("a", 9), "\x9b\x9b\x9b\x9b"} {
+		if got := sanitise(s, 3); !printable(got) || len(got) > 3 {
+			t.Errorf("sanitise(%q, 3) = %q", s, got)
+		}
+	}
 	w := &msgWriter{w: bufio.NewWriterSize(failWriter{}, 16)}
 	if err := w.send(msgOut, make([]byte, 64)); err == nil {
 		t.Error("send to a failing writer")

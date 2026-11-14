@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // spinWasm is a module whose _start loops forever without calling the host.
@@ -83,13 +85,38 @@ func hostileWorker(mode string) int {
 		time.Sleep(3 * time.Second)
 		_ = writeMsg(os.Stdout, msgReady, nil)
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
+	case "c1": // a refusal whose text, cut to its bound, starts inside a two-byte character (U+06DB)
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(-1, "ۛ"+strings.Repeat("a", 199)))
+	case "c1tail": // the same for the log's tail
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(7, "ۛ"+strings.Repeat("a", logTailLen-1)))
+	case "probelie": // a probe result naming a picture and a frame count far beyond every limit
+		_ = writeMsg(os.Stdout, msgOut, []byte(`{"streams":[{"codec_name":"hevc","width":2000000000,"height":2000000000,`+
+			`"pix_fmt":"yuv420p","r_frame_rate":"30/1","avg_frame_rate":"30/1","nb_frames":"4000000000","duration":"1e12"}],`+
+			`"format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","duration":"1e12"}}`))
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
+	case "sizelie": // a frame line claiming a huge picture, then a frame of the probed size
+		_ = writeMsg(os.Stdout, msgLog, []byte("[Parsed_showinfo_0 @ 0x1] config in time_base: 1/10, frame_rate: 10/1\n"+
+			"[Parsed_showinfo_0 @ 0x1] n: 0 pts: 0 pts_time:0 pos: 0 fmt:yuv420p s:65535x65535 i:P\n"))
+		_ = writeMsg(os.Stdout, msgOut, make([]byte, 16*16*3/2))
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
+	case "noready": // never says the engine is loaded
+		time.Sleep(time.Hour)
+	case "readyhang": // says it is ready, then hangs
+		_ = writeMsg(os.Stdout, msgReady, nil)
+		time.Sleep(time.Hour)
+	case "version": // speaks another protocol version
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(exitVersion, "protocol version 99"))
+	case "lateversion": // claims a version mismatch after it has sent output
+		_ = writeMsg(os.Stdout, msgOut, []byte{1})
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(exitVersion, "protocol version 99"))
 	case "early":
 	}
 	return 0
 }
 
 // runFakeParent starts a spinning worker with no watchdog, prints its process id, and waits to be
-// killed.
+// killed. With the argument "nojob" it does not put the worker in a Job Object (Windows), so that
+// the worker's exit on its pipe closing is tested alone.
 func runFakeParent() int {
 	w, err := currentWorkers()
 	if w == nil {
@@ -97,6 +124,7 @@ func runFakeParent() int {
 		return 1
 	}
 	p := *w
+	p.noJob = len(os.Args) > 2 && os.Args[2] == "nojob"
 	p.started = func(pid int) { fmt.Println(pid) }
 	_, _ = p.exec(context.Background(), &job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil },
 		stdout: io.Discard, stderr: io.Discard}, &meter{}, "")
@@ -168,10 +196,21 @@ func TestWorkerSpin(t *testing.T) {
 	gone(t, ps.all(), 5*time.Second)
 }
 
-// TestWorkerParentKilled: a worker whose parent dies mid-job exits by itself within 5 s.
+// TestWorkerParentKilled: a worker whose parent dies mid-job exits by itself within 5 s, with its Job
+// Object (Windows) and without it, where only its pipe closing ends it.
 func TestWorkerParentKilled(t *testing.T) {
 	t.Parallel()
-	cmd := exec.Command(os.Args[0], fakeParent) //nolint:gosec // the test binary
+	for _, mode := range []string{"job", "nojob"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			parentKilled(t, mode)
+		})
+	}
+}
+
+func parentKilled(t *testing.T, mode string) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], fakeParent, mode) //nolint:gosec // the test binary
 	cmd.Env = os.Environ()
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -196,10 +235,12 @@ func TestWorkerParentKilled(t *testing.T) {
 }
 
 // TestWorkerHostile: replies a worker may forge end the job cleanly, with an error, without large
-// allocations, and with what is printed sanitised. Not parallel, so that the allocation count is
-// this test's.
+// allocations, and with what is printed sanitised: valid UTF-8 without control characters, even
+// where a bound cuts a character. None is taken for a worker that failed to start. Not parallel, so
+// that the allocation count is this test's.
 func TestWorkerHostile(t *testing.T) {
-	for _, mode := range []string{"oversize", "garbage", "badtype", "progress", "shortexit", "early", "lies"} {
+	for _, mode := range []string{"oversize", "garbage", "badtype", "progress", "shortexit", "early", "lies",
+		"c1", "c1tail", "lateversion"} {
 		p, ps := testWorkers(t, mode)
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
@@ -210,8 +251,11 @@ func TestWorkerHostile(t *testing.T) {
 			t.Errorf("%s: %v", mode, err)
 			continue
 		}
-		if strings.ContainsAny(err.Error(), "\x1b\x07\x00") {
-			t.Errorf("%s: unsanitised %q", mode, err)
+		if msg := err.Error(); !printable(msg) {
+			t.Errorf("%s: unsanitised %q", mode, msg)
+		}
+		if errors.Is(err, errWorkerStart) {
+			t.Errorf("%s: taken for a failed start: %v", mode, err)
 		}
 		if grown := after.TotalAlloc - before.TotalAlloc; grown > 64<<20 {
 			t.Errorf("%s: allocated %d MiB", mode, grown>>20)
@@ -227,6 +271,101 @@ func TestWorkerHostile(t *testing.T) {
 		t.Errorf("partial frame: %v", err)
 	}
 	_ = d.Close()
+}
+
+// printable reports whether s is valid UTF-8 without C0 or C1 control characters or DEL.
+func printable(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			return false
+		}
+	}
+	return true
+}
+
+// TestWorkerForgedResults: a worker's lying probe result (a picture of 2e9 x 2e9 pixels and 4e9
+// frames) and a lying frame size (65535 x 65535) are refused without large allocations. Not
+// parallel, so that the allocation count is this test's.
+func TestWorkerForgedResults(t *testing.T) {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	p, _ := testWorkers(t, "probelie")
+	if _, err := probe(t.Context(), workerRunner{p}, clip("hevc8.mp4")); err == nil {
+		t.Error("a huge probed size was accepted")
+	}
+	p, _ = testWorkers(t, "sizelie")
+	pi := probeInfo{ClipInfo: ClipInfo{Width: 16, Height: 16, BitDepth: 8}, Size: 1000, PixFmt: "yuv420p"}
+	d := startDecoder(t.Context(), workerRunner{p}, clip("hevc8.mp4"), pi, DecodeConfig{}, "yuv420p")
+	var f Frame
+	if err := d.Next(&f); !errors.Is(err, ErrInvalidVideo) {
+		t.Errorf("forged frame size: %v", err)
+	}
+	_ = d.Close()
+	runtime.ReadMemStats(&after)
+	if grown := after.TotalAlloc - before.TotalAlloc; grown > 64<<20 {
+		t.Errorf("allocated %d MiB", grown>>20)
+	}
+}
+
+// TestWorkerLoadLimit: a worker that never says it has loaded the engine is killed when
+// EngineLoadLimit (shortened here) runs out, with the typed error and no process left; the stall
+// watchdog, shorter still, does not fire meanwhile. Not parallel: it shortens the limit.
+func TestWorkerLoadLimit(t *testing.T) {
+	loadLimit = 2 * time.Second
+	t.Cleanup(func() { loadLimit = EngineLoadLimit })
+	p, ps := testWorkers(t, "noready")
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	start := time.Now()
+	err := run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
+		timeout: time.Second})
+	var le *LimitError
+	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" {
+		t.Fatalf("got %v", err)
+	}
+	if el := time.Since(start); el < 2*time.Second || el > 12*time.Second {
+		t.Errorf("stopped after %v", el)
+	}
+	gone(t, ps.all(), 5*time.Second)
+}
+
+// TestWorkerVersion: a worker refuses a job of another protocol version, and the parent takes that,
+// as the worker's first message, for a failure to start, so the job runs in process and WorkerStatus
+// says why. Not parallel: it changes the version the parent sends and the process's status.
+func TestWorkerVersion(t *testing.T) {
+	var out bytes.Buffer
+	in := &bytes.Buffer{}
+	b, _ := json.Marshal(workerJob{Prog: "ffmpeg", Version: protocolVersion + 1})
+	_ = writeMsg(in, msgJob, b)
+	if code := serveWorker(in, &out, func(int) {}); code != 2 {
+		t.Errorf("worker exit %d", code)
+	}
+	typ, msg, err := readMsg(&out, nil, parentLimit)
+	if typ != msgExit || err != nil || len(msg) < 4 || int32(binary.BigEndian.Uint32(msg)) != exitVersion { //nolint:gosec // a signed code
+		t.Errorf("refusal %q %q %v", typ, msg, err)
+	}
+
+	p, _ := testWorkers(t, "version")
+	if err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }}); !errors.Is(err, errWorkerStart) {
+		t.Errorf("parent: %v", err)
+	}
+
+	v := protocolVersion
+	defer func() { protocolVersion = v; degraded.Store(nil) }()
+	protocolVersion++
+	d, err := embedded(t).NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(decodeAll(t, d)); n != 24 {
+		t.Errorf("%d frames", n)
+	}
+	if err := WorkerStatus(); err == nil || !strings.Contains(err.Error(), "protocol version") {
+		t.Errorf("status: %v", err)
+	}
 }
 
 // TestWorkerCancel: cancelling a decode and an encode running in workers is prompt and leaves no

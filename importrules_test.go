@@ -73,6 +73,8 @@ func TestImportRulesDetects(t *testing.T) {
 		"cmd/tool/main_test.go imports unsafe",
 		"internal/bad/bad.go imports os/exec",
 		"internal/bad/bad.go imports unsafe",
+		"internal/bad/refl.go takes an address with reflect (Pointer)",
+		"internal/bad/refl.go takes an address with reflect (UnsafeAddr)",
 		"internal/video/sys/sys.go imports unsafe",
 		"root.go imports os/exec",
 	}

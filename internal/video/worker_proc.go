@@ -27,6 +27,8 @@ type procRunner struct {
 	env []string
 	// started, when set, is told each worker's process id (tests).
 	started func(pid int)
+	// noJob leaves the worker out of a Job Object on Windows (tests).
+	noJob bool
 }
 
 // errWorkerStart marks a worker that could not be started; the job then runs in process.
@@ -201,3 +203,10 @@ const waitDelay = 5 * time.Second
 // engineLoadLimit bounds the time a worker may take to load and compile the engine before it starts
 // the program; the stall watchdog does not cover that phase.
 const engineLoadLimit = 10 * time.Minute
+
+// EngineLoadLimit bounds the time from starting a worker process to its message that the engine
+// is loaded (SECURITY.md section 5).
+const EngineLoadLimit = 10 * time.Minute
+
+// loadLimit is EngineLoadLimit; tests shorten it.
+var loadLimit = EngineLoadLimit

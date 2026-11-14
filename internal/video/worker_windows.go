@@ -4,6 +4,7 @@ package video
 
 import (
 	"os"
+	"os/exec"
 	"reflect"
 	"runtime"
 
@@ -33,3 +34,9 @@ func killOnClose(p *os.Process) func() {
 	}
 	return func() { _ = windows.CloseHandle(job) }
 }
+
+// startWorkerJob is a stub for the test commit.
+func startWorkerJob(*exec.Cmd) (windows.Handle, error) { panic("not implemented") }
+
+// addr is a stub for the test commit.
+func addr[T any](*T) uintptr { panic("not implemented") }

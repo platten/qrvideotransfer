@@ -87,7 +87,15 @@ type workerJob struct {
 	MaxOutput int64 `json:"max_output,omitempty"`
 	// Module names a test module to run instead of the engine; only test binaries register any.
 	Module string `json:"module,omitempty"`
+	// Version is the protocol version the parent speaks (protocolVersion).
+	Version int `json:"version"`
 }
+
+// protocolVersion is the worker protocol's version; tests change the parent's.
+var protocolVersion = 1
+
+// exitVersion is the exit code with which a worker refuses a job of another protocol version.
+const exitVersion = -2
 
 // testModules holds the Wasm modules a test binary lets a worker run instead of the engine.
 var testModules = map[string][]byte{}
