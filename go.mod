@@ -12,6 +12,7 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20261101151554-27ecf3e4d454
+	github.com/gen2brain/h265 v0.2.5
 	github.com/klauspost/compress v1.20.4
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/muesli/mango-cobra v1.2.0

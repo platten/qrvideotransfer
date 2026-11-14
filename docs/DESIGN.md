@@ -459,7 +459,11 @@ Each engine instance adds its linear memory, which spike S1 measured at 155 MB (
 (10-bit) when decoding 4K HEVC and 140-240 MB when encoding 4K, within a reserved limit of 512 MiB per
 instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of the 21 runs where it
 was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). The default worker count is the CPU count, reduced so that the workers, each counted at the
-worst measured engine figure, 920 MB, stay within half of the machine's physical memory. The opt-in
+worst measured engine figure, 920 MB, stay within half of the machine's physical memory, and to at
+most `video.EngineInstances()`, one fewer than GOMAXPROCS (at least one). The cap is a real
+defence: uncapped, stops were up to 8 times late on a CI runner (section 12).
+`internal/video` enforces it itself; further instances wait their turn, with no limit but the
+context, so a worker must not hold more decoders open than the cap without reading them. The opt-in
 HEVC fast path of section 12 is not counted: its memory is not bounded against a crafted stream, which
 is why it is opt-in and only for recordings the user made themselves.
 
@@ -583,11 +587,36 @@ Costs a user should expect:
   and 0.63 fps). Without the 8x8 transform the stream is Main profile. Workers each encode a run of
   frames to an elementary stream; all-intra streams with identical parameter sets concatenate validly,
   and one final copy pass wraps them in MP4. Each run has an even number of frames, because x264
-  alternates `idr_pic_id` between 0 and 1 and consecutive IDR pictures must differ in it.
+  alternates `idr_pic_id` between 0 and 1 and consecutive IDR pictures must differ in it. In
+  `internal/video` an encoder writes an MP4 (`-use_editlist 0`) or, for a run, an H.264 elementary
+  stream (`.h264`) whose `Close` refuses an odd frame count (`ErrOddRun`); `Concat` wraps the runs
+  into the MP4 with `-c copy`. The caller builds the `yuv420p` planes; input and output are tagged
+  BT.709 limited range, so ffmpeg converts nothing. `--hdr` (M6) can use 10-bit input, encoded as
+  High 10.
 - **Reading.** Each worker decodes its own time slice to raw frames, without auto-rotation, brightness
   only for grey modes. Captures identify themselves, so slices overlap freely and order does not matter.
   Every codec, HEVC included, is decoded by the embedded engine inside the sandbox. That is the
   owner's decision for version 1.
+  - *How a slice is read* (M1). Decoding starts 1 s before the slice (`-noaccurate_seek -ss`, with
+    `-copyts`) and frames before it are dropped by qrvt: ffmpeg seeks to the random access point whose
+    decode time precedes the target, and at an open-GOP point (an HEVC CRA picture) the leading
+    pictures before it in display order cannot be decoded, which in the HEVC test clip lost frames
+    after the target. Each frame's timestamp is read from the `showinfo` filter's log line
+    (`checksum=0`) in the stream's time base, so slices that partition the duration decode every frame
+    exactly once, and decoding stops at the slice's end. `-fps_mode passthrough`: ffmpeg's default
+    for raw output would duplicate frames to fill gaps in the timestamps. Output is in the source's
+    own pixel format (`yuv420p`, `yuvj420p`, `yuv420p10le`) or its Y plane alone (`gray`,
+    `gray10le`, through `extractplanes=y`), so ffmpeg converts neither range nor depth; other formats
+    are read as brightness only, 10-bit output needs a 10-bit source, and more than 10 bits is
+    refused. The picture may be at most 8K UHD in either orientation (longer side 7,680, shorter
+    side 4,320). Every frame must keep the probed size; a change mid-stream stops the decode. A
+    `showinfo` line is recognised only at the start of a line (`[Parsed_showinfo_N @ address] n:`),
+    which keeps out container metadata (printed indented) but not every text from the file: an
+    unknown Matroska CodecID is logged from the start of a line and may hold a newline. So frame
+    lines must also number 0, 1, 2 ... after each configuration line, and one out of sequence fails
+    the decode; more timestamp lines than frames, at the end of the file or of a slice, is refused. Frames are read straight into the caller's planes through a 256 KiB buffer,
+    with no frame-sized buffer of the decoder's own. An odd width or height is refused from the
+    probe, since 4:2:0 chroma would be mis-framed.
   - *Engine speed at 4K HEVC* (spike S1, one instance, luma only, medians of five runs): 8-bit 3.9 fps,
     or 4.5 with `-skip_loop_filter all`; 10-bit 3.6 fps, or 3.35 with it. The 4 fps target is not met
     without skipping the loop filter; with it, it is met for 8-bit only, narrowly (3.8-4.7). Skipping
@@ -623,8 +652,22 @@ Costs a user should expect:
     - 10 s per picture. The decoder cannot be cancelled, so at the first picture that exceeds it the
       whole decode stops with an error naming the limit; no abandoned decoder is left running while work
       continues.
-    - On any error, panic or refused stream the slice is decoded by the engine. CI decodes the test
-      clips with both and requires identical output.
+    - On any error, panic or refused stream the rest of the slice is decoded by the engine (from just
+      after the last frame returned). CI decodes the test clips with both and requires identical
+      output (`TestFastPathMatchesEngine`, whole and in slices, 8 and 10 bits).
+    - *As built in M1.* The fast path is compiled only with the build tag `unsandboxedhevc` (tests:
+      `-tags unsandboxedhevc,noasm`); other builds, releases included, refuse `--unsandboxed-hevc`
+      (`video.ErrUnsupported`). The tag goes once the assembly question below is settled. A
+      parameter set that declares a size, chroma format or bit depth other than the probed one sends
+      the slice to the engine rather than starting a new decoder. The copy instance also writes each
+      packet's timestamps (`framemd5`), and each picture is tagged with its access unit's index, so
+      the fast path's timestamps equal the engine's. The time limit runs from a picture's first slice
+      on a single decoder goroutine; at the limit that goroutine is abandoned and the decode fails.
+      The copy instance's temporary directory may hold at most twice the input's size plus 64 MiB
+      (`video.FastPathCopySize`, checked once a second). When the engine takes over, the old decoder
+      is abandoned without a flush. A CI step runs the package's tests with
+      `-tags unsandboxedhevc,noasm,nounsafe` on all six runners, and `tools/dev fuzz` adds the tag, so
+      `FuzzFastPathNAL` is fuzzed.
     - The decoder's assembly is excluded, and the flag does not ship until it can be. Its `noasm` build
       tag is global: `klauspost/reedsolomon` and
       `klauspost/compress` also honour it (and `klauspost/cpuid`, which then reports no CPU features).
@@ -673,12 +716,18 @@ Costs a user should expect:
       without assembly, which is the encoder's own input and outside this question. Stream G sets the
       release build's tags; until it does, the default path keeps the libraries' assembly.
 - **Backends.** One interface with three implementations: embedded (default), an external `ffmpeg`
-  process for `--ffmpeg system`, and a raw-frame file backend for tests.
+  process for `--ffmpeg system`, and a raw-frame file backend for tests (`video.New`,
+  `NewEmbedded`, `NewSystem`, `NewRaw`). The native backend runs the same arguments, with paths given
+  as `file:` URLs, and takes `ffprobe` from beside the chosen `ffmpeg`, else from `PATH`.
 - **Start-up.** The compiled module is cached on disk, so only the first run pays for compilation
   (spike S1: 7-9 s first, under 3 s cached).
 - **Loading.** `go-ffmpreg/embed` decompresses the module in its `init`, costing 0.25 s and about 70 MB
   at every start, even for `--help`. `internal/video` loads the compressed module itself, on first use,
-  and passes it to `go-ffmpreg/wasm`.
+  and passes it to `go-ffmpreg/wasm`: it embeds a byte-for-byte copy of go-ffmpreg v0.6.22's
+  `embed/ffmpreg.wasm.gz` (7.8 MB), checks the SHA-256 of the decompressed module
+  (`357dd97d…bc766`, `video.EngineSHA256`) before compiling it, and keeps one compiled module per
+  process. A test compares the copy with the module cache's file. The compilation cache is
+  `qrvt/wazero` under `os.UserCacheDir()`.
 - **Memory.** Each instance's linear memory is reserved at its limit, 512 MiB for decoding and
   encoding, which is also its ceiling (SECURITY.md section 5): `WithMemoryLimitPages(8192)` with
   `WithMemoryCapacityFromMax`, never grown by reallocation, since otherwise the discarded copies double
@@ -688,19 +737,52 @@ Costs a user should expect:
   wrapper mounted with `FSConfig.WithFSMount` that exposes that one file and counts its reads. When
   encoding it sees one output directory. The instance that copies an HEVC stream out of its container
   for the fast path sees the input the same way, read-only, and one temporary directory, writable, where
-  its output file goes; nothing else. It has no network and a memory ceiling.
+  its output file goes; nothing else. It has no network and a memory ceiling. Every job that reads a
+  recording passes `-protocol_whitelist file,pipe` and
+  `-format_whitelist mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,mpegts,h264,hevc`, ffmpeg 5.1's names for
+  the demuxers of MP4 and MOV, Matroska and WebM, MPEG-TS and the H.264 and HEVC elementary streams
+  (a test checks them against the engine's list); the native backend gets the same. ffmpeg detects an
+  HLS playlist whatever the extension, and a 110-byte live playlist named `.mp4` held ffprobe for more
+  than 8 minutes, rereading it every 29 s with each read counting as progress. A probe is also bounded
+  at 15 s of running time and 4 x the file's size + 16 MiB of reads (SECURITY.md section 5); probes of
+  the S1 and S2 files took at most 1.2 s and read at most 1.07 times the file.
 - **Watchdog.** qrvt creates the wazero runtime and passes it to go-ffmpreg, with
   `RuntimeConfig.WithCloseOnContextDone(true)`: without it, cancelling a context cannot interrupt
   running Wasm. An instance that makes no progress for 30 s is cancelled and the decode stops with an
-  error naming the limit (SECURITY.md section 5, `EngineStallTimeout`). Progress is an output frame
-  when decoding; input read through the counting `fs.FS` view when probing, so one mechanism gives both
+  error naming the limit (SECURITY.md section 5, `EngineStallTimeout`). Progress is a complete output
+  frame with its `showinfo` timestamp when decoding, counted by the reader; input read through the counting `fs.FS` view when probing, so one mechanism gives both
   the narrow view and the progress signal; and growth of the output file when copying. The watchdog
   bounds stalls, not total time: `MaxDecodedPixelsPerInputByte` (10,000) refuses a file whose probe
   promises more decoded pixels per input byte than that, before decoding starts, and stops a decode
   that exceeds it later in case the probe was lied to. Spike S1 measured at most 75.5 pixels per byte
   on its clips and the S2 pattern files. The option adds periodic checks to the
   compiled code, so M1 stream D re-runs the S1 decode and encode figures with it on and records both;
-  a cost above about 10% goes to the owner. The implementation and its test are M1 stream D work.
+  a cost above about 10% goes to the owner. Measured (spike S1 report, section 10): **75-91%**, far
+  above that: decoding 1080p H.264 22.3 -> 5.6 fps, 4K HEVC 8-bit 3.08 -> 0.28 fps, 10-bit
+  3.02 -> 0.29 fps; encoding 1080p 7.7 -> 0.87 fps, 4K 2.1 -> 0.22 fps (one instance, medians of
+  three). Reported to the owner, who chose worker processes (the engine in a child process with the
+  option off, killed by the watchdog), built in a separate change; until it lands the option stays on.
+  wazero v1.12.0 implements the option by calling a check through a trampoline at every loop
+  back-edge (`internal/engine/wazevo/frontend/lower.go`, `OpcodeLoop` with `ensureTermination`),
+  so the cost depends on the work: a crafted stream whose decoding is mostly picture-filling loops ran
+  13 times slower (1.1-1.3 s off, 15-17 s on). The watchdog
+  ticks once a second, and while an instance waits on qrvt (a full output pipe, an empty input pipe,
+  its turn, the module's first compilation) it is not stalled, unless qrvt is itself waiting on it for
+  a frame's timestamp; that wait also ends at the stall limit or at cancellation, and cancelling a
+  decode closes its pipe (`context.AfterFunc`), so an instance blocked writing a frame stops too.
+  Encoding instances count a frame taken as progress. At most GOMAXPROCS - 1 instances run at once
+  (`video.EngineInstances()`, at least one), and an instance waiting for its turn is not stalled. The
+  cap was added after a 30 s stall on the 4-vCPU CI runners stopped after 79 s, reasoning that compiled
+  Wasm cannot be preempted. That reasoning does not hold while close-on-cancel is on: wazero then
+  returns to Go at every loop back-edge for its check (done in Go so that it can be preempted,
+  `call_engine.go`, `ExitCodeCheckModuleExitCode`), and without the cap the watchdog still stops
+  every instance, but not promptly: uncapped, stops were up to 8 times late on a CI runner
+  (macos-26-intel, GOMAXPROCS + 1 spinning instances, 16.8 s against a 2 s limit), while the capped
+  run stayed within its bound; on a 16-thread development machine GOMAXPROCS + 2 uncapped instances
+  were stopped on time (`TestWatchdogUnderLoad` asserts the capped case and logs the uncapped one).
+  The cap stays as a real defence. Its hazard: waiting for a turn has no limit but the
+  context, so a caller holding that many decoders open without reading them waits for ever on the next
+  (`TestHoldAndWait`). The worker count of section 8 does not exceed it.
 
 Rejected as a foundation: the pure-Go H.264 stack (`oops1/go.264`, `go-avkit/*`). An independent check
 found it is one author's 2.5-month-old project that links glibc on Linux through purego and silently
@@ -749,8 +831,8 @@ qrvt profiles | version | completion | man
 | `--overwrite` | decode | off | Allow existing files in the output folder to be replaced |
 | `--state-dir` | decode | none | Keep progress for resuming and merging |
 | `--report` | decode | none | Write a JSON report of the decode |
-| `--ffmpeg` | all | `embedded` | `embedded`, `system` or a path. `system` runs outside the sandbox: for recordings the user made themselves |
-| HEVC fast-path flag `--unsandboxed-hevc` | decode, inspect, calibrate read | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three |
+| `--ffmpeg` | all | `embedded` | `embedded`, `system` (`ffmpeg` and `ffprobe` from `PATH`) or the path of an `ffmpeg` (its `ffprobe` beside it, else from `PATH`). `system` and a path run outside the sandbox: for recordings the user made themselves. The help text says both |
+| HEVC fast-path flag `--unsandboxed-hevc` | decode, inspect, calibrate read | off | Decode HEVC with the pure-Go `gen2brain/h265` (section 12). For recordings the user made themselves; it runs outside the sandbox, and its memory is not bounded against a crafted stream. The help text says all three. Present only in builds with the `unsandboxedhevc` tag until the decoder's assembly can be excluded; other builds refuse it |
 | `--jobs` | all | CPU count | Worker count, 0-1024; 0 is the CPU count, reduced to fit memory |
 | `--json`, `--plain`, `--quiet`, `--verbose` | all | | Output style. `--json` excludes `--plain` and `--quiet`; `--quiet` excludes `--verbose` |
 
@@ -1263,3 +1345,7 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream F, PR #11 round 3: sections 13 and 14 give the exact manifest defaults, the root constants `DefaultMaxEntries` (100,000) and `DefaultMaxManifestBytes` (6,710,886, 64 MiB / 10), and the scaling rule of `--max-entries` (N x 64 MiB / 1,000,000 bytes, at most 64 MiB) |
 | 2026-11-14 | The owner swapped the last two milestones: M7 is the final security pass and M8 the website, packaging, signing and release dry run (section 18 and the M7/M8 references in section 17); the engine pins are updated before the security pass |
 | 2026-11-14 | Section 10 step 7 names the soft-bit scale (`modem.LLRScale`, a quarter nat); a repeated sentence in section 8 removed |
+| 2026-11-13 | M1 stream D: section 8 caps the worker count at `video.EngineInstances()` (GOMAXPROCS - 1), because compiled Wasm cannot be preempted and instances on every P starved the watchdog on the 4-vCPU CI runners. Section 12 records the engine as built: the embedded copy of the module and its hash check, the encoder's MP4 and even-length `.h264` runs with `Concat`, how slices are read (1 s preroll with `-noaccurate_seek`, `-copyts`, `showinfo` timestamps, `-fps_mode passthrough`, source pixel format, size changes refused), the instance cap, and the measured cost of `WithCloseOnContextDone` (75-91% on decoding, reported to the owner; kept on); the HEVC fast path is compiled only with the `unsandboxedhevc` tag, sends parameter sets that differ from the probe to the engine, takes timestamps from `framemd5`, and times each picture from its first slice. Section 13: the `--ffmpeg` row says where `ffprobe` comes from and that a path also runs outside the sandbox; the `--unsandboxed-hevc` row says the flag exists only in tagged builds |
+| 2026-11-14 | M1 stream D, review of PR #9: section 8 calls the instance cap a precaution and states that workers must not hold more decoders open than the cap without reading them. Section 12: how a slice is read adds the anchored `showinfo` match, the refusal of extra timestamp lines and of odd sizes, and reading frames straight into the caller's planes; the sandbox adds the protocol and format whitelists (the HLS playlist that held ffprobe for 8 minutes) and the probe's bounds; the watchdog counts a complete, timestamped frame, does not excuse an instance qrvt is waiting on, closes the pipe on cancellation, and gives the true reason the cap is not needed with close-on-cancel and its hold-and-wait hazard; the fast path's as-built list adds the copy-size bound, the abandon without a flush, the CI step and the fuzz tag |
+| 2026-11-14 | M1 stream D, CI on PR #9: sections 8 and 12 correct the instance cap's description: on the macos-26-intel runner GOMAXPROCS + 1 uncapped spinning instances took 16.8 s against a 2 s limit, so the cap is a mitigation, not a harmless precaution |
+| 2026-11-14 | M1 stream D, round 2 of the review of PR #9: section 8 calls the instance cap a real defence (uncapped, stops were up to 8 times late on a CI runner); section 12 adds the 8K UHD capture limit in either orientation, corrects the `showinfo` injection wording (an unknown Matroska CodecID is logged from the start of a line) and adds the frame-number sequence check and the slice-end count check, and restates the cap's evidence |

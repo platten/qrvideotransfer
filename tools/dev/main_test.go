@@ -15,6 +15,16 @@ func TestGoTest(t *testing.T) {
 	}
 }
 
+// TestFuzzTags: the fuzz task adds the HEVC fast path's tag, so that FuzzFastPathNAL is fuzzed too.
+func TestFuzzTags(t *testing.T) {
+	if got := fuzzTags("noasm,nounsafe"); got != "noasm,nounsafe,unsandboxedhevc" {
+		t.Errorf("fuzzTags with release tags = %q", got)
+	}
+	if got := fuzzTags(""); got != "unsandboxedhevc" {
+		t.Errorf("fuzzTags without = %q", got)
+	}
+}
+
 func TestLintRuns(t *testing.T) {
 	got := lintRuns("noasm,nounsafe", false)
 	want := [][]string{{"run", "./..."}, {"run", "--build-tags=noasm,nounsafe", "./..."}}
