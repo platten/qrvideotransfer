@@ -119,6 +119,28 @@ func resume(pid uint32) error {
 	return nil
 }
 
+var globalMemoryStatusEx = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalMemoryStatusEx")
+
+// memoryStatusEx is the MEMORYSTATUSEX structure.
+type memoryStatusEx struct {
+	Length, MemoryLoad                       uint32
+	TotalPhys, AvailPhys                     uint64
+	TotalPageFile, AvailPageFile             uint64
+	TotalVirtual, AvailVirtual, AvailExtVirt uint64
+}
+
+// physicalMemory is the machine's physical memory in bytes, or 0 when it cannot be read.
+func physicalMemory() uint64 {
+	s := &memoryStatusEx{}
+	s.Length = uint32(reflect.TypeOf(*s).Size()) //nolint:gosec // a small struct
+	r, _, _ := globalMemoryStatusEx.Call(addr(s))
+	runtime.KeepAlive(s)
+	if r == 0 {
+		return 0
+	}
+	return s.TotalPhys
+}
+
 // addr is p's address for a system call. It is taken with reflect rather than unsafe: the one
 // reviewed exception to the import rule's intent (docs/SECURITY.md section 9.6), which a test keeps
 // to this file. p is heap-allocated (reflect makes it escape), so it does not move; the caller keeps

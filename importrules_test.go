@@ -17,8 +17,8 @@ import (
 
 // checkImports applies the import rule of docs/SECURITY.md section 9.6 to the Go files under root:
 // the root package itself, cmd/ and internal/. Only internal/video (and packages below it) may
-// import os/exec, and nothing may import unsafe. Nor may any file but internal/video/worker_windows.go,
-// the one reviewed exception, hold a selector named Pointer, UnsafeAddr or UnsafePointer, called or
+// import os/exec, nothing may import unsafe, and nothing may import code under spikes/ or tools/, which the rule does not scan. Nor may any file but internal/video/worker_windows.go,
+// the one reviewed exception, hold a selector named Pointer, UnsafeAddr, UnsafePointer or InterfaceData, called or
 // not, whatever it imports: so reflect cannot hand out an address through a method call, a method
 // value or a method expression, nor on a reflect.Value made elsewhere. The one form allowed is a
 // package-qualified name (atomic.Pointer, a type; reflect.Pointer, a Kind), and that is decided by
@@ -77,12 +77,16 @@ func checkImports(t *testing.T, root string) []string {
 	return bad
 }
 
+// module is this repository's module path.
+const module = "github.com/platten/qrvideotransfer"
+
 // checkFile applies the rule to one parsed and type-checked file.
 func checkFile(rel string, f *ast.File, info *types.Info) []string {
 	var bad []string
 	for _, im := range f.Imports {
 		p, _ := strconv.Unquote(im.Path.Value)
-		if p == "unsafe" || (p == "os/exec" && !strings.HasPrefix(rel, "internal/video/")) {
+		exempt := strings.HasPrefix(p, module+"/spikes/") || strings.HasPrefix(p, module+"/tools/") // code the rule does not scan
+		if p == "unsafe" || (p == "os/exec" && !strings.HasPrefix(rel, "internal/video/")) || exempt {
 			bad = append(bad, rel+" imports "+p)
 		}
 	}
@@ -95,7 +99,7 @@ func checkFile(rel string, f *ast.File, info *types.Info) []string {
 			return true
 		}
 		switch s.Sel.Name {
-		case "Pointer", "UnsafeAddr", "UnsafePointer":
+		case "Pointer", "UnsafeAddr", "UnsafePointer", "InterfaceData":
 			if id, ok := s.X.(*ast.Ident); ok {
 				if _, pkg := info.Uses[id].(*types.PkgName); pkg {
 					return true // a package-qualified name

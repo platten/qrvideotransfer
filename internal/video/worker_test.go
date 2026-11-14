@@ -530,7 +530,10 @@ func TestWorkerCap(t *testing.T) {
 		t.Errorf("waiting for a slot: %v after %v, %d workers started", err, time.Since(start), len(qs.all()))
 	}
 	cancel()
-	within(t, time.Minute, "the held worker's end", func() { <-held })
+	within(t, time.Minute, "the held worker's end", func() { err = <-held })
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the held worker: %v", err)
+	}
 	err = run(testCtx(t, time.Minute), workerRunner{q}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
 	if len(qs.all()) != 1 || !errors.Is(err, ErrEngine) { // "early" ends without a result
 		t.Errorf("after the slot was freed: %v, %d workers", err, len(qs.all()))

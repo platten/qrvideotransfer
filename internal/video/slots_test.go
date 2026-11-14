@@ -54,15 +54,20 @@ func TestWatchdogUnderLoad(t *testing.T) {
 	}
 }
 
-// TestHoldAndWait documents the instance cap's hazard (DESIGN.md section 12): a caller that keeps
-// EngineInstances() decoders open without reading them holds every slot, and its next probe or
+// TestHoldAndWait documents the hazard of both caps (DESIGN.md sections 8 and 12), on worker
+// processes (WorkerProcesses) and in process (EngineInstances): a caller that keeps
+// that many decoders open without reading them holds every slot, and its next probe or
 // decoder waits for a slot until its context ends; waiting for a slot is never a stall. Closing a
 // decoder frees its slot. Not parallel: it runs with a single slot.
 func TestHoldAndWait(t *testing.T) {
 	old := slots
 	slots = make(chan struct{}, 1)
 	defer func() { slots = old }()
-	// With worker processes the parent holds no slot: a held decoder does not block the next.
+	// Worker processes are capped too (WorkerProcesses): a held decoder holds its worker's turn, and
+	// with a single turn the next decoder's probe waits for it until its context ends.
+	oldWorkers := workerSlots
+	workerSlots = make(chan struct{}, 1)
+	defer func() { workerSlots = oldWorkers }()
 	w := embedded(t)
 	held, err := w.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
 	if err != nil {
@@ -72,10 +77,12 @@ func TestHoldAndWait(t *testing.T) {
 	if err := held.Next(&f); err != nil {
 		t.Fatal(err)
 	}
-	if d, err := w.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true}); err != nil {
-		t.Errorf("a second decoder beside a held one, with workers: %v", err)
-	} else {
-		_ = d.Close()
+	start := time.Now()
+	wctx, wcancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer wcancel()
+	if _, err := w.NewDecoder(wctx, clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true}); !errors.Is(err, context.DeadlineExceeded) ||
+		time.Since(start) < 3*time.Second {
+		t.Errorf("waiting for the held worker's turn: %v after %v", err, time.Since(start))
 	}
 	_ = held.Close()
 	// In process (the fallback), the cap applies.
@@ -87,7 +94,7 @@ func TestHoldAndWait(t *testing.T) {
 	if err := held.Next(&f); err != nil { // its instance now runs, blocked writing the next frame
 		t.Fatal(err)
 	}
-	start := time.Now() // before the deadline is set, so that the wait is measured whole
+	start = time.Now() // before the deadline is set, so that the wait is measured whole
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	if _, err := b.NewDecoder(ctx, clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true}); !errors.Is(err, context.DeadlineExceeded) ||
