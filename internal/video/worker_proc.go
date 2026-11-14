@@ -165,15 +165,18 @@ func feedWorker(w io.Writer, job []byte, stdin io.Reader, ready, finished <-chan
 }
 
 // readWorker dispatches the worker's messages until its exit message. Anything malformed ends the
-// job with an error, before any allocation larger than one bounded message. A refusal of the
-// protocol version as the worker's first message is a failure to start: nothing has happened yet.
+// job with an error, before any allocation larger than one bounded message. Until the ready
+// message, nothing but that message is accepted: anything else is a failure to start (startFailure).
 func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 	var buf []byte
 	var reads int64
-	for first := true; ; first = false {
+	for ready := false; ; {
 		var typ byte
 		var err error
 		typ, buf, err = readMsg(r, buf, parentLimit)
+		if !ready && (err != nil || typ != msgReady) {
+			return 0, startFailure(typ, buf, err)
+		}
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return 0, fmt.Errorf("%w: the engine worker ended without a result", ErrEngine)
@@ -197,15 +200,12 @@ func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 			}
 		case msgReady:
 			loaded()
+			ready = true
 		case msgExit:
 			if len(buf) < 4 {
 				return 0, fmt.Errorf("%w: worker protocol: short exit message", ErrEngine)
 			}
 			rc := int(int32(binary.BigEndian.Uint32(buf))) //nolint:gosec // a signed exit code
-			if rc == exitVersion && first {
-				return 0, fmt.Errorf("%w: the worker speaks another protocol version (%s); this program speaks %d",
-					errWorkerStart, sanitise(string(buf[4:]), 100), protocolVersion)
-			}
 			if rc != 0 || len(buf) > 4 {
 				_, _ = j.stderr.Write([]byte("\n" + sanitise(string(buf[4:]), logTailLen) + "\n"))
 			}
@@ -215,6 +215,26 @@ func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 			return rc, nil
 		}
 	}
+}
+
+// startFailure describes how a worker ended before its ready message, which it sends before any guest
+// code runs, as a failure to start: a refusal of the protocol version (the executable on disk may be
+// another release), an exit, a broken message or any other message. Nothing of the job has happened
+// and nothing the worker sent is passed on, so the job can run in process instead.
+func startFailure(typ byte, buf []byte, err error) error {
+	switch {
+	case errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF):
+		return fmt.Errorf("%w: the engine worker ended before it was ready", errWorkerStart)
+	case err != nil:
+		return fmt.Errorf("%w: the engine worker failed before it was ready: %w", errWorkerStart, err)
+	case typ == msgExit && len(buf) >= 4 && int32(binary.BigEndian.Uint32(buf)) == exitVersion: //nolint:gosec // a signed exit code
+		return fmt.Errorf("%w: the worker speaks another protocol version (%s); this program speaks %d",
+			errWorkerStart, sanitise(string(buf[4:]), 100), protocolVersion)
+	case typ == msgExit && len(buf) >= 4:
+		return fmt.Errorf("%w: the engine worker failed before it was ready (exit %d): %s", errWorkerStart,
+			int32(binary.BigEndian.Uint32(buf)), sanitise(string(buf[4:]), 200)) //nolint:gosec // a signed exit code
+	}
+	return fmt.Errorf("%w: the engine worker sent a malformed or early message (type 0x%02x) before it was ready", errWorkerStart, typ)
 }
 
 // waitDelay bounds how long a killed worker may take to be reaped.

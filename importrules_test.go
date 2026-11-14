@@ -15,9 +15,11 @@ import (
 
 // checkImports applies the import rule of docs/SECURITY.md section 9.6 to the Go files under root:
 // the root package itself, cmd/ and internal/. Only internal/video (and packages below it) may
-// import os/exec, and nothing may import unsafe. Nor may a file that imports reflect take an address
-// with it (a call of Pointer, UnsafeAddr or UnsafePointer), except internal/video/worker_windows.go,
-// the one reviewed exception. tools/, spikes/ and testdata/ are not visited. Test files and files of
+// import os/exec, and nothing may import unsafe. Nor may any file but internal/video/worker_windows.go,
+// the one reviewed exception, hold a selector named Pointer, UnsafeAddr or UnsafePointer, called or
+// not, whatever it imports: so reflect cannot hand out an address through a method call, a method
+// value or a method expression, nor on a reflect.Value made elsewhere. Package-qualified names
+// (atomic.Pointer, a type; reflect.Pointer, a Kind) are not selectors on a value and are allowed. tools/, spikes/ and testdata/ are not visited. Test files and files of
 // every build tag are included. It returns one line per violation.
 func checkImports(t *testing.T, root string) []string {
 	t.Helper()
@@ -30,24 +32,30 @@ func checkImports(t *testing.T, root string) []string {
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
 		video := strings.HasPrefix(rel, "internal/video/")
-		reflects := false
+		pkgs := map[string]bool{} // the names under which the file's imports are used
 		for _, im := range f.Imports {
 			p, _ := strconv.Unquote(im.Path.Value)
 			if p == "unsafe" || (p == "os/exec" && !video) {
 				bad = append(bad, rel+" imports "+p)
 			}
-			reflects = reflects || p == "reflect"
+			if im.Name != nil {
+				pkgs[im.Name.Name] = true
+			} else {
+				pkgs[p[strings.LastIndex(p, "/")+1:]] = true
+			}
 		}
-		if !reflects || rel == "internal/video/worker_windows.go" {
+		if rel == "internal/video/worker_windows.go" {
 			return
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
-			if c, ok := n.(*ast.CallExpr); ok && len(c.Args) == 0 {
-				if s, ok := c.Fun.(*ast.SelectorExpr); ok {
-					switch s.Sel.Name {
-					case "Pointer", "UnsafeAddr", "UnsafePointer":
-						bad = append(bad, rel+" takes an address with reflect ("+s.Sel.Name+")")
-					}
+			s, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch s.Sel.Name {
+			case "Pointer", "UnsafeAddr", "UnsafePointer":
+				if id, ok := s.X.(*ast.Ident); !ok || !pkgs[id.Name] { // a selector on a value or type, not a qualified name
+					bad = append(bad, rel+" selects "+s.Sel.Name)
 				}
 			}
 			return true
