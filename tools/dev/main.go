@@ -319,7 +319,17 @@ func licenses(args []string) error {
 	return nil
 }
 
-// fuzz runs every Fuzz target of the module, one at a time.
+// fuzzTags adds unsandboxedhevc to the release build's tags, so that the fuzz task also fuzzes the
+// HEVC fast path (FuzzFastPathNAL, SECURITY.md section 9.1), which only that tag compiles; the tag
+// changes nothing else.
+func fuzzTags(release string) string {
+	if release == "" {
+		return "unsandboxedhevc"
+	}
+	return release + ",unsandboxedhevc"
+}
+
+// fuzz runs every Fuzz target of the module, one at a time, built with fuzzTags.
 func fuzz(args []string) error {
 	fs := newFlags("fuzz")
 	d := fs.Duration("time", 10*time.Second, "fuzzing time per target")
@@ -328,6 +338,7 @@ func fuzz(args []string) error {
 	if err != nil {
 		return err
 	}
+	tags = fuzzTags(tags)
 	out, err := exec.Command("go", goTest(tags, "-list", "^Fuzz", "./...")...).Output()
 	if err != nil {
 		return fmt.Errorf("listing fuzz targets: %w", err)

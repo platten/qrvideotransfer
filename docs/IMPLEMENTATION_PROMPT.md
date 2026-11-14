@@ -273,18 +273,22 @@ defaults.
 
 Then stop for **G2**.
 
-### M7. Documentation and release (2 agents)
+### M7. Final security pass
+
+Follow SECURITY.md section 10 exactly. The reviewers must be agents that have seen none of the
+implementation history. Exit: no open finding of high or medium severity.
+
+### M8. Documentation and release (2 agents)
 
 - The user guide, an architecture guide, the website and its publishing workflow.
 - Root `SECURITY.md`; package formats; signing and notarisation wiring; the script that rebuilds the
   embedded ffmpeg from source, with the licence notices its GPL terms require; and a full release dry
   run. List for the owner every secret and external repository the release workflow needs.
+- Exit: the release dry run succeeds, and an independent delta security review of everything merged since the M7 pass
+  ended (release workflows, packaging configuration, signing steps, and any code touched), with no
+  open finding of high or medium severity.
 
-### M8. Final security pass
-
-Follow SECURITY.md section 10 exactly. The reviewers must be agents that have seen none of the
-implementation history. When it exits cleanly, prepare the `v1.0.0-rc.1` tag and stop; pushing it is the
-owner's decision.
+When M8 exits cleanly, prepare the `v1.0.0-rc.1` tag and stop; pushing it is the owner's decision.
 
 ## 6. Steps that need the owner
 
@@ -348,5 +352,11 @@ changed and why; and anything not verified, said plainly.
 
 ## 8. Done
 
-The work is finished when M8 has exited cleanly, all checks pass on the six runners, the three
+The work is finished when M7 and M8 have exited cleanly, all checks pass on the six runners, the three
 documents describe what was actually built, and the release candidate tag is prepared for the owner.
+
+## Change log
+
+| Date | Change |
+| --- | --- |
+| 2026-11-14 | The owner made the GitHub repository public (Authorisations, stream G note); the owner swapped the last two milestones: M7 is now the final security pass and M8 documentation and release, which gains a delta security review of everything merged after M7 before the release candidate is prepared |

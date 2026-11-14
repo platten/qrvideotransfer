@@ -82,7 +82,7 @@ type RecorderParams struct {
 // Constants shared by every preset (DESIGN.md section 15).
 const (
 	panelGamma   = 2.4  // BT.1886 exponent before GammaError
-	focalScale   = 1.4  // focal length is the frame width / 1.4: about 71 degrees across
+	focalScale   = 1.4  // focal length is the frame width / 1.4: 70.0 degrees across
 	surround     = 0.02 // linear light around the screen, as a share of white
 	glarePeak    = 1.5  // linear light at a glare patch's core, as a share of white
 	shakeRevert  = 0.95 // the hand-shake walk's pull back to the mean per capture

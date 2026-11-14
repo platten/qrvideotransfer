@@ -13,7 +13,7 @@ updates:
       prefix: "chore(deps)"
     # The video engine's pins are updated by hand only. Every engine speed, memory and sandbox
     # figure of spike S1 (docs/spikes/S1.md) was measured on exactly these versions; they are
-    # updated deliberately, with stream D re-running the S1 measurements, no later than M7.
+    # updated deliberately, with stream D re-running the S1 measurements, before the final security pass (M7).
     ignore:
       - dependency-name: github.com/tetratelabs/wazero
       - dependency-name: codeberg.org/gruf/go-ffmpreg
