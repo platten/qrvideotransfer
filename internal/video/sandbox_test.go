@@ -685,13 +685,13 @@ func TestCodecIDInjection(t *testing.T) {
 	if err := os.WriteFile(p, bad, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	want := map[int]time.Duration{}
-	d, err := b.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	var want []time.Duration // the same file before the change
+	d, err := b.NewDecoder(t.Context(), filepath.Join(dir, "two.mkv"), DecodeConfig{BrightnessOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range decodeAll(t, d) {
-		want[f.Index] = f.PTS
+		want = append(want, f.PTS)
 	}
 	d, err = b.NewDecoder(t.Context(), p, DecodeConfig{BrightnessOnly: true})
 	if err != nil {
@@ -700,8 +700,8 @@ func TestCodecIDInjection(t *testing.T) {
 	var f Frame
 	n := 0
 	for err = d.Next(&f); err == nil; err = d.Next(&f) {
-		if pts, ok := want[n]; !ok || f.PTS != pts {
-			t.Fatalf("frame %d returned at %v, want %v", n, f.PTS, pts)
+		if n >= len(want) || f.PTS != want[n] {
+			t.Fatalf("frame %d returned at %v, want %v", n, f.PTS, want[min(n, len(want)-1)])
 		}
 		n++
 	}
@@ -725,17 +725,27 @@ func setSecondCodecID(t *testing.T, data []byte, cid string) []byte {
 	out = append(out, data[i+len(old):]...)
 	delta := len(cid) - 16
 	// The enclosing elements, innermost first; each size field lies before the previous one.
+	// The Tracks element's size field: the last Tracks ID before the CodecID (a SeekHead before it
+	// holds the same bytes).
+	tracks := bytes.LastIndex(data[:i], []byte{0x16, 0x54, 0xae, 0x6b}) + 4
 	var sizes []int
-	for j := i - 1; j >= 0 && len(sizes) == 0; j-- { // TrackEntry
-		if data[j] == 0xae {
-			if n, w := ebmlSize(data[j+1:]); w > 0 && j+1+w+int(n) > i && j+1+w <= i {
-				sizes = append(sizes, j+1)
-			}
+	n, w := ebmlSize(data[tracks:])
+	for pos, end := tracks+w, tracks+w+int(n); pos < end; { // the TrackEntry holding i
+		_, idLen := ebmlSize(data[pos:]) // IDs are coded like sizes
+		size, sw := ebmlSize(data[pos+idLen:])
+		content := pos + idLen + sw
+		if idLen == 0 || sw == 0 {
+			t.Fatal("unreadable Tracks element")
 		}
+		if data[pos] == 0xae && content <= i && i < content+int(size) {
+			sizes = append(sizes, pos+idLen)
+		}
+		pos = content + int(size)
 	}
-	for _, id := range [][]byte{{0x16, 0x54, 0xae, 0x6b}, {0x18, 0x53, 0x80, 0x67}} { // Tracks, Segment
-		sizes = append(sizes, bytes.Index(data, id)+4)
+	if len(sizes) != 1 {
+		t.Fatal("no TrackEntry holds the CodecID")
 	}
+	sizes = append(sizes, tracks, bytes.Index(data, []byte{0x18, 0x53, 0x80, 0x67})+4) // Tracks, Segment
 	for _, at := range sizes {
 		n, w := ebmlSize(out[at:])
 		if w == 8 && n == 1<<56-1 { // unknown size

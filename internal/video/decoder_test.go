@@ -149,6 +149,7 @@ func TestDecoderCancel(t *testing.T) {
 func TestDecoderExtraTimestamps(t *testing.T) {
 	t.Parallel()
 	extra := fakeRunner(func(ctx context.Context, j *job, _ *meter) (int, error) {
+		_, _ = fmt.Fprintf(j.stderr, "[Parsed_showinfo_0 @ 0x1] config in time_base: 1/10, frame_rate: 10/1\n")
 		for i := range 2 {
 			_, _ = fmt.Fprintf(j.stderr, "[Parsed_showinfo_0 @ 0x1] n: %d pts: %d pts_time:0 pos: 0 fmt:yuv420p s:4x2 i:P\n", i, i)
 		}
@@ -227,6 +228,7 @@ func TestDecoderBuffer(t *testing.T) {
 			}
 		}
 		r := fakeRunner(func(ctx context.Context, j *job, _ *meter) (int, error) {
+			_, _ = fmt.Fprintf(j.stderr, "[Parsed_showinfo_0 @ 0x1] config in time_base: 1/10, frame_rate: 10/1\n")
 			_, _ = fmt.Fprintf(j.stderr, "[Parsed_showinfo_0 @ 0x1] n: 0 pts: 0 pts_time:0 pos: 0 fmt:x s:1024x512 i:P\n")
 			_, err := j.stdout.Write(frame)
 			return 0, err
