@@ -117,9 +117,9 @@ func defaultCacheDir() string {
 
 // slots holds one token per engine instance allowed to run: at most GOMAXPROCS - 1 at once. With
 // WithCloseOnContextDone(true) every loop back-edge of the compiled code returns to Go for its check,
-// where the scheduler can preempt it, so the watchdog stops every instance even without the cap;
-// but on a small, loaded machine (the macos-26-intel CI runner) uncapped spinning instances were
-// stopped 16.8 s after a 2 s limit, so the cap stays as a mitigation.
+// where the scheduler can preempt it, so the watchdog stops every instance even without the cap,
+// but late: uncapped, stops were up to 8 times late on a CI runner (macos-26-intel, 16.8 s against a
+// 2 s limit). The cap is a real defence.
 var slots = make(chan struct{}, max(1, runtime.GOMAXPROCS(0)-1))
 
 // EngineInstances is how many engine instances may run at once: one fewer than GOMAXPROCS at

@@ -460,8 +460,8 @@ Each engine instance adds its linear memory, which spike S1 measured at 155 MB (
 instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of the 21 runs where it
 was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). The default worker count is the CPU count, reduced so that the workers, each counted at the
 worst measured engine figure, 920 MB, stay within half of the machine's physical memory, and to at
-most `video.EngineInstances()`, one fewer than GOMAXPROCS (at least one). Without that cap the
-watchdog still stops every instance, but on a small, loaded machine late (section 12).
+most `video.EngineInstances()`, one fewer than GOMAXPROCS (at least one). The cap is a real
+defence: uncapped, stops were up to 8 times late on a CI runner (section 12).
 `internal/video` enforces it itself; further instances wait their turn, with no limit but the
 context, so a worker must not hold more decoders open than the cap without reading them. The opt-in
 HEVC fast path of section 12 is not counted: its memory is not bounded against a crafted stream, which
@@ -607,11 +607,13 @@ Costs a user should expect:
     own pixel format (`yuv420p`, `yuvj420p`, `yuv420p10le`) or its Y plane alone (`gray`,
     `gray10le`, through `extractplanes=y`), so ffmpeg converts neither range nor depth; other formats
     are read as brightness only, 10-bit output needs a 10-bit source, and more than 10 bits is
-    refused. Every frame must keep the probed size; a change mid-stream stops the decode. A
-    `showinfo` line is recognised only at the start of a line (`[Parsed_showinfo_N @ address] n:`):
-    ffmpeg prints container metadata indented, and a newline in a value as an indented
-    continuation, so a file cannot inject a timestamp; a decode with more timestamp lines than
-    frames is refused. Frames are read straight into the caller's planes through a 256 KiB buffer,
+    refused. The picture may be at most 8K UHD in either orientation (longer side 7,680, shorter
+    side 4,320). Every frame must keep the probed size; a change mid-stream stops the decode. A
+    `showinfo` line is recognised only at the start of a line (`[Parsed_showinfo_N @ address] n:`),
+    which keeps out container metadata (printed indented) but not every text from the file: an
+    unknown Matroska CodecID is logged from the start of a line and may hold a newline. So frame
+    lines must also number 0, 1, 2 ... after each configuration line, and one out of sequence fails
+    the decode; more timestamp lines than frames, at the end of the file or of a slice, is refused. Frames are read straight into the caller's planes through a 256 KiB buffer,
     with no frame-sized buffer of the decoder's own. An odd width or height is refused from the
     probe, since 4:2:0 chroma would be mis-framed.
   - *Engine speed at 4K HEVC* (spike S1, one instance, luma only, medians of five runs): 8-bit 3.9 fps,
@@ -773,11 +775,11 @@ Costs a user should expect:
   Wasm cannot be preempted. That reasoning does not hold while close-on-cancel is on: wazero then
   returns to Go at every loop back-edge for its check (done in Go so that it can be preempted,
   `call_engine.go`, `ExitCodeCheckModuleExitCode`), and without the cap the watchdog still stops
-  every instance. It does not always stop them promptly: GOMAXPROCS + 2 uncapped spinning instances
-  were stopped on time on a 16-thread development machine, but on the macos-26-intel CI runner
-  GOMAXPROCS + 1 of them took 16.8 s against a 2 s limit, while the capped run stayed within its
-  bound (`TestWatchdogUnderLoad` asserts the capped case and logs the uncapped one). The cap stays,
-  as a mitigation for small, loaded machines. Its hazard: waiting for a turn has no limit but the
+  every instance, but not promptly: uncapped, stops were up to 8 times late on a CI runner
+  (macos-26-intel, GOMAXPROCS + 1 spinning instances, 16.8 s against a 2 s limit), while the capped
+  run stayed within its bound; on a 16-thread development machine GOMAXPROCS + 2 uncapped instances
+  were stopped on time (`TestWatchdogUnderLoad` asserts the capped case and logs the uncapped one).
+  The cap stays as a real defence. Its hazard: waiting for a turn has no limit but the
   context, so a caller holding that many decoders open without reading them waits for ever on the next
   (`TestHoldAndWait`). The worker count of section 8 does not exceed it.
 
@@ -1326,3 +1328,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-13 | M1 stream D: section 8 caps the worker count at `video.EngineInstances()` (GOMAXPROCS - 1), because compiled Wasm cannot be preempted and instances on every P starved the watchdog on the 4-vCPU CI runners. Section 12 records the engine as built: the embedded copy of the module and its hash check, the encoder's MP4 and even-length `.h264` runs with `Concat`, how slices are read (1 s preroll with `-noaccurate_seek`, `-copyts`, `showinfo` timestamps, `-fps_mode passthrough`, source pixel format, size changes refused), the instance cap, and the measured cost of `WithCloseOnContextDone` (75-91% on decoding, reported to the owner; kept on); the HEVC fast path is compiled only with the `unsandboxedhevc` tag, sends parameter sets that differ from the probe to the engine, takes timestamps from `framemd5`, and times each picture from its first slice. Section 13: the `--ffmpeg` row says where `ffprobe` comes from and that a path also runs outside the sandbox; the `--unsandboxed-hevc` row says the flag exists only in tagged builds |
 | 2026-11-14 | M1 stream D, review of PR #9: section 8 calls the instance cap a precaution and states that workers must not hold more decoders open than the cap without reading them. Section 12: how a slice is read adds the anchored `showinfo` match, the refusal of extra timestamp lines and of odd sizes, and reading frames straight into the caller's planes; the sandbox adds the protocol and format whitelists (the HLS playlist that held ffprobe for 8 minutes) and the probe's bounds; the watchdog counts a complete, timestamped frame, does not excuse an instance qrvt is waiting on, closes the pipe on cancellation, and gives the true reason the cap is not needed with close-on-cancel and its hold-and-wait hazard; the fast path's as-built list adds the copy-size bound, the abandon without a flush, the CI step and the fuzz tag |
 | 2026-11-14 | M1 stream D, CI on PR #9: sections 8 and 12 correct the instance cap's description: on the macos-26-intel runner GOMAXPROCS + 1 uncapped spinning instances took 16.8 s against a 2 s limit, so the cap is a mitigation, not a harmless precaution |
+| 2026-11-14 | M1 stream D, round 2 of the review of PR #9: section 8 calls the instance cap a real defence (uncapped, stops were up to 8 times late on a CI runner); section 12 adds the 8K UHD capture limit in either orientation, corrects the `showinfo` injection wording (an unknown Matroska CodecID is logged from the start of a line) and adds the frame-number sequence check and the slice-end count check, and restates the cap's evidence |

@@ -252,7 +252,7 @@ func (b *ff) NewDecoder(ctx context.Context, path string, c DecodeConfig) (Decod
 }
 
 // readBuf is the size of the buffer through which a decoder reads raw frames into the caller's
-// planes; it holds no whole frame (201 MB at the capture limit in 10 bits).
+// planes; it holds no whole frame (100 MB at the capture limit).
 const readBuf = 256 << 10
 
 // startDecoder starts an instance that decodes path to raw frames in format pix. Progress is a
