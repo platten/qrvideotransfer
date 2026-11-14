@@ -1,0 +1,18 @@
+qrvt decode
+╭───────────────────────────────╮╭───────────────────────────────╮╭───────────────────────────────╮
+│ Source                        ││ Video                         ││ Signal                        │
+│ IMG_0412.MOV                  ││ Recording  3840x2160, 60 fps… ││ Captures    3600              │
+│ IMG_0413.MOV                  ││ Code       1920x1080, gray4,… ││ Frames      840 of 840        │
+│ to received                   ││                               ││ Clean       93.6%             │
+│                               ││                               ││ Bit errors  0.92%             │
+│                               ││                               ││ Codewords   54720             │
+╰───────────────────────────────╯╰───────────────────────────────╯╰───────────────────────────────╯
+decode-video ██████████████████████████████████████████████████████ done  3600 frames in 0:18
+demodulate   ██████████████████████████████████████████████████████ done  3600 frames in 0:19
+repair       ██████████████████████████████████████████████████████ done  48 blocks in 0:01
+verify       ██████████████████████████████████████████████████████ done  50.0 MiB in 0:01
+unpack       ██████████████████████████████████████████████████████ done  50.0 MiB in 0:02
+Blocks  48 of 48 ready
+████████████████████████████████████████████████
+! Clipping: Highlights are clipped in 3.2% of cells; lower the screen brightness.
+! FramesDropped: The recording skipped 12 frames.
