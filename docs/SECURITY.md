@@ -249,7 +249,7 @@ root package, `cmd/` and `internal/` that fails if any package other than `inter
 `os/exec`, or if any package imports `unsafe`. Developer tooling under `tools/` and throwaway code under
 `spikes/` are outside that rule, since they must launch other programs.
 
-## 10. Final security pass (milestone M8)
+## 10. Final security pass (milestone M7)
 
 The pass happens when the tool is feature-complete and before the first release candidate is tagged.
 
@@ -268,6 +268,10 @@ The pass happens when the tool is feature-complete and before the first release 
    the reviewer's confirmation that the fix holds.
 5. **Exit.** No open finding of high or medium severity; every section 9 test passes on all three
    systems; the limits table matches the constants in the code.
+6. **Delta review before the release candidate (M8).** Code and workflows change after the pass. Before
+   the release candidate is prepared, an independent reviewer examines everything merged since the pass
+   ended (release workflows, packaging configuration, signing steps, and any code touched), with the
+   same exit: no open finding of high or medium severity.
 
 Severity: *high* breaks a guarantee in section 1; *medium* weakens a defence in section 4 without yet
 breaking a guarantee, or is a denial of service that stays within the limits; *low* is everything else.
@@ -275,7 +279,7 @@ breaking a guarantee, or is a denial of service that stays within the limits; *l
 ## 11. Reporting a vulnerability
 
 Report privately through the repository's "Report a vulnerability" page (GitHub private vulnerability
-reporting), not in a public issue. The root `SECURITY.md` created in milestone M7 repeats this
+reporting), not in a public issue. The root `SECURITY.md` created in milestone M8 repeats this
 instruction and states which versions receive fixes.
 
 ## Change log
@@ -296,3 +300,4 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | M1 stream A, third independent review of PR 7: section 5's xz row says a body holds exactly one block, so one LZMA2 decoder and one dictionary per body, with the reason (a new 8 MiB dictionary per block let 100,000 tiny blocks cost 78 s and 785 GB of allocation), the chunk rules, and states live memory and total allocation separately as measured (one dictionary, one chunk and fixed buffers live; allocation under 1 MiB, or the dictionary plus 1 MiB, independent of stream length; 12 MiB for 500,000 one-byte chunks), with the fuzz target's allocation bound |
 | 2026-11-14 | M1 stream A, fourth independent review of PR 7: section 5's xz row adds the limits on LZMA state resets and on new uncompressed runs, with the library allocations they bound, and states only bounds that hold: live memory; total allocation as derived from the rules plus the measured fixed cost per LZMA chunk (about 200 bytes, which no rule limits); the measured figures for the review streams; and the fuzz target's check described as a check of the inputs it tries |
 | 2026-11-14 | M1 stream F, PR #11 round 3 (the owner's decision): section 5 gives the manifest default as 100,000 entries and 6,710,886 bytes (a tenth of the format limit), raised by `--max-entries` up to 1,000,000 entries and 64 MiB; two limits now have a flag, the unpacked size and the manifest |
+| 2026-11-14 | The owner swapped the last two milestones: the final security pass is M7 (section 10), and the root `SECURITY.md` comes with M8; M8 adds a delta security review of everything merged after the pass |
