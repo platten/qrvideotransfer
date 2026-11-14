@@ -9,7 +9,7 @@ require (
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/ulikunitz/xz v0.5.17
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.50.0
 	golang.org/x/text v0.44.0
 )
 
