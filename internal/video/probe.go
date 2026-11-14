@@ -31,6 +31,10 @@ type probeInfo struct {
 // runs many times slower than in any build that ships.
 var probeTime = EngineProbeTime
 
+// observeProbe, when set, is told each probe's active time at every watchdog tick. TEMPORARY
+// measurement for the review of PR #20; removed before review.
+var observeProbe func(active time.Duration)
+
 // maxProbeOutput bounds what is read from ffprobe.
 const maxProbeOutput = 1 << 20
 
@@ -54,8 +58,13 @@ func probe(ctx context.Context, r runner, path string) (probeInfo, error) {
 		return probeInfo{}, fmt.Errorf("%w: empty file", ErrInvalidVideo)
 	}
 	out := &capped{max: maxProbeOutput}
+	check := probeLimits(st.Size(), probeTime)
+	if observeProbe != nil { // TEMPORARY measurement
+		inner := check
+		check = func(m *meter, active time.Duration) error { observeProbe(active); return inner(m, active) }
+	}
 	err = run(ctx, r, job{prog: "ffprobe", args: func(in, _ string) []string { return probeArgs(in) },
-		input: path, stdout: out, progress: progReads, check: probeLimits(st.Size(), probeTime)})
+		input: path, stdout: out, progress: progReads, check: check})
 	if errors.Is(err, ErrEngine) {
 		return probeInfo{}, fmt.Errorf("%w: %w", ErrInvalidVideo, err)
 	}

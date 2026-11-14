@@ -57,7 +57,7 @@ func TestMain(m *testing.M) {
 		w, _ := currentWorkers()
 		w.env = workerEnv()
 	}
-	os.Exit(m.Run())
+	os.Exit(measureReport(m.Run())) // TEMPORARY measurement
 }
 
 // hostileWorker misbehaves in the way named. It first says the engine is loaded, as a worker does
@@ -213,6 +213,7 @@ func TestWorkerSpin(t *testing.T) {
 	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
 		t.Fatalf("got %v", err)
 	}
+	measureStop("TestWorkerSpin", ps.since()-EngineStallTimeout, 5*time.Second)             // TEMPORARY measurement
 	if el := ps.since(); el < EngineStallTimeout || el > EngineStallTimeout+5*time.Second { // from the worker's start, after any wait for a slot
 		t.Errorf("stopped after %v", el)
 	}
@@ -596,6 +597,7 @@ func TestWorkerCancel(t *testing.T) {
 	}
 	_ = d.Close()
 	_ = e.Close()
+	measureStop("TestWorkerCancel", time.Since(start), 5*time.Second) // TEMPORARY measurement
 	if el := time.Since(start); el > 5*time.Second {
 		t.Errorf("stopped %v after the cancel", el)
 	}
