@@ -1,0 +1,23 @@
+# A workflow that follows every rule. "pull_request_target" in a comment is allowed.
+name: good
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: quoted
+        uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: ./.github/actions/local
+      - uses: docker://alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      - run: echo "uses: not/an-action@v1 inside a script is not a step"
+  reusable:
+    uses: owner/repo/.github/workflows/w.yml@3d3c42e5aac5ba805825da76410c181273ba90b1 # v1.2.3

@@ -3,7 +3,7 @@
 # absent. Prints everything it will install, and asks, before installing anything.
 #
 #   scripts/setup.sh            Go 1.27.4 and git, then `go run ./tools/dev install-tools`
-#                               (golangci-lint v2.15.0, GoReleaser v2.20.2)
+#                               (golangci-lint, GoReleaser, syft, actionlint, go-licenses)
 #   scripts/setup.sh --spike    also a native ffmpeg with an HEVC encoder (libx265) and the
 #                               wasmtime command-line runner, which only spike S1 needs
 #   --yes                       do not ask (required when stdin is not a terminal)
@@ -149,10 +149,10 @@ if [ $go_install = 0 ]; then
 	tools=$(PATH="${gobin:+$gobin:}$PATH" go run ./tools/dev install-tools -dry-run)
 	case $tools in
 	*"Will install"*) add "$(printf '%s' "$tools" | sed -n '2,$p' | sed 's/^ *//' | paste -sd ';' -)" ;;
-	*) say "ok  Go tools (golangci-lint, GoReleaser)" ;;
+	*) say "ok  pinned tools (golangci-lint, GoReleaser, syft, actionlint, go-licenses)" ;;
 	esac
 else
-	add "then, if missing: golangci-lint v2.15.0 and GoReleaser v2.20.2 (go install, through tools/dev)"
+	add "then, if missing, the pinned tools of tools/dev: golangci-lint, GoReleaser, syft and actionlint (release archives, SHA-256 checked) and go-licenses (go install)"
 fi
 
 if [ -z "$plan" ]; then
