@@ -73,6 +73,11 @@ type DecodeOptions struct {
 	// Non-empty: the transfer must be signed by one of these.
 	VerifyKeys [][]byte
 	MaxSize    int64 // largest total size that may be unpacked
+	// MaxEntries is the largest number of manifest entries that may be unpacked; the manifest-size
+	// limit is raised in proportion. 0 means the decoder's default, about 100,000; the most is the
+	// format limit of 1,000,000 entries and 64 MiB (flag --max-entries). A manifest over the limit
+	// is a LimitError whose Flag is "--max-entries".
+	MaxEntries int
 	Overwrite  bool
 	Report     string // optional path for a JSON report
 	Backend    string
