@@ -28,13 +28,11 @@ const (
 	// file's size in bytes. It is checked from the probe before decoding and again while decoding.
 	MaxDecodedPixelsPerInputByte = 10_000
 
-	// MaxCaptureWidth bounds the picture width accepted from a video file.
-	MaxCaptureWidth = 8192
-	// MaxCaptureHeight bounds the picture height accepted from a video file.
-	MaxCaptureHeight = 8192
-	// MaxCaptureLongSide is a stub.
+	// MaxCaptureLongSide bounds the longer side of a picture accepted from a video file, whatever its
+	// orientation: with MaxCaptureShortSide, 8K UHD, landscape or portrait-coded (some cameras code
+	// portrait recordings as 4320 x 7680 instead of tagging a rotation).
 	MaxCaptureLongSide = 7680
-	// MaxCaptureShortSide is a stub.
+	// MaxCaptureShortSide bounds the shorter side of a picture accepted from a video file.
 	MaxCaptureShortSide = 4320
 
 	// EngineMemoryLimit is each engine instance's linear memory, reserved up front; it is also the
@@ -127,11 +125,12 @@ func checkSize(w, h int) error {
 	if w <= 0 || h <= 0 {
 		return fmt.Errorf("%w: picture size %dx%d", ErrInvalidVideo, w, h)
 	}
-	if w > MaxCaptureWidth {
-		return &LimitError{Limit: "MaxCaptureWidth", Value: float64(w), Max: MaxCaptureWidth}
+	long, short := max(w, h), min(w, h)
+	if long > MaxCaptureLongSide {
+		return &LimitError{Limit: "MaxCaptureLongSide", Value: float64(long), Max: MaxCaptureLongSide}
 	}
-	if h > MaxCaptureHeight {
-		return &LimitError{Limit: "MaxCaptureHeight", Value: float64(h), Max: MaxCaptureHeight}
+	if short > MaxCaptureShortSide {
+		return &LimitError{Limit: "MaxCaptureShortSide", Value: float64(short), Max: MaxCaptureShortSide}
 	}
 	return nil
 }

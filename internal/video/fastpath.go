@@ -317,7 +317,7 @@ func parseSPSLimits(rbsp []byte) (w, h, dpb int, err error) {
 		r.ue()
 		r.ue()
 	}
-	if r.bad || w <= 0 || h <= 0 || w > MaxCaptureWidth || h > MaxCaptureHeight {
+	if r.bad || checkSize(w, h) != nil { // the capture limit, in either orientation
 		return 0, 0, 0, fmt.Errorf("%w: unreadable sequence parameter set", errRefused)
 	}
 	return w, h, dpb, nil

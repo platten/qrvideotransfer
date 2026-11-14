@@ -351,6 +351,11 @@ func (d *pipeDecoder) next(f *Frame) error {
 		return nil
 	}
 	if d.c.Length > 0 && pts >= d.c.Start+d.c.Length {
+		// The engine logs a frame's line before writing it, and the pipe holds no frame, so at most
+		// one line can be waiting here: that of the frame it is blocked writing.
+		if len(d.ts.q) > 1 {
+			return d.stop(fmt.Errorf("%w: more frame timestamps than frames", ErrEngine))
+		}
 		return d.stop(io.EOF)
 	}
 	f.PTS, f.Index = pts, frameIndex(pts, d.p.FPSNum, d.p.FPSDen)
@@ -455,12 +460,15 @@ func (t frameTS) at() time.Duration {
 // precedes the frame on the output, and its time base. Everything else goes to a short tail for error
 // messages.
 type showinfo struct {
-	mu       sync.Mutex
-	line     []byte
-	tbN, tbD int64
-	q        chan frameTS
-	over     bool
-	tail     logTail
+	mu         sync.Mutex
+	line       []byte
+	tbN, tbD   int64
+	configured bool  // a configuration line has been seen
+	next       int64 // the frame number the next frame line must carry
+	bad        error // sticky: frame lines out of sequence
+	q          chan frameTS
+	over       bool
+	tail       logTail
 }
 
 func newShowinfo() *showinfo { return &showinfo{q: make(chan frameTS, 1024)} }
@@ -483,10 +491,12 @@ func (s *showinfo) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// showinfoLine matches the start of a line that the showinfo filter itself logs. Anchored at the
-// line's start, it cannot match text from the file (ffmpeg prints container metadata indented, and
-// a newline in a value as an indented continuation). A native ffmpeg may print the address without
-// the 0x.
+// showinfoLine matches the start of a line that the showinfo filter itself logs. A native ffmpeg
+// may print the address without the 0x. Anchoring it at the line's start keeps out container
+// metadata, which ffmpeg prints indented (and a newline in a value as an indented continuation), but
+// not all text from the file: some is logged from the start of a line, such as an unknown Matroska
+// CodecID, which may hold a newline. So frame lines must also carry the frame numbers 0, 1, 2 ...
+// after each configuration line, and a line out of that sequence fails the decode.
 var showinfoLine = regexp.MustCompile(`^\[Parsed_showinfo_\d+ @ (0x)?[0-9a-fA-F]+\] `)
 
 func (s *showinfo) parse(l string) {
@@ -502,14 +512,19 @@ func (s *showinfo) parse(l string) {
 		a, b, _ := strings.Cut(strings.TrimSuffix(field(v), ","), "/")
 		s.tbN, _ = strconv.ParseInt(a, 10, 64)
 		s.tbD, _ = strconv.ParseInt(b, 10, 64)
+		s.configured, s.next = true, 0 // a new filter instance counts from 0
 		return
 	}
-	ok1 := strings.HasPrefix(l, "n:")
+	n, ok1 := strings.CutPrefix(l, "n:")
 	_, pts, ok2 := strings.Cut(l, " pts:")
 	_, size, ok3 := strings.Cut(l, " s:")
 	if !ok1 || !ok2 || !ok3 {
 		return
 	}
+	if k, err := strconv.ParseInt(field(n), 10, 64); (err != nil || !s.configured || k != s.next) && s.bad == nil {
+		s.bad = fmt.Errorf("%w: frame timestamp lines out of sequence (frame %s, expected %d)", ErrEngine, sanitise(field(n), 20), s.next)
+	}
+	s.next++
 	t := frameTS{tbN: s.tbN, tbD: s.tbD}
 	var err1, err2, err3 error
 	t.pts, err1 = strconv.ParseInt(field(pts), 10, 64)
@@ -550,6 +565,16 @@ var errNoTimestamp = fmt.Errorf("%w: a frame without a timestamp", ErrEngine)
 // pop returns the next frame's timestamp. It waits for it until done is closed (errNoTimestamp),
 // ctx ends (its cause) or timeout passes (the EngineStallTimeout error).
 func (s *showinfo) pop(ctx context.Context, done <-chan struct{}, timeout time.Duration) (frameTS, error) {
+	t, err := s.wait(ctx, done, timeout)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.bad != nil {
+		return frameTS{}, s.bad
+	}
+	return t, err
+}
+
+func (s *showinfo) wait(ctx context.Context, done <-chan struct{}, timeout time.Duration) (frameTS, error) {
 	select {
 	case t := <-s.q:
 		return t, nil
