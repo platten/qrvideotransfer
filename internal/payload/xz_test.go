@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -74,9 +75,12 @@ func TestXZDecodesEncoderOutput(t *testing.T) {
 		"compressible":   bytes.Repeat([]byte("qrvt stream "), 300<<10),
 	}
 	for name, in := range inputs {
-		for _, block := range []int64{0, 64 << 10} { // 0: one block, as Pack writes; else many blocks
-			if out, err := decodeXZ(xzOf(t, in, block)); err != nil || !bytes.Equal(out, in) {
-				t.Fatalf("%s, block size %d: decode: %v", name, block, err)
+		if out, err := decodeXZ(xzOf(t, in, 0)); err != nil || !bytes.Equal(out, in) { // one block, as Pack writes
+			t.Fatalf("%s: decode: %v", name, err)
+		}
+		if len(in) > 64<<10 { // many blocks: refused (FORMAT.md section 12)
+			if _, err := decodeXZ(xzOf(t, in, 64<<10)); !isFormat(err) {
+				t.Fatalf("%s, many blocks: %v", name, err)
 			}
 		}
 	}
@@ -115,8 +119,11 @@ var xzFixtures = map[string][]string{
 	"uncompressed.xz": {"-6"},
 }
 
-// TestXZDecodesXZUtilsOutput decodes streams written by XZ Utils 5.8.4: every check type, many
-// blocks, block headers with sizes, and uncompressed chunks.
+// xzMultiBlock are the fixtures with more than one block (11, 3 and 4), which a decoder refuses.
+var xzMultiBlock = map[string]bool{"blocks.xz": true, "threads.xz": true, "block-list.xz": true}
+
+// TestXZDecodesXZUtilsOutput decodes the one-block streams written by XZ Utils 5.8.4 (every check
+// type, sizes in the block header, uncompressed chunks) and refuses the ones with several blocks.
 func TestXZDecodesXZUtilsOutput(t *testing.T) {
 	if *xzSamples != "" {
 		must(t, os.WriteFile(filepath.Join(*xzSamples, "sample.bin"), xzSample(""), 0o600))
@@ -127,7 +134,13 @@ func TestXZDecodesXZUtilsOutput(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join("testdata", "xz", name))
 		must(t, err)
 		caps := withDictHook(t)
-		if out, err := decodeXZ(data); err != nil || !bytes.Equal(out, in) {
+		out, err := decodeXZ(data)
+		switch {
+		case xzMultiBlock[name]:
+			if !isFormat(err) {
+				t.Errorf("%s has several blocks: %v", name, err)
+			}
+		case err != nil || !bytes.Equal(out, in):
 			t.Errorf("%s: %v", name, err)
 		}
 		for _, c := range *caps {
@@ -416,6 +429,21 @@ func FuzzXZ(f *testing.F) {
 		return old(r, dictCap)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
+		// Work and allocation: one pass that discards the output may allocate at most one dictionary
+		// and one LZMA2 decoder, plus a fixed multiple of the input (chunk buffers and headers).
+		caps = caps[:0]
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		r, release, _ := decompressor(bytes.NewReader(data), MethodXZ)
+		_, _ = io.Copy(io.Discard, r)
+		release()
+		runtime.ReadMemStats(&after)
+		if alloc := after.TotalAlloc - before.TotalAlloc; alloc > XZDictCap+2<<20+64*uint64(len(data)) {
+			t.Fatalf("allocated %d bytes for %d input bytes", alloc, len(data))
+		}
+		if len(caps) > 1 {
+			t.Fatalf("%d LZMA2 decoders created for one stream", len(caps))
+		}
 		caps = caps[:0]
 		out, err := decodeXZ(data)
 		for _, c := range caps {
