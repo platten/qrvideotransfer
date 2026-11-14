@@ -159,14 +159,15 @@ func EngineInstances() int { return cap(slots) }
 // output directory at /out, and nothing else; it has no network.
 func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	m.waiting.Add(1)
+	tokens := slots // the token goes back where it came from, even if a test swaps the channel
 	select {
-	case slots <- struct{}{}:
+	case tokens <- struct{}{}:
 		m.waiting.Add(-1)
 	case <-ctx.Done():
 		m.waiting.Add(-1)
 		return 0, ctx.Err()
 	}
-	defer func() { <-slots }()
+	defer func() { <-tokens }()
 	var in string
 	reads := &atomic.Int64{}
 	if j.progress == progReads {

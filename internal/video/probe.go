@@ -26,9 +26,8 @@ type probeInfo struct {
 	Container string
 }
 
-// probeTime is EngineProbeTime. Tests built with the race detector lengthen it (race_test.go): there
-// every loop back-edge of the engine calls instrumented Go for close-on-cancel's check, so a probe
-// runs many times slower than in any build that ships.
+// probeTime is EngineProbeTime, the same in every build: race-detector test builds used four times
+// the old 15 s, which is the 60 s every build now uses.
 var probeTime = EngineProbeTime
 
 // maxProbeOutput bounds what is read from ffprobe.

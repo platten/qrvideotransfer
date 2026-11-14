@@ -57,14 +57,17 @@ func TestWorkerClosesInherited(t *testing.T) {
 	if err := writeMsg(stdin, msgJob, b); err != nil {
 		t.Fatal(err)
 	}
-	for {
-		typ, _, err := readMsg(stdout, nil, parentLimit)
-		if err != nil {
-			t.Fatalf("no exit message: %v", err)
+	var rerr error
+	within(t, time.Minute, "the worker's exit message", func() {
+		for {
+			var typ byte
+			if typ, _, rerr = readMsg(stdout, nil, parentLimit); rerr != nil || typ == msgExit {
+				return
+			}
 		}
-		if typ == msgExit {
-			break
-		}
+	})
+	if rerr != nil {
+		t.Fatalf("no exit message: %v", rerr)
 	}
 }
 
@@ -98,7 +101,8 @@ func TestConcatCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	ret := make(chan error, 1)
 	go func() { ret <- b.Concat(ctx, []string{fifo}, filepath.Join(dir, "out.mp4"), 12) }()
-	w := <-writer // Concat has opened the run
+	var w *os.File
+	within(t, time.Minute, "Concat opening its run", func() { w = <-writer })
 	defer func() { _ = w.Close() }()
 	time.Sleep(3 * time.Second) // the engine is now waiting for input
 	cancel()
@@ -110,6 +114,11 @@ func TestConcatCancel(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Error("Concat still runs 15 s after its cancellation")
 		_ = w.Close()
-		t.Log(<-ret)
+		select {
+		case err := <-ret:
+			t.Log(err)
+		case <-time.After(time.Minute):
+			t.Log("Concat still runs a minute after its input closed")
+		}
 	}
 }

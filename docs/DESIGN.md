@@ -461,19 +461,33 @@ instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of th
 was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). The default worker count is the CPU count, reduced so that the workers, each counted at the
 worst measured engine figure, 920 MB, stay within half of the machine's physical memory. Each
 decoding instance runs in its own worker process (section 12), which the operating system schedules,
-so the worker count is not capped below the CPU count: a decoding worker spends about 300 ms of engine
+so the worker count is not reduced below the CPU count: a decoding worker spends about 300 ms of engine
 time per 4K frame, against a few milliseconds of qrvt's own work on the same frame in the parent
 (the frame's copy through the pipe, 10-37 ms at 4K, overlaps the next frame's decoding), so one
 worker per core keeps every core busy, and vision on the same cores only fills the gaps. A worker's
 peak resident memory measured 190 MB (1080p H.264), 310 MB (4K HEVC 8-bit) and 403 MB (4K HEVC
 10-bit), on one machine (the S1 development machine, spike S1 section 13), not on the CI runners;
 920 MB per worker stays the conservative count, because the whole 512 MiB reservation can
-become resident (spike S1). On a machine with 16 GB and 16 cores that allows 8 workers. Instances in
+become resident (spike S1). On a machine with 16 GB and 16 cores that allows 8 workers.
+`internal/video` enforces that count itself, as a cap on concurrent worker processes
+(`video.WorkerProcesses()`: GOMAXPROCS at start-up, which honours a container's CPU quota, and the
+memory this process may use: Linux `sysinfo`, or the cgroup's limit when smaller (v2 `memory.max`,
+v1 `memory.limit_in_bytes`), macOS `hw.memsize`, Windows `GlobalMemoryStatusEx`; GOMAXPROCS alone
+when the memory is unknown), so every caller and every test gets it. A job waiting for a turn is
+waiting, not stalled: the wait counts against no bound but its context. PR #15 left worker
+processes uncapped, reasoning that the operating system schedules them; that is withdrawn, since
+uncapped workers can oversubscribe the CPUs. It was prompted by a probe of a small clip, about a
+second's work, that exceeded the then 15 s `EngineProbeTime` on the 4-vCPU macos-26-intel runner
+under the full test load (run 43629256993); the cause is believed to be CPU starvation, but was not
+shown. The cap limits starvation from this process's own workers only, not from other processes on
+the machine, and it did not remove the effect: a capped run on that runner still recorded a probe
+of 13 s (run 43633299696). The probe bound is now 60 s for that reason (SECURITY.md section 5).
+Instances in
 qrvt's own process (encoding, `Concat`, and every instance when no worker process can be started) are capped
 at `video.EngineInstances()`, one fewer than GOMAXPROCS (at least one). The cap is a real defence:
 uncapped, stops were up to 8 times late on a CI runner (section 12). `internal/video` enforces it
-itself; further instances wait their turn, with no limit but the context, so on that fallback path a
-worker must not hold more decoders open than the cap without reading them. The opt-in
+itself. Under either cap, further jobs wait their turn with no limit but the context, so a worker
+must not hold more decoders open than the cap without reading them (`TestHoldAndWait`). The opt-in
 HEVC fast path of section 12 is not counted: its memory is not bounded against a crafted stream, which
 is why it is opt-in and only for recordings the user made themselves.
 
@@ -754,8 +768,9 @@ Costs a user should expect:
   (a test checks them against the engine's list); the native backend gets the same. ffmpeg detects an
   HLS playlist whatever the extension, and a 110-byte live playlist named `.mp4` held ffprobe for more
   than 8 minutes, rereading it every 29 s with each read counting as progress. A probe is also bounded
-  at 15 s of running time and 4 x the file's size + 16 MiB of reads (SECURITY.md section 5); probes of
-  the S1 and S2 files took at most 1.2 s and read at most 1.07 times the file.
+  at 60 s of running time and 4 x the file's size + 16 MiB of reads (SECURITY.md section 5); probes of
+  the S1 and S2 files took at most 1.2 s and read at most 1.07 times the file, but one probe under
+  the full CI test load took 13 s, and the time bound is a backstop sized at about four times that.
 - **Watchdog.** qrvt creates the wazero runtime and passes it to go-ffmpreg, with
   `RuntimeConfig.WithCloseOnContextDone(true)`: without it, cancelling a context cannot interrupt
   running Wasm. An instance that makes no progress for 30 s is cancelled and the decode stops with an
@@ -802,8 +817,10 @@ Costs a user should expect:
   directory, an output bound) travels over the worker's standard input as one length-prefixed JSON
   message, never in its arguments or environment, and the worker validates it as untrusted input. The
   job carries the protocol's version; a worker refuses any other (the executable on disk may have been
-  replaced by another release while qrvt runs), and the parent, given that refusal as the worker's
-  first message, treats it as a failure to start: the job runs in process (*Fallback*, below). The
+  replaced by another release while qrvt runs). The worker sends its ready message before any guest
+  code runs, so the parent treats anything other than that message as the worker's first (that
+  refusal, any other exit, a broken or early message, the worker ending) as a failure to start,
+  passes on nothing the worker sent, and runs the job in process (*Fallback*, below). The
   program's standard input, if any, is sent only once the worker reports the engine loaded. The
   worker keeps every control: the read-only single-file counting view, the 512 MiB ceiling, and
   `MaxDecodedPixelsPerInputByte` as a bound on its output. Results come back as typed, length-prefixed
@@ -837,9 +854,14 @@ Costs a user should expect:
     about 0.5 s for a 4K frame), and a guest that spun would stall it, and with it the whole process;
     that matters to a host that encodes and decodes in one process (SECURITY.md T1).
   - *Fallback.* When the host never called the hook, its executable cannot be found or a worker
-    cannot be started, the instance runs in qrvt's process with close-on-cancel on, under the
-    `EngineInstances()` cap: the same guarantees, 4 to 11 times slower. `video.WorkerStatus` then
-    returns the reason, which the pipeline reports as a warning (`WarnEngineInProcess`).
+    cannot be started or fails before its ready message, the instance runs in qrvt's process with close-on-cancel on, under the
+    `EngineInstances()` cap: the same guarantees, 4 to 11 times slower. Two calls report it.
+    `(*video.Embedded).InProcess` is per backend: it returns the first reason any job of that backend
+    ran in process, and keeps returning it. The pipeline makes one backend per decode, asks it at the
+    decode's end, and warns once for that job (`WarnEngineInProcess`). `video.WorkerStatus` is the
+    process's current state: it returns the reason while no worker can be used, or after a failed
+    start until a worker next reaches ready (a failed start may be passing, such as a worker killed
+    under memory pressure).
   - *Not claimed.* A worker is the same binary with the same privileges as qrvt; worker processes
     bound hangs and memory and keep a stuck engine from blocking qrvt, but they are not an operating
     system sandbox. The WebAssembly sandbox is still what confines the decoder.
@@ -1429,3 +1451,7 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, review of PR #15: section 8 marks the worker memory figures as measured on one machine (the S1 development machine), not on the CI runners, and counts `Concat` among the in-process instances. Section 12: the worker speed figures are marked the same way, with the second run's figures; the job carries a protocol version, which a worker of another version refuses and the parent takes for a failure to start; standard input is sent only after the ready message; on Unix the worker closes every inherited descriptor above 2 as it starts; on Windows it is created suspended and resumed only once in its Job Object; the loading phase is bounded by `video.EngineLoadLimit`, and compiling in qrvt's process has no limit but the context; encoding and `Concat` stay in process with no forced stop, stop on cancellation by having their input closed, and delay (or, spinning, would stall) qrvt's own garbage collection; the watchdog is no longer described as covering encoding |
 | 2026-11-14 | M1 stream A, payload limits: sections 13 and 14 say the manifest size limit N x 64 MiB / 1,000,000 is rounded down, and section 13 that a manifest over the limits names `--max-entries` unless they are already the format limits, which nothing raises |
 | 2026-11-14 | M1 stream A, review of PR #19: section 13's `--max-entries` row says the size limit usually binds before the entry limit (about 40,000 typical entries at the defaults; 43,026 in the widest manifest measured) and that the flag reaches extraction in M3, through the pipeline |
+| 2026-11-14 | M1 stream D, round 2 of the review of PR #15: section 12 treats anything other than the ready message as a worker's first message (a version refusal, any other exit, a broken or early message, the worker ending) as a failure to start, with nothing passed on and the job run in process |
+| 2026-11-14 | M1 stream D, review of PR #20: section 12's fallback is reported per backend by `(*video.Embedded).InProcess` (the pipeline warns once per decode), and `video.WorkerStatus` is the process's current state, cleared when a worker next reaches ready |
+| 2026-11-14 | M1 stream D, round 2 of the review of PR #20: section 8 withdraws PR #15's uncapped worker processes: `internal/video` caps them at `video.WorkerProcesses()` (CPU count, reduced so that workers at 920 MB fit in half the physical memory), with waiting for a turn not counted against any bound, prompted by a probe that exceeded its wall-clock bound on macos-26-intel; the hold-and-wait hazard now applies to both caps |
+| 2026-11-14 | M1 stream D, round 3 of the review of PR #20: section 8's worker cap counts GOMAXPROCS and, on Linux, the cgroup memory limit when smaller, and no longer implies that the cap fixed the slow CI probe (cause believed to be CPU starvation; a capped run still recorded 13 s); section 12's probe bound is 60 s |
