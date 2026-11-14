@@ -166,12 +166,50 @@ func TestDecoderExtraTimestamps(t *testing.T) {
 	_ = d.Close()
 }
 
-// TestDecoderBuffer: the decoder reads frames straight into the caller's planes; it keeps no
-// frame-sized buffer of its own (201 MB at the capture limit in 10 bits).
+// TestDecoderSliceEnd: at the end of a slice, more timestamp lines waiting than the one the engine
+// may have logged ahead is refused, not taken as the slice's end.
+func TestDecoderSliceEnd(t *testing.T) {
+	t.Parallel()
+	ahead := fakeRunner(func(ctx context.Context, j *job, _ *meter) (int, error) {
+		_, _ = fmt.Fprintf(j.stderr, "[Parsed_showinfo_0 @ 0x1] config in time_base: 1/10, frame_rate: 10/1\n")
+		line := func(i int) {
+			_, _ = fmt.Fprintf(j.stderr, "[Parsed_showinfo_0 @ 0x1] n: %d pts: %d pts_time:0 pos: 0 fmt:yuv420p s:4x2 i:P\n", i, i)
+		}
+		for _, lines := range [][]int{{0}, {1}, {2, 3, 4}} { // three lines before the third frame
+			for _, l := range lines {
+				line(l)
+			}
+			if _, err := j.stdout.Write(make([]byte, tinyFrame)); err != nil {
+				return 0, err
+			}
+		}
+		<-ctx.Done()
+		return 0, nil
+	})
+	d := startDecoder(t.Context(), ahead, "x", tiny, DecodeConfig{Length: 150 * time.Millisecond}, "yuv420p")
+	var f Frame
+	for range 2 {
+		if err := d.Next(&f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.Next(&f); !errors.Is(err, ErrEngine) {
+		t.Errorf("slice end with two lines ahead: %v", err)
+	}
+	_ = d.Close()
+	// One line ahead is normal.
+	d = startDecoder(t.Context(), frameRunner(-1, 0, true), "x", tiny, DecodeConfig{Length: 150 * time.Millisecond}, "yuv420p")
+	if got := decodeAll(t, d); len(got) != 2 {
+		t.Errorf("%d frames in the slice", len(got))
+	}
+}
+
+// TestDecoderBuffer:the decoder reads frames straight into the caller's planes; it keeps no
+// frame-sized buffer of its own (100 MB at the capture limit in 10 bits).
 func TestDecoderBuffer(t *testing.T) {
 	t.Parallel()
 	p := tiny
-	p.Width, p.Height, p.BitDepth, p.PixFmt = MaxCaptureWidth, MaxCaptureHeight, 10, "yuv420p10le"
+	p.Width, p.Height, p.BitDepth, p.PixFmt = MaxCaptureLongSide, MaxCaptureShortSide, 10, "yuv420p10le"
 	d := startDecoder(t.Context(), frameRunner(0, 0, false), "x", p, DecodeConfig{}, p.PixFmt)
 	if n := len(d.buf); n > 1<<20 {
 		t.Errorf("a %d-byte buffer", n)

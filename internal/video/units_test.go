@@ -3,6 +3,7 @@ package video
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -257,6 +258,23 @@ func TestParseProbe(t *testing.T) {
 			t.Errorf("%s accepted", bad)
 		}
 	}
+	// The capture limit is 7680 x 4320 in either orientation: longer side at most 7680, shorter side at
+	// most 4320.
+	for _, ok := range []string{`{"streams":[{"width":7680,"height":4320}]}`, `{"streams":[{"width":4320,"height":7680}]}`} {
+		if _, err := parseProbe([]byte(ok)); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for js, limit := range map[string]string{
+		`{"streams":[{"width":7681,"height":4320}]}`: "MaxCaptureLongSide", `{"streams":[{"width":4320,"height":7681}]}`: "MaxCaptureLongSide",
+		`{"streams":[{"width":7680,"height":4321}]}`: "MaxCaptureShortSide", `{"streams":[{"width":4321,"height":7680}]}`: "MaxCaptureShortSide",
+		`{"streams":[{"width":4322,"height":4322}]}`: "MaxCaptureShortSide",
+	} {
+		var le *LimitError
+		if _, err := parseProbe([]byte(js)); !errors.As(err, &le) || le.Limit != limit {
+			t.Errorf("%s: %v", js, err)
+		}
+	}
 	// 4:2:0 chroma planes of an odd-sized picture would be mis-framed.
 	for _, odd := range []string{`{"streams":[{"width":385,"height":216}]}`, `{"streams":[{"width":384,"height":215}]}`} {
 		if _, err := parseProbe([]byte(odd)); !errors.Is(err, ErrUnsupported) {
@@ -334,7 +352,7 @@ func TestShowinfo(t *testing.T) {
 			t.Fatalf("%q gave a timestamp", l)
 		}
 	}
-	s.parse("[Parsed_showinfo_12 @ 000001C2F3A0B2C0] n: 0 pts: 9 s:2x2")
+	s.parse("[Parsed_showinfo_0 @ 000001C2F3A0B2C0] n: 2 pts: 9 s:2x2")
 	if c, err := s.pop(t.Context(), done, time.Minute); err != nil || c.pts != 9 {
 		t.Errorf("native line: %+v %v", c, err)
 	}
@@ -354,11 +372,37 @@ func TestShowinfo(t *testing.T) {
 	if !strings.Contains(s.String(), "other line") || len(s.String()) > logTailLen {
 		t.Errorf("tail %q", s.String())
 	}
-	for range 1100 {
-		s.parse("[Parsed_showinfo_0 @ 0x1] n: 1 pts: 1 s:2x2")
+	for i := range 1100 {
+		s.parse(fmt.Sprintf("[Parsed_showinfo_0 @ 0x1] n: %d pts: 1 s:2x2", 3+i))
 	}
 	if !s.overflow() {
 		t.Error("no overflow")
+	}
+	// Frame lines must count up from 0 after each configuration line, so a line injected from the
+	// file (text that ffmpeg logs at the start of a line, such as a Matroska CodecID with a newline)
+	// is detected instead of shifting every timestamp after it.
+	for name, lines := range map[string][]string{
+		"before the configuration": {"n: 0 pts: 99 s:2x2", "config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 0 s:2x2"},
+		"repeated":                 {"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 99 s:2x2", "n: 0 pts: 0 s:2x2"},
+		"skipped":                  {"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 0 s:2x2", "n: 2 pts: 2 s:2x2"},
+	} {
+		s := newShowinfo()
+		for _, l := range lines {
+			s.parse("[Parsed_showinfo_0 @ 0x1] " + l)
+		}
+		if _, err := s.pop(t.Context(), done, time.Minute); !errors.Is(err, ErrEngine) || errors.Is(err, errNoTimestamp) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	s = newShowinfo()
+	for _, l := range []string{"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 0 s:2x2", "n: 1 pts: 1 s:2x2",
+		"config in time_base: 1/10, frame_rate: 10/1", "n: 0 pts: 2 s:2x2"} { // a reconfigured filter counts from 0
+		s.parse("[Parsed_showinfo_1 @ 0x2] " + l)
+	}
+	for i := range 3 {
+		if c, err := s.pop(t.Context(), done, time.Minute); err != nil || c.pts != int64(i) {
+			t.Errorf("after a reconfiguration, %d: %+v %v", i, c, err)
+		}
 	}
 	for _, c := range []struct {
 		ts   frameTS

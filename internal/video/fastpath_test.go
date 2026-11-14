@@ -344,6 +344,39 @@ func TestSPSLimits(t *testing.T) {
 	if pw, ph, dpb, err := parseSPSLimits(w.trailing()); err != nil || pw != 64 || ph != 64 || dpb != 7 {
 		t.Errorf("sub-layers: %dx%d dpb %d %v", pw, ph, dpb, err)
 	}
+	// The capture limit in either orientation: portrait-coded 4320 x 7680 passes, and one sample
+	// over on the longer or the shorter side is refused.
+	for _, c := range []struct {
+		w, h int
+		ok   bool
+	}{{4320, 7680, true}, {7680, 4320, true}, {7681, 4320, false}, {4320, 7681, false}, {4321, 7680, false}, {4322, 4322, false}} {
+		_, _, _, err := parseSPSLimits(spsOfSize(c.w, c.h))
+		if (err == nil) != c.ok || err != nil && !errors.Is(err, errRefused) {
+			t.Errorf("%dx%d: %v", c.w, c.h, err)
+		}
+	}
+}
+
+// spsOfSize is the RBSP of a one-sub-layer SPS declaring a w x h picture.
+func spsOfSize(w, h int) []byte {
+	var b bitWriter
+	b.u(4, 0)
+	b.u(3, 0)
+	b.u(1, 1)
+	b.u(96, 0) // profile_tier_level(1, 0)
+	b.ue(0)
+	b.ue(1) // 4:2:0
+	b.ue(uint64(w))
+	b.ue(uint64(h))
+	b.u(1, 0)
+	for range 3 { // bit depths, log2_max_pic_order_cnt_lsb_minus4
+		b.ue(0)
+	}
+	b.u(1, 1)
+	b.ue(4)
+	b.ue(0)
+	b.ue(0)
+	return b.trailing()
 }
 
 // annexB returns a committed clip's stream in Annex B form, copied by the engine.

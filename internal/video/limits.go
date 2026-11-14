@@ -32,6 +32,10 @@ const (
 	MaxCaptureWidth = 8192
 	// MaxCaptureHeight bounds the picture height accepted from a video file.
 	MaxCaptureHeight = 8192
+	// MaxCaptureLongSide is a stub.
+	MaxCaptureLongSide = 7680
+	// MaxCaptureShortSide is a stub.
+	MaxCaptureShortSide = 4320
 
 	// EngineMemoryLimit is each engine instance's linear memory, reserved up front; it is also the
 	// instance's ceiling.

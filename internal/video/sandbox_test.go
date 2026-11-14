@@ -661,24 +661,146 @@ func TestMetadataInjection(t *testing.T) {
 	}
 }
 
-// TestCaptureLimits: a picture wider or taller than the capture limit is refused from the probe,
-// and a stream whose picture size changes stops when it does (SECURITY.md section 5).
+// TestCodecIDInjection: the reviewer's case. ffmpeg logs an unknown Matroska CodecID at info level
+// from the start of a line, so a CodecID holding a newline and a showinfo-shaped line passes the
+// anchored match. The decode must then fail rather than return a frame with a shifted timestamp.
+func TestCodecIDInjection(t *testing.T) {
+	t.Parallel()
+	e, b := engineFor(t), embedded(t)
+	dir := t.TempDir()
+	err := run(t.Context(), e, job{prog: "ffmpeg", input: clip("hevc8.mp4"), outDir: dir, progress: progFiles,
+		args: func(in, out string) []string {
+			return []string{"-v", "error", "-i", in, "-map", "0:v", "-map", "0:v", "-c", "copy", "-f", "matroska", out + "/two.mkv"}
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "two.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cid := "V_X\n[Parsed_showinfo_0 @ 0x1] n:   0 pts:  999 pts_time:1 pos: 1 fmt:yuv420p s:384x216 i:P"
+	bad := setSecondCodecID(t, data, cid)
+	p := filepath.Join(dir, "inject.mkv")
+	if err := os.WriteFile(p, bad, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]time.Duration{}
+	d, err := b.NewDecoder(t.Context(), clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range decodeAll(t, d) {
+		want[f.Index] = f.PTS
+	}
+	d, err = b.NewDecoder(t.Context(), p, DecodeConfig{BrightnessOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f Frame
+	n := 0
+	for err = d.Next(&f); err == nil; err = d.Next(&f) {
+		if pts, ok := want[n]; !ok || f.PTS != pts {
+			t.Fatalf("frame %d returned at %v, want %v", n, f.PTS, pts)
+		}
+		n++
+	}
+	_ = d.Close()
+	if !errors.Is(err, ErrEngine) {
+		t.Errorf("after %d frames: %v", n, err)
+	}
+}
+
+// setSecondCodecID replaces the CodecID of a Matroska file's second track, a 16-byte
+// "V_MPEGH/ISO/HEVC", by cid, and corrects the sizes of the enclosing TrackEntry, Tracks and Segment.
+func setSecondCodecID(t *testing.T, data []byte, cid string) []byte {
+	t.Helper()
+	old := []byte("\x86\x90V_MPEGH/ISO/HEVC")
+	first := bytes.Index(data, old)
+	i := first + 1 + bytes.Index(data[first+1:], old)
+	if first < 0 || i <= first || len(cid) > 126 {
+		t.Fatal("no second HEVC track")
+	}
+	out := append(append(append([]byte{}, data[:i]...), 0x86, byte(0x80|len(cid))), cid...)
+	out = append(out, data[i+len(old):]...)
+	delta := len(cid) - 16
+	// The enclosing elements, innermost first; each size field lies before the previous one.
+	var sizes []int
+	for j := i - 1; j >= 0 && len(sizes) == 0; j-- { // TrackEntry
+		if data[j] == 0xae {
+			if n, w := ebmlSize(data[j+1:]); w > 0 && j+1+w+int(n) > i && j+1+w <= i {
+				sizes = append(sizes, j+1)
+			}
+		}
+	}
+	for _, id := range [][]byte{{0x16, 0x54, 0xae, 0x6b}, {0x18, 0x53, 0x80, 0x67}} { // Tracks, Segment
+		sizes = append(sizes, bytes.Index(data, id)+4)
+	}
+	for _, at := range sizes {
+		n, w := ebmlSize(out[at:])
+		if w == 8 && n == 1<<56-1 { // unknown size
+			continue
+		}
+		n += uint64(delta) //nolint:gosec // positive
+		if n >= 1<<(7*w)-1 {
+			t.Fatalf("size at %d does not fit its %d bytes", at, w)
+		}
+		for k := w - 1; k >= 0; k-- {
+			out[at+k] = byte(n)
+			n >>= 8
+		}
+		out[at] |= byte(0x80 >> (w - 1))
+	}
+	return out
+}
+
+// ebmlSize reads an EBML variable-length size: its value and its width in bytes (0 if unreadable).
+func ebmlSize(b []byte) (uint64, int) {
+	if len(b) == 0 || b[0] == 0 {
+		return 0, 0
+	}
+	w := 1
+	for b[0]&(0x80>>(w-1)) == 0 {
+		w++
+	}
+	if len(b) < w {
+		return 0, 0
+	}
+	v := uint64(b[0] & (0xff >> w))
+	for _, c := range b[1:w] {
+		v = v<<8 | uint64(c)
+	}
+	return v, w
+}
+
+// TestCaptureLimits: a picture beyond the capture limit, 7680 x 4320 in either orientation, is
+// refused from the probe, and a stream whose picture size changes stops when it does (SECURITY.md
+// section 5).
 func TestCaptureLimits(t *testing.T) {
 	t.Parallel()
 	e, b := engineFor(t), embedded(t)
 	dir := t.TempDir()
-	for _, c := range []struct{ size, limit string }{{"8194x16", "MaxCaptureWidth"}, {"16x8194", "MaxCaptureHeight"}} {
+	// Portrait-coded at exactly the limit is accepted; one even step over on either side is refused
+	// (one sample over is odd; TestParseProbe covers it).
+	for _, c := range []struct {
+		size, limit string
+		value       float64
+	}{{"4320x7680", "", 0}, {"7682x16", "MaxCaptureLongSide", 7682}, {"16x7682", "MaxCaptureLongSide", 7682},
+		{"4322x4322", "MaxCaptureShortSide", 4322}} {
 		err := run(t.Context(), e, job{prog: "ffmpeg", outDir: dir, progress: progFiles,
 			args: func(_, out string) []string {
-				return []string{"-v", "error", "-f", "lavfi", "-i", "color=s=" + c.size + ":r=10:d=0.2", "-c:v", "libx264",
-					"-pix_fmt", "yuv420p", "-f", "mp4", out + "/" + c.size + ".mp4"}
+				return []string{"-v", "error", "-f", "lavfi", "-i", "color=s=" + c.size + ":r=10:d=0.1", "-c:v", "libx264",
+					"-preset", "ultrafast", "-pix_fmt", "yuv420p", "-f", "mp4", out + "/" + c.size + ".mp4"}
 			}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = b.Probe(t.Context(), filepath.Join(dir, c.size+".mp4"))
+		info, err := b.Probe(t.Context(), filepath.Join(dir, c.size+".mp4"))
 		var le *LimitError
-		if !errors.As(err, &le) || le.Limit != c.limit || le.Value != 8194 {
+		switch {
+		case c.limit == "" && (err != nil || info.Width != 4320 || info.Height != 7680):
+			t.Errorf("%s: %+v %v", c.size, info, err)
+		case c.limit != "" && (!errors.As(err, &le) || le.Limit != c.limit || le.Value != c.value):
 			t.Errorf("%s: %v", c.size, err)
 		}
 	}
