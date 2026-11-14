@@ -310,9 +310,19 @@ finishes within 60 seconds on a CI runner. Both are asserted in the test. Among 
 many skip pictures (a few kilobytes declaring hours of 4K video) is refused from the probe by
 `MaxDecodedPixelsPerInputByte`, and the same file with a lying container is stopped while decoding.
 Written in M1 stream D: `testdata/video/skip.mkv` holds 600 flat 3840 x 2160 pictures (20 s) in 36 KB
-and is refused from the probe at about 139,000 pixels per byte; with its Matroska duration
-rewritten to 0.1 s the probe promises 3 frames and decoding stops after 43 frames, with the engine's
-linear memory at 76 MiB and the process's Go heap 245 MiB above where it started. The video-file cases of section 9.2 are tested there too (`TestHostileFiles`):
+and is refused from the probe at about 139,000 pixels per byte. For the decode-time check its
+Matroska duration is rewritten to 0.1 s, so the probe promises 3 frames, and decoding stops after
+43 frames. Tests built with the race detector run the decode-time check on a smaller clip of the same
+kind, `testdata/video/skip1080.mkv` (100 flat 1920 x 1080 pictures in 9 KB), at a quarter of the
+frame size: the work before the stop is the limit times the file size, and the 4K clip took 111 s
+under the race detector on macos-26-intel. It also stops after 43 frames. Race builds allow five
+times the 60-second bound; the non-race step on every runner decodes the 4K clip within 60 seconds.
+Measured (linux amd64, PR #24): the 4K clip, non-race, 2.4 s with the process's Go heap 16 MiB above
+where it started; `skip1080.mkv` under the race detector, 10 s and 5 MiB. Since PR #15 the engine
+decodes in a worker process, so the engine's linear memory is not in the test process's heap and the
+test's in-process sample of it reads 0; the worker's memory is bounded by its 512 MiB reservation
+(section 5). Before the worker processes the 4K check measured 76 MiB of linear memory and 245 MiB
+of Go heap. The video-file cases of section 9.2 are tested there too (`TestHostileFiles`):
 empty, truncated, text and PNG content, an MP4 without its track or without its codec configuration,
 random NAL units and a live HLS playlist named `.mp4` each end in `video.ErrInvalidVideo`; the test
 requires the playlist's error to come from the format whitelist ("Format not on whitelist"), and
@@ -410,3 +420,4 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | M1 stream A, payload limits: section 5's "Extraction work" row gives the worst case at the default limits as measured on the six CI runners (23,773 files of 64 components: 2.5 s to 137 s, windows-2025 the slowest) and says the earlier worst case (237,274 files) applies only with `--max-entries 1000000`, with a second run of it (up to 1,437 s on windows-2025). Section 9.5's exception gives both figures; the open decision on lowering the limits is removed, the owner having set the defaults |
 | 2026-11-14 | M1 stream A, payload limits, the designer's wording: section 5's "Extraction work" row and section 9.5 give the extraction times as single runs with their run numbers and the variation seen between runs, not as bounds, and claim no memory figure for extraction beyond what the section 9.5 resource test asserts |
 | 2026-11-14 | M1 stream A, review of PR #19: section 5's Manifest row says the size limit usually binds before the entry limit, about 40,000 typical entries at the defaults (43,026 in the widest manifest measured) |
+| 2026-11-14 | PR #24 (CI robustness): section 9.5 names `skip1080.mkv`, the quarter-frame-size clip that race builds use for the skip-picture decode check, with five times the 60-second bound, while the non-race step on every runner decodes the 4K clip within 60 seconds; it gives the current measurements and says the in-process linear-memory sample reads 0 now that the engine decodes in a worker process |

@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -883,25 +882,18 @@ func TestCaptureLimits(t *testing.T) {
 	}
 }
 
+// The clip and time factor of TestSkipPictures' decode-time check; race_test.go changes them.
+var (
+	skipDecodeClip = "skip.mkv"
+	skipTimeFactor = 1
+)
+
 // TestSkipPictures: a small file of many skip pictures is refused from the probe by
 // MaxDecodedPixelsPerInputByte; the same file in a container that lies about its length is stopped
 // while decoding (SECURITY.md 9.5). Both stay under 1 GiB and finish within 60 s. Not parallel, so
 // that the process's heap is this decode's: the Go heap peak, which includes the instance's whole
-// 512 MiB reservation, is sampled while it runs.
-// raceEnabled reports whether the test binary was built with the race detector.
-func raceEnabled() bool {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return false
-	}
-	for _, s := range bi.Settings {
-		if s.Key == "-race" {
-			return s.Value == "true"
-		}
-	}
-	return false
-}
-
+// 512 MiB reservation, is sampled while it runs. Race builds use a smaller clip and a longer time
+// bound (race_test.go); every runner's non-race step asserts the 4K clip within 60 s.
 func TestSkipPictures(t *testing.T) {
 	b := embedded(t)
 	_, err := b.NewDecoder(t.Context(), clip("skip.mkv"), DecodeConfig{BrightnessOnly: true})
@@ -912,11 +904,8 @@ func TestSkipPictures(t *testing.T) {
 	}
 	t.Log(err)
 
-	// The decode-time check uses a smaller clip of the same kind, 100 frames at 1080p in about 9 KB:
-	// the work before the stop is the limit times the file size, so the 36 KB 4K clip would cost
-	// four times as much decoding for the same property (111 s under the race detector on the
-	// slowest runner). Rewrite its Matroska Duration to 100 ms: the probe then promises 3 frames.
-	data, _ := os.ReadFile(clip("skip1080.mkv"))
+	// Rewrite the Matroska Duration to 100 ms: the probe then promises 3 frames.
+	data, _ := os.ReadFile(clip(skipDecodeClip))
 	i := bytes.Index(data, []byte{0x44, 0x89, 0x88})
 	if i < 0 {
 		t.Fatal("no Duration element")
@@ -968,12 +957,7 @@ func TestSkipPictures(t *testing.T) {
 	if !errors.As(err, &le) || le.Limit != "MaxDecodedPixelsPerInputByte" {
 		t.Fatalf("decoding the lying file: %v after %d frames", err, n)
 	}
-	// The race detector slows the frame copies several times over; the non-race run on the same
-	// runners keeps the 60 s bound.
-	bound := 60 * time.Second
-	if raceEnabled() {
-		bound *= 5
-	}
+	bound := 60 * time.Second * time.Duration(skipTimeFactor)
 	el := time.Since(start)
 	t.Logf("decoding took %v", el)
 	if el > bound {
