@@ -558,8 +558,14 @@ func TestHostileFiles(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 			continue
 		}
-		if el := time.Since(start); el > 60*time.Second || name == "hls.mp4" && el > 5*time.Second {
+		if el := time.Since(start); el > 60*time.Second {
 			t.Errorf("%s: %v", name, el)
+		}
+		// The playlist must be refused by the format whitelist, as ffprobe opens it, not by a bound.
+		// (Wall time is no measure of that: it includes waiting for a slot behind the parallel tests,
+		// 11 s once under the race detector on a 4-core runner.)
+		if name == "hls.mp4" && !strings.Contains(err.Error(), "not on whitelist") {
+			t.Errorf("%s: not refused by the whitelist: %v", name, err)
 		}
 		if strings.ContainsAny(err.Error(), "\x1b\x00\r\n") {
 			t.Errorf("%s: control characters in %q", name, err)

@@ -71,9 +71,9 @@ func TestHoldAndWait(t *testing.T) {
 	if err := held.Next(&f); err != nil { // its instance now runs, blocked writing the next frame
 		t.Fatal(err)
 	}
+	start := time.Now() // before the deadline is set, so that the wait is measured whole
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
-	start := time.Now()
 	if _, err := b.NewDecoder(ctx, clip("hevc8.mp4"), DecodeConfig{BrightnessOnly: true}); !errors.Is(err, context.DeadlineExceeded) ||
 		time.Since(start) < 3*time.Second {
 		t.Errorf("waiting for the held slot: %v after %v", err, time.Since(start))

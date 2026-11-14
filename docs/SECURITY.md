@@ -195,7 +195,8 @@ Windows:
 - **Format**: every reserved field non-zero; unknown versions and ids; a descriptor that disagrees with
   the header or with the values derived from its own stream length; frames from two sessions interleaved.
 - **Video files**: truncated, zero-length, wrong container, and structurally corrupt files, and a live
-  HLS playlist named `.mp4`. Each must end in a clear error within a time bound; the playlist within 5 s.
+  HLS playlist named `.mp4`. Each must end in a clear error within a time bound; the playlist must be
+  refused by the format whitelist as soon as ffprobe opens it.
 
 ### 9.3 Sandbox tests
 
@@ -263,9 +264,11 @@ and is refused from the probe at about 139,000 pixels per byte; with its Matrosk
 rewritten to 0.1 s the probe promises 3 frames and decoding stops after 43 frames, with the engine's
 linear memory at 76 MiB and the process's Go heap 245 MiB above where it started. The video-file cases of section 9.2 are tested there too (`TestHostileFiles`):
 empty, truncated, text and PNG content, an MP4 without its track or without its codec configuration,
-random NAL units and a live HLS playlist named `.mp4` each end in `video.ErrInvalidVideo`, the playlist in
-under 5 s (the format whitelist refuses it; `TestProbeBound` shows that without the whitelist the probe's
-time bound stops it). The 1 GiB holds for these inputs. For a file at the capture limit it holds by
+random NAL units and a live HLS playlist named `.mp4` each end in `video.ErrInvalidVideo`; the test
+requires the playlist's error to come from the format whitelist ("Format not on whitelist"), and
+`TestProbeBound` shows that without the whitelist the probe's time bound stops it. The test asserts the
+whitelist refusal rather than a wall time, which includes waiting for a slot behind the parallel tests
+(11 s once under the race detector on a 4-core CI runner). The 1 GiB holds for these inputs. For a file at the capture limit it holds by
 construction, not by test: a decoder holds about 640 MB, and about 1,020 MB with the whole reservation
 resident, about 54 MB under 1 GiB (section 5).
 
@@ -320,3 +323,4 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | M1 stream D, review of PR #9: T1 adds the protocol and format whitelists on every job that reads a recording (an HLS playlist named `.mp4` had held ffprobe for more than 8 minutes), the probe's bounds, closing the output pipe on cancellation, and the copy instance's size bound; the fast-path subsection states that bound. Section 5: decoding progress is a complete, timestamped frame, and qrvt waiting on an instance for a timestamp does not count as the instance waiting on qrvt; the instance cap is described as a precaution (with close-on-cancel, compiled loops return to Go at every back-edge; the CI delay that prompted it was more likely load), with the hold-and-wait hazard; new rows for the probe (`EngineProbeTime` 15 s, `MaxProbeReads` 4 x size + 16 MiB, with the measurements) and the fast path's copy size (`FastPathCopySize`, 2 x input + 64 MiB); the engine memory row gives a decoder's host memory at the capture limit (201 MB of planes, the frame-sized pipe buffer removed); odd picture sizes are refused. Section 9.1: the fuzz task builds with the fast-path tag. Section 9.2 adds the HLS playlist; section 9.3 names the decoder-stall, metadata-injection, capture-limit and new fast-path tests; section 9.5 states where the 1 GiB is and is not shown |
 | 2026-11-14 | M1 stream D, CI on PR #9: section 5 corrects the instance cap's description: without it the watchdog still stops every instance, but on the macos-26-intel runner GOMAXPROCS + 1 uncapped spinning instances took 16.8 s against a 2 s limit, so the cap is a mitigation, not only a precaution |
 | 2026-11-14 | M1 stream D, round 2 of the review of PR #9: section 5 lowers the capture limit to 8K UHD in either orientation (longer side 7,680, shorter side 4,320), restates a decoder's host memory at it (99.5 MB of planes; about 1,020 MB in the worst case, inside section 9.5's 1 GiB), records the cap's evidence (uncapped, stops were up to 8 times late on a CI runner) and restates the stall margin with close-on-cancel (about 8 times a 4K frame, 2 times an 8K frame; PR #15 removes close-on-cancel from the default path). Section 9.3 corrects the injection wording (text logged from the start of a line, such as a Matroska CodecID, passes the anchored match; frame lines must count in sequence) and names `TestCodecIDInjection` and the orientation cases; section 9.5 states that the 1 GiB holds at the capture limit by construction |
+| 2026-11-14 | M1 stream D, CI on PR #9: sections 9.2 and 9.5 require the HLS playlist to be refused by the format whitelist, instead of within 5 s of wall time, which includes waiting for an instance slot |
