@@ -442,7 +442,10 @@ the same type and size, or that follows the last one; a file whose SHA-256 diffe
 It also rejects, before allocating for them: a zstd frame whose window (or, for a single-segment
 frame, content size) exceeds 8 MiB; an xz block whose filter is not LZMA2 alone or whose dictionary
 exceeds 8 MiB; an xz body with anything after its one stream (a second stream, stream padding or
-other bytes); an age header whose scrypt work factor exceeds 18. Any conforming pax tar is accepted;
+other bytes); an xz LZMA2 chunk whose data the LZMA decoder does not consume exactly (a chunk that
+declares more compressed bytes than its decoder uses, or fewer than it needs); an xz block whose
+check, padding or declared sizes are wrong, or an index or footer that does not match the blocks;
+an age header whose scrypt work factor exceeds 18. Any conforming pax tar is accepted;
 the tar bytes need not match those of the reference encoder.
 
 **Order of checks.** A decoder must check the descriptor's stream hash over the whole recovered stream,
@@ -457,7 +460,7 @@ decompress and unpack. It must validate the entire manifest before writing any f
   `?`, `*`, which Windows cannot store;
 - no component ending in a space or a dot;
 - no component that is a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`,
-  `COM1`-`COM9`, `LPT1`-`LPT9`, and `COM` or `LPT` followed by `¹`, `²` or `³`), compared without regard
+  `COM0`-`COM9`, `LPT0`-`LPT9`, and `COM` or `LPT` followed by `¹`, `²` or `³`), compared without regard
   to case after removing anything from the first dot and any spaces before it;
 - each component at most 255 bytes and the whole path at most 4,096 bytes;
 - at most 64 components. There are two reasons. On macOS, and partly on Windows, the time spent on
@@ -536,3 +539,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-13 | M1 stream A, review of PR 7: section 12 path rules also refuse `<`, `>`, `"`, `|`, `?`, `*`, `CONIN$`, `CONOUT$`, `COM` and `LPT` with a superscript digit, and device names followed by spaces. Case folding is stated as exactly CaseFolding.txt C and F (the Cherokee small letters fold to the capitals). "No entry beneath a file" becomes "every folder that contains an entry is an entry of type `dir`", which the encoder already wrote. The decoder rejects a zstd window over 8 MiB, an xz dictionary over 8 MiB or a filter other than LZMA2, and a scrypt work factor over 18, and accepts any conforming pax tar. Section 13 says where the frozen tar bytes come from; the golden file gains the new refused manifests. The frozen streams did not change |
 | 2026-11-13 | M1 stream A, review of PR 7 round 2: section 12 says an xz body is exactly one xz stream, with no stream padding, whose blocks each have the single filter LZMA2. The decoder rejects anything after that stream: a second stream, stream padding or other bytes |
 | 2026-11-13 | M1 stream A, PR 7, path depth: section 12 adds the path rule "at most 64 components", with its two reasons (time per component grows with depth on macOS and partly on Windows; a tree far deeper than shells handle is a nuisance payload), and says the encoder's refusal lists every path that breaks a rule with the rule it breaks. Section 13: `stream.json` gains a refused manifest at 65 components and a list of manifests that must be accepted, with one at exactly 64; the "path over 4096 bytes" vector now has 17 components so that it breaks only the length rule. The frozen streams did not change |
+| 2026-11-14 | M1 stream A, second independent review of PR 7: section 12 says the decoder rejects an xz LZMA2 chunk whose data the LZMA decoder does not consume exactly, and a block whose check, padding or declared sizes are wrong, or an index or footer that does not match the blocks (the reference decoder now parses the xz container itself). `COM0` and `LPT0` are device names too; section 13's `stream.json` gains their refused manifests. The frozen streams did not change |
