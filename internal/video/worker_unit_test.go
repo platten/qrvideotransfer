@@ -3,6 +3,7 @@ package video
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -38,6 +39,7 @@ func TestWorkerInProcess(t *testing.T) {
 		t.Fatalf("probe exit %d", code)
 	}
 	seen := map[byte]bool{}
+	var calls uint64
 	for {
 		typ, b, err := readMsg(&out, nil, parentLimit)
 		if err != nil {
@@ -47,9 +49,15 @@ func TestWorkerInProcess(t *testing.T) {
 		if typ == msgExit && !bytes.Equal(b, exitMsg(0, "")) {
 			t.Errorf("exit message %q", b)
 		}
+		if typ == msgProgress { // progress bytes, input bytes, input reads, ready to first read (ns)
+			if len(b) != progressLen {
+				t.Fatalf("progress message of %d bytes", len(b))
+			}
+			calls = binary.BigEndian.Uint64(b[16:])
+		}
 	}
-	if !seen[msgOut] || !seen[msgProgress] || !seen[msgExit] {
-		t.Errorf("messages seen: %v", seen)
+	if !seen[msgOut] || !seen[msgProgress] || !seen[msgExit] || calls == 0 {
+		t.Errorf("messages seen: %v; input reads reported %d", seen, calls)
 	}
 
 	out.Reset()

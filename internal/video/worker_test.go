@@ -90,7 +90,7 @@ func hostileWorker(mode string) int {
 		_ = writeMsg(os.Stdout, msgOut, make([]byte, 100))
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
 	case "lies": // a huge read count, an error text with escapes, a failure
-		_ = writeMsg(os.Stdout, msgProgress, binary.BigEndian.AppendUint64(nil, 1<<62))
+		_ = writeMsg(os.Stdout, msgProgress, bytes.Repeat([]byte{0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, 4)) // every count and the first-read time at their largest
 		_ = writeMsg(os.Stdout, msgLog, []byte("\x1b[31mred\x1b[0m"))
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(7, "\x1b]0;title\x07bad"))
 	case "slowload": // compiling the engine on a slow machine: no progress, then the ready message
@@ -210,7 +210,7 @@ func TestWorkerSpin(t *testing.T) {
 	p, ps := testWorkers(t)
 	err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil }})
 	var le *LimitError
-	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
+	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" || !strings.Contains(err.Error(), "since last progress") {
 		t.Fatalf("got %v", err)
 	}
 	// Timed from the worker's start, after any wait for a slot. The watchdog may last have seen the
@@ -350,7 +350,7 @@ func TestWorkerLoadLimit(t *testing.T) {
 	err := run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
 		timeout: time.Second})
 	var le *LimitError
-	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" {
+	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" || !strings.Contains(err.Error(), "never ready") {
 		t.Fatalf("got %v", err)
 	}
 	if el := ps.since(); el < 2*time.Second || el > 12*time.Second {

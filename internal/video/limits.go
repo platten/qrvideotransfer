@@ -63,6 +63,8 @@ type LimitError struct {
 	Limit      string
 	Value, Max float64
 	Hint       string // what to do about it; may be empty
+	// Detail is stub for the test commit.
+	Detail string
 }
 
 // Error implements the error interface.

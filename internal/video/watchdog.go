@@ -18,7 +18,20 @@ type meter struct {
 	// decoder waiting for a frame's timestamp; while one is, the instance's waiting does not count.
 	blocked atomic.Int32
 	extra   func() int64 // further progress, such as an output file's size; may be nil
+
+	// For a time-bound error's breakdown (stubs in the test commit).
+	start, readyAt, firstIn, progressAt atomic.Int64
+	inCalls, inBytes                    atomic.Int64
 }
+
+// breakdown is a stub for the test commit.
+func (m *meter) breakdown(time.Time) string { return "" }
+
+// withBreakdown is a stub for the test commit.
+func withBreakdown(err error, _ *meter) error { return err }
+
+// progressLen is a stub for the test commit.
+const progressLen = 32
 
 func (m *meter) value() int64 {
 	v := m.n.Load() + m.reads.Load()
