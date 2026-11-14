@@ -99,7 +99,7 @@ Implementation defaults, each a named constant with a test that exceeds it:
 | --- | --- |
 | Unpacked size (`--max-size`) | 16 GiB. No ratio limit is applied, because a legitimate sparse file compresses by more than any sensible ratio |
 | Stream length | Free disk space less 1 GiB, and at most 64 GiB |
-| Manifest | 64 MiB and 1,000,000 entries |
+| Manifest (`--max-entries`) | 100,000 entries (`DefaultMaxEntries`) and 6,710,886 bytes (`DefaultMaxManifestBytes`, 64 MiB / 10). `--max-entries N` raises the entry limit to N and the size limit to N x 64 MiB / 1,000,000 bytes; the ceiling is the format limit, 1,000,000 entries and 64 MiB |
 | Soft-bit store | 256 MB |
 | LDPC iterations per codeword | 25 |
 | Sessions tracked per decode | 1 |
@@ -111,7 +111,8 @@ Implementation defaults, each a named constant with a test that exceeds it:
 | HEVC fast path (opt-in only): decode time | 10 s per picture. The decoder cannot be cancelled, so at the first picture that exceeds the limit the whole decode stops with an error naming the limit; no abandoned decoder is left running while work continues. Does not apply to the default path |
 
 A decode that reaches a limit stops with an error that names the limit and, where one exists, the flag
-that raises it. Only the unpacked size has a flag in version 1.
+that raises it. Two limits have a flag in version 1: the unpacked size (`--max-size`) and the manifest
+(`--max-entries`, up to 1,000,000 entries and 64 MiB).
 
 ## 6. Sender authenticity
 
@@ -270,3 +271,4 @@ instruction and states which versions receive fixes.
 | 2026-11-13 | M0 review round 3: guarantee 1's "hang" is made true on the default path. Section 5 adds `EngineStallTimeout`, 30 s without progress (about 100 times the time per 4K HEVC frame), for decoding, probing and the stream-copy instance; T1 replaces "cancelled with the command's context" with that watchdog and close-on-cancel, and gives the copy instance's mounts; section 9.3 adds the watchdog test (M1 stream D). The fast-path subsection adds "built without its hand-written assembly" and that the flag does not ship until then |
 | 2026-11-13 | M0 follow-up: section 5 states that `EngineStallTimeout` bounds stalls only, names how progress is measured (the counting `fs.FS` view when probing, output-file growth when copying), and adds `MaxDecodedPixelsPerInputByte` (10,000; checked from the probe and again while decoding; measured 16.6-75.5 on the S1 clips and pattern files); T1 gives the single-file view as an `fs.FS` mount, attaches the raw-frame output to the decoding instance and the output file to the copy instance, and rewords the fast-path sentence; section 9.5 adds the skip-picture test (M1 stream D) |
 | 2026-11-13 | M1 setup: the HEVC fast-path flag is named `--unsandboxed-hevc` |
+| 2026-11-14 | M1 stream F, PR #11 round 3 (the owner's decision): section 5 gives the manifest default as 100,000 entries and 6,710,886 bytes (a tenth of the format limit), raised by `--max-entries` up to 1,000,000 entries and 64 MiB; two limits now have a flag, the unpacked size and the manifest |

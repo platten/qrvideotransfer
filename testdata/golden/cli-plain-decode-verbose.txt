@@ -1,0 +1,101 @@
+--- stderr
+qrvt decode: IMG_0412.MOV, IMG_0413.MOV -> received
+decode-video: started (3600 frames)
+demodulate: started (3600 frames)
+stats: captures 100, frames 30/840, clean 90.1%, raw bit errors 1.97%, codewords 1520, blocks 0/48
+decode-video: 5% (200 frames of 3600 frames, 200.0 frames/s, 0:17 left)
+stats: captures 200, frames 60/840, clean 90.2%, raw bit errors 1.94%, codewords 3040, blocks 0/48
+demodulate: 6% (250 frames of 3600 frames, 156.2 frames/s, 0:21 left)
+stats: captures 300, frames 90/840, clean 90.3%, raw bit errors 1.91%, codewords 4560, blocks 0/48
+decode-video: 11% (400 frames of 3600 frames, 200.0 frames/s, 0:16 left)
+stats: captures 400, frames 120/840, clean 90.4%, raw bit errors 1.88%, codewords 6080, blocks 0/48
+demodulate: 12% (450 frames of 3600 frames, 173.1 frames/s, 0:18 left)
+stats: captures 500, frames 150/840, clean 90.5%, raw bit errors 1.85%, codewords 7600, blocks 0/48
+decode-video: 16% (600 frames of 3600 frames, 200.0 frames/s, 0:15 left)
+demodulate: 15% (550 frames of 3600 frames, 177.4 frames/s, 0:17 left)
+stats: captures 600, frames 180/840, clean 90.6%, raw bit errors 1.82%, codewords 9120, blocks 1/48
+stats: captures 700, frames 210/840, clean 90.7%, raw bit errors 1.79%, codewords 10640, blocks 1/48
+decode-video: 22% (800 frames of 3600 frames, 200.0 frames/s, 0:14 left)
+demodulate: 20% (750 frames of 3600 frames, 182.9 frames/s, 0:16 left)
+stats: captures 800, frames 240/840, clean 90.8%, raw bit errors 1.76%, codewords 12160, blocks 2/48
+decode-video: 25% (900 frames of 3600 frames, 200.0 frames/s, 0:14 left)
+stats: captures 900, frames 270/840, clean 90.9%, raw bit errors 1.73%, codewords 13680, blocks 3/48
+demodulate: 26% (950 frames of 3600 frames, 186.3 frames/s, 0:14 left)
+stats: captures 1000, frames 300/840, clean 91.0%, raw bit errors 1.70%, codewords 15200, blocks 3/48
+warning: Clipping: Highlights are clipped in 3.2% of cells; lower the screen brightness.
+decode-video: 30% (1100 frames of 3600 frames, 200.0 frames/s, 0:13 left)
+stats: captures 1100, frames 330/840, clean 91.1%, raw bit errors 1.67%, codewords 16720, blocks 4/48
+demodulate: 31% (1150 frames of 3600 frames, 188.5 frames/s, 0:13 left)
+stats: captures 1200, frames 360/840, clean 91.2%, raw bit errors 1.64%, codewords 18240, blocks 5/48
+decode-video: 36% (1300 frames of 3600 frames, 200.0 frames/s, 0:12 left)
+stats: captures 1300, frames 390/840, clean 91.3%, raw bit errors 1.61%, codewords 19760, blocks 6/48
+demodulate: 37% (1350 frames of 3600 frames, 190.1 frames/s, 0:12 left)
+stats: captures 1400, frames 420/840, clean 91.4%, raw bit errors 1.58%, codewords 21280, blocks 7/48
+decode-video: 41% (1500 frames of 3600 frames, 200.0 frames/s, 0:11 left)
+demodulate: 40% (1450 frames of 3600 frames, 190.8 frames/s, 0:11 left)
+stats: captures 1500, frames 450/840, clean 91.5%, raw bit errors 1.55%, codewords 22800, blocks 8/48
+stats: captures 1600, frames 480/840, clean 91.6%, raw bit errors 1.52%, codewords 24320, blocks 9/48
+decode-video: 47% (1700 frames of 3600 frames, 200.0 frames/s, 0:10 left)
+demodulate: 45% (1650 frames of 3600 frames, 191.9 frames/s, 0:10 left)
+stats: captures 1700, frames 510/840, clean 91.7%, raw bit errors 1.49%, codewords 25840, blocks 10/48
+decode-video: 50% (1800 frames of 3600 frames, 200.0 frames/s, 0:09 left)
+stats: captures 1800, frames 540/840, clean 91.8%, raw bit errors 1.46%, codewords 27360, blocks 12/48
+demodulate: 51% (1850 frames of 3600 frames, 192.7 frames/s, 0:09 left)
+stats: captures 1900, frames 570/840, clean 91.9%, raw bit errors 1.43%, codewords 28880, blocks 13/48
+decode-video: 55% (2000 frames of 3600 frames, 200.0 frames/s, 0:08 left)
+stats: captures 2000, frames 600/840, clean 92.0%, raw bit errors 1.40%, codewords 30400, blocks 14/48
+warning: FramesDropped: The recording skipped 12 frames.
+demodulate: 56% (2050 frames of 3600 frames, 193.4 frames/s, 0:08 left)
+stats: captures 2100, frames 630/840, clean 92.1%, raw bit errors 1.37%, codewords 31920, blocks 16/48
+decode-video: 61% (2200 frames of 3600 frames, 200.0 frames/s, 0:07 left)
+stats: captures 2200, frames 660/840, clean 92.2%, raw bit errors 1.34%, codewords 33440, blocks 17/48
+demodulate: 62% (2250 frames of 3600 frames, 194.0 frames/s, 0:07 left)
+stats: captures 2300, frames 690/840, clean 92.3%, raw bit errors 1.31%, codewords 34960, blocks 19/48
+decode-video: 66% (2400 frames of 3600 frames, 200.0 frames/s, 0:06 left)
+demodulate: 65% (2350 frames of 3600 frames, 194.2 frames/s, 0:06 left)
+stats: captures 2400, frames 720/840, clean 92.4%, raw bit errors 1.28%, codewords 36480, blocks 21/48
+stats: captures 2500, frames 750/840, clean 92.5%, raw bit errors 1.25%, codewords 38000, blocks 23/48
+decode-video: 72% (2600 frames of 3600 frames, 200.0 frames/s, 0:05 left)
+demodulate: 70% (2550 frames of 3600 frames, 194.7 frames/s, 0:05 left)
+stats: captures 2600, frames 780/840, clean 92.6%, raw bit errors 1.22%, codewords 39520, blocks 25/48
+decode-video: 75% (2700 frames of 3600 frames, 200.0 frames/s, 0:05 left)
+stats: captures 2700, frames 810/840, clean 92.7%, raw bit errors 1.19%, codewords 41040, blocks 27/48
+demodulate: 76% (2750 frames of 3600 frames, 195.0 frames/s, 0:04 left)
+stats: captures 2800, frames 840/840, clean 92.8%, raw bit errors 1.16%, codewords 42560, blocks 29/48
+decode-video: 80% (2900 frames of 3600 frames, 200.0 frames/s, 0:04 left)
+stats: captures 2900, frames 840/840, clean 92.9%, raw bit errors 1.13%, codewords 44080, blocks 31/48
+demodulate: 81% (2950 frames of 3600 frames, 195.4 frames/s, 0:03 left)
+stats: captures 3000, frames 840/840, clean 93.0%, raw bit errors 1.10%, codewords 45600, blocks 33/48
+decode-video: 86% (3100 frames of 3600 frames, 200.0 frames/s, 0:03 left)
+stats: captures 3100, frames 840/840, clean 93.1%, raw bit errors 1.07%, codewords 47120, blocks 35/48
+demodulate: 87% (3150 frames of 3600 frames, 195.7 frames/s, 0:02 left)
+stats: captures 3200, frames 840/840, clean 93.2%, raw bit errors 1.04%, codewords 48640, blocks 37/48
+decode-video: 91% (3300 frames of 3600 frames, 200.0 frames/s, 0:02 left)
+demodulate: 90% (3250 frames of 3600 frames, 195.8 frames/s, 0:02 left)
+stats: captures 3300, frames 840/840, clean 93.3%, raw bit errors 1.01%, codewords 50160, blocks 40/48
+stats: captures 3400, frames 840/840, clean 93.4%, raw bit errors 0.98%, codewords 51680, blocks 42/48
+decode-video: 97% (3500 frames of 3600 frames, 200.0 frames/s, 0:01 left)
+demodulate: 95% (3450 frames of 3600 frames, 196.0 frames/s, 0:01 left)
+stats: captures 3500, frames 840/840, clean 93.5%, raw bit errors 0.95%, codewords 53200, blocks 45/48
+stats: captures 3600, frames 840/840, clean 93.6%, raw bit errors 0.92%, codewords 54720, blocks 48/48
+decode-video: done (3600 frames in 0:18)
+demodulate: done (3600 frames in 0:19)
+repair: started (48 blocks)
+repair: 25% (12 blocks of 48 blocks, 48.0 blocks/s, 0:01 left)
+repair: 50% (24 blocks of 48 blocks, 48.0 blocks/s, 0:01 left)
+repair: 75% (36 blocks of 48 blocks, 48.0 blocks/s, 0:00 left)
+repair: done (48 blocks in 0:01)
+verify: started (50.0 MiB)
+verify: 50% (25.0 MiB of 50.0 MiB, 100.0 MiB/s, 0:00 left)
+verify: done (50.0 MiB in 0:01)
+unpack: started (50.0 MiB)
+unpack: 25% (12.5 MiB of 50.0 MiB, 31.2 MiB/s, 0:01 left)
+unpack: 50% (25.0 MiB of 50.0 MiB, 31.2 MiB/s, 0:01 left)
+unpack: 75% (37.5 MiB of 50.0 MiB, 31.2 MiB/s, 0:00 left)
+unpack: done (50.0 MiB in 0:02)
+--- stdout
+Decoded 12 files (50.0 MiB) into received
+  Recordings  2 (3600 captures)
+  Frames      840 of 840 seen, 93.6% clean
+  Encrypted   no
+  Signature   unsigned
