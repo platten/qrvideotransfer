@@ -461,19 +461,28 @@ instance. Process memory for one 4K decoding instance was 319-436 MB in 16 of th
 was recorded, and 685-920 MB in the other 5 (920 MB when the whole reservation became resident). The default worker count is the CPU count, reduced so that the workers, each counted at the
 worst measured engine figure, 920 MB, stay within half of the machine's physical memory. Each
 decoding instance runs in its own worker process (section 12), which the operating system schedules,
-so the worker count is not capped below the CPU count: a decoding worker spends about 300 ms of engine
+so the worker count is not reduced below the CPU count: a decoding worker spends about 300 ms of engine
 time per 4K frame, against a few milliseconds of qrvt's own work on the same frame in the parent
 (the frame's copy through the pipe, 10-37 ms at 4K, overlaps the next frame's decoding), so one
 worker per core keeps every core busy, and vision on the same cores only fills the gaps. A worker's
 peak resident memory measured 190 MB (1080p H.264), 310 MB (4K HEVC 8-bit) and 403 MB (4K HEVC
 10-bit), on one machine (the S1 development machine, spike S1 section 13), not on the CI runners;
 920 MB per worker stays the conservative count, because the whole 512 MiB reservation can
-become resident (spike S1). On a machine with 16 GB and 16 cores that allows 8 workers. Instances in
+become resident (spike S1). On a machine with 16 GB and 16 cores that allows 8 workers.
+`internal/video` enforces that count itself, as a cap on concurrent worker processes
+(`video.WorkerProcesses()`, from the CPU count and the physical memory: Linux `sysinfo`, macOS
+`hw.memsize`, Windows `GlobalMemoryStatusEx`; the CPU count alone when the memory is unknown), so
+every caller and every test gets it. A job waiting for a turn is waiting, not stalled: the wait
+counts against no bound but its context. PR #15 left worker processes uncapped, reasoning that the
+operating system schedules them; that is withdrawn. The probe's bound (`EngineProbeTime`) is wall-clock
+time, and with uncapped workers the package's own parallel tests starved a worker on the 4-vCPU
+macos-26-intel runner until a probe of a small clip, which takes about a second, exceeded its 15 s.
+Instances in
 qrvt's own process (encoding, `Concat`, and every instance when no worker process can be started) are capped
 at `video.EngineInstances()`, one fewer than GOMAXPROCS (at least one). The cap is a real defence:
 uncapped, stops were up to 8 times late on a CI runner (section 12). `internal/video` enforces it
-itself; further instances wait their turn, with no limit but the context, so on that fallback path a
-worker must not hold more decoders open than the cap without reading them. The opt-in
+itself. Under either cap, further jobs wait their turn with no limit but the context, so a worker
+must not hold more decoders open than the cap without reading them (`TestHoldAndWait`). The opt-in
 HEVC fast path of section 12 is not counted: its memory is not bounded against a crafted stream, which
 is why it is opt-in and only for recordings the user made themselves.
 
@@ -1438,3 +1447,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream A, review of PR #19: section 13's `--max-entries` row says the size limit usually binds before the entry limit (about 40,000 typical entries at the defaults; 43,026 in the widest manifest measured) and that the flag reaches extraction in M3, through the pipeline |
 | 2026-11-14 | M1 stream D, round 2 of the review of PR #15: section 12 treats anything other than the ready message as a worker's first message (a version refusal, any other exit, a broken or early message, the worker ending) as a failure to start, with nothing passed on and the job run in process |
 | 2026-11-14 | M1 stream D, review of PR #20: section 12's fallback is reported per backend by `(*video.Embedded).InProcess` (the pipeline warns once per decode), and `video.WorkerStatus` is the process's current state, cleared when a worker next reaches ready |
+| 2026-11-14 | M1 stream D, round 2 of the review of PR #20: section 8 withdraws PR #15's uncapped worker processes: `internal/video` caps them at `video.WorkerProcesses()` (CPU count, reduced so that workers at 920 MB fit in half the physical memory), with waiting for a turn not counted against any bound, because the probe's wall-clock bound failed on macos-26-intel with uncapped workers; the hold-and-wait hazard now applies to both caps |
