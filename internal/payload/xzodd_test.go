@@ -53,7 +53,7 @@ func indexNonShortest() []byte {
 	}
 	index = binary.LittleEndian.AppendUint32(index, crc32.ChecksumIEEE(index))
 	s := append(append(bytes.Clone(xzNone), b...), index...)
-	f := binary.LittleEndian.AppendUint32(nil, uint32(len(index)/4-1)) //nolint:gosec // a few bytes
+	f := binary.LittleEndian.AppendUint32(nil, uint32(len(index)/4-1))
 	f = append(f, xzNone[6], xzNone[7])
 	s = binary.LittleEndian.AppendUint32(s, crc32.ChecksumIEEE(f))
 	return append(append(s, f...), 'Y', 'Z')
