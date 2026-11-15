@@ -27,6 +27,7 @@ type meter struct {
 	// calls and bytes. Kept with a few atomic operations; the text is built only for an error.
 	start, readyAt, firstIn, progressAt atomic.Int64
 	inCalls, inBytes                    atomic.Int64
+	memAt, openAt                       atomic.Int64 // stubs for the test commit
 }
 
 // ready records that the instance is ready to run.

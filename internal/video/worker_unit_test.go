@@ -40,6 +40,7 @@ func TestWorkerInProcess(t *testing.T) {
 	}
 	seen := map[byte]bool{}
 	var calls uint64
+	mem, opened := int64(-1), int64(-1)
 	for {
 		typ, b, err := readMsg(&out, nil, parentLimit)
 		if err != nil {
@@ -49,15 +50,18 @@ func TestWorkerInProcess(t *testing.T) {
 		if typ == msgExit && !bytes.Equal(b, exitMsg(0, "")) {
 			t.Errorf("exit message %q", b)
 		}
-		if typ == msgProgress { // progress bytes, input bytes, input reads, ready to first read (ns)
+		// Progress: progress bytes, input bytes, input reads, then ready to first read, to memory
+		// reserved and to input opened (ns, -1: not yet).
+		if typ == msgProgress {
 			if len(b) != progressLen {
 				t.Fatalf("progress message of %d bytes", len(b))
 			}
 			calls = binary.BigEndian.Uint64(b[16:])
+			mem, opened = int64(binary.BigEndian.Uint64(b[32:])), int64(binary.BigEndian.Uint64(b[40:])) //nolint:gosec // signed
 		}
 	}
-	if !seen[msgOut] || !seen[msgProgress] || !seen[msgExit] || calls == 0 {
-		t.Errorf("messages seen: %v; input reads reported %d", seen, calls)
+	if !seen[msgOut] || !seen[msgProgress] || !seen[msgExit] || calls == 0 || mem < 0 || opened < 0 {
+		t.Errorf("messages seen: %v; input reads reported %d; memory reserved at %d ns, input opened at %d ns", seen, calls, mem, opened)
 	}
 
 	out.Reset()

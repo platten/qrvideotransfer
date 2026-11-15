@@ -90,7 +90,7 @@ func hostileWorker(mode string) int {
 		_ = writeMsg(os.Stdout, msgOut, make([]byte, 100))
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
 	case "lies": // a huge read count, an error text with escapes, a failure
-		_ = writeMsg(os.Stdout, msgProgress, bytes.Repeat([]byte{0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, 4)) // every count and the first-read time at their largest
+		_ = writeMsg(os.Stdout, msgProgress, bytes.Repeat([]byte{0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, progressLen/8)) // every count and time at its largest
 		_ = writeMsg(os.Stdout, msgLog, []byte("\x1b[31mred\x1b[0m"))
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(7, "\x1b]0;title\x07bad"))
 	case "slowload": // compiling the engine on a slow machine: no progress, then the ready message

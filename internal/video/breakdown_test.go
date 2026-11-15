@@ -19,12 +19,15 @@ func TestBreakdown(t *testing.T) {
 	m := &meter{}
 	m.start.Store(now.Add(-63 * time.Second).UnixNano())
 	m.readyAt.Store(now.Add(-62 * time.Second).UnixNano())
+	m.memAt.Store(now.Add(-61700 * time.Millisecond).UnixNano())
+	m.openAt.Store(now.Add(-61950 * time.Millisecond).UnixNano())
 	m.firstIn.Store(now.Add(-61900 * time.Millisecond).UnixNano())
 	m.inCalls.Store(12)
 	m.inBytes.Store(1234567)
 	m.progressAt.Store(now.Add(-30 * time.Second).UnixNano())
 	b := m.breakdown(now)
 	for _, want := range []string{"wall 63.0 s", "start to ready 1.0 s", "ready to first read 0.1 s",
+		"ready to memory reserved 0.3 s", "ready to input opened 0.1 s",
 		"12 reads, 1234567 bytes", "30.0 s since last progress", "worker processes running", "in-process instances running"} {
 		if !strings.Contains(b, want) {
 			t.Errorf("breakdown %q lacks %q", b, want)
