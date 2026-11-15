@@ -9,6 +9,17 @@ import (
 	"github.com/platten/qrvideotransfer/internal/video"
 )
 
+// geomObsTol is the tolerance of observation comparisons, in 8-bit code values: far below the
+// smallest difference that matters (one 10-bit code is 0.25) and far above float32 rounding.
+const geomObsTol = 0.01
+
+// geomObsNear reports whether two observations agree within geomObsTol per plane and in saturation.
+// Vision tests never assert bit-exact floating-point values.
+func geomObsNear(a, b modem.Obs) bool {
+	near := func(x, y float32) bool { return math.Abs(float64(x-y)) <= geomObsTol }
+	return near(a.Y, b.Y) && near(a.Cb, b.Cb) && near(a.Cr, b.Cr) && a.Saturated == b.Saturated
+}
+
 // geomPlainMesh returns the exact mesh of a rendered frame of the code.
 func geomPlainMesh(c *geomCode) *Mesh {
 	p := float64(c.pitch)
@@ -31,7 +42,7 @@ func TestSamplePlain(t *testing.T) {
 			s := cm.Map(c.symbols[0][i])
 			k := float32(int(1) << (s.Bits - 8))
 			want := modem.Obs{Y: float32(s.Y) / k, Cb: float32(s.Cb) / k, Cr: float32(s.Cr) / k}
-			if o != want {
+			if !geomObsNear(o, want) {
 				t.Fatalf("modulation %d cell %d: got %+v, want %+v", mod, i, o, want)
 			}
 		}
@@ -55,7 +66,7 @@ func TestSampleCentral(t *testing.T) {
 	}
 	var o [1]modem.Obs
 	FootprintSampler{}.Sample(o[:], f, geomPlainMesh(c), []frame.Cell{cell})
-	if o[0].Y != 100 {
+	if !geomObsNear(o[0], modem.Obs{Y: 100, Cb: o[0].Cb, Cr: o[0].Cr}) {
 		t.Errorf("got %v, want 100", o[0].Y)
 	}
 }
@@ -76,7 +87,7 @@ func TestSampleSaturated(t *testing.T) {
 			t.Errorf("cell %d: saturated %v, want %v", i, o.Saturated, want[i])
 		}
 	}
-	if obs[3] != (modem.Obs{Saturated: true}) {
+	if !geomObsNear(obs[3], modem.Obs{Saturated: true}) {
 		t.Errorf("outside: %+v", obs[3])
 	}
 }
@@ -89,7 +100,7 @@ func TestSampleTiny(t *testing.T) {
 	var o [1]modem.Obs
 	FootprintSampler{}.Sample(o[:], f, m, []frame.Cell{{X: 2, Y: 2}})
 	// The central part [1.54, 1.96] holds no pixel centre; the centre (1.75, 1.75) is in pixel (1, 1).
-	if o[0].Y != 60 || o[0].Cb != 0 {
+	if !geomObsNear(o[0], modem.Obs{Y: 60}) {
 		t.Errorf("got %+v", o[0])
 	}
 }
@@ -113,7 +124,7 @@ func TestSampleInvalid(t *testing.T) {
 		obs := make([]modem.Obs, len(cells))
 		FootprintSampler{}.Sample(obs, tc.f, tc.m, cells)
 		for i, o := range obs {
-			if o != (modem.Obs{Saturated: true}) {
+			if !geomObsNear(o, modem.Obs{Saturated: true}) {
 				t.Errorf("%s: cell %d: %+v", name, i, o)
 				break
 			}
@@ -121,7 +132,7 @@ func TestSampleInvalid(t *testing.T) {
 	}
 	obs := make([]modem.Obs, 3)
 	FootprintSampler{}.Sample(obs, geomPlain(c, 0), geomPlainMesh(c), cells)
-	if obs[2].Y == 0 {
+	if obs[2].Saturated || obs[2].Y < 1 {
 		t.Error("short dst not filled")
 	}
 }
