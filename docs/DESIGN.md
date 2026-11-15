@@ -1322,7 +1322,10 @@ by GoReleaser).
   checkout is mounted read-only and the containers run with `no-new-privileges`. One step runs the
   `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
   tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
-  others. Every job and every long step has a timeout. The test, race and coverage tasks run
+  others. Every job and every long step has a timeout. A newer push to a pull request cancels that
+  pull request's older `ci` and `codeql` runs; runs on main, tags and schedules are never cancelled
+  (the workflow policy test allows `cancel-in-progress` only as `false` or the pull-request
+  condition). The test, race and coverage tasks run
   `internal/video` on its own, after the other packages have finished, not in parallel with them:
   the worker cap and the watchdog's stop latency are properties of one process on a machine that
   other test binaries are not oversubscribing, and the package's tests assert wall-clock bounds
@@ -1470,3 +1473,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 17 says the test, race and coverage tasks run `internal/video` on its own after the other packages, and why (the cap and the watchdog are properties of one process on a machine other test binaries are not oversubscribing), with the cost on macos-26-intel (+5 min 32 s over the coverage and race steps, 6 min 42 s left under the race step's timeout) |
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
 | 2026-11-15 | M2 open risks: section 12's worker progress message also carries the time from readiness to the worker's linear memory being reserved and to its input being opened; commit 0f2f4fc added these two fields in M1 stream D and raised the protocol to version 3, which the code ships (`protocolVersion`), and no row recorded it (review of PR #26, L1; the row above for version 2 is correct for commit cec1dc3) |
+| 2026-11-15 | Stream G, CI budget: section 17 says a newer push to a pull request cancels its older `ci` and `codeql` runs, that runs on main, tags and schedules are never cancelled, and that the workflow policy test enforces this |

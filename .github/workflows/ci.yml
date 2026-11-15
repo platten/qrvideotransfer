@@ -11,9 +11,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels that pull request's older run. Runs on main, tags and
+# schedules each get their own group (the commit SHA) and are never cancelled.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   GO_VERSION: "1.27.4"
