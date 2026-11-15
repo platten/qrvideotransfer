@@ -46,23 +46,24 @@ func TestConfirmsDecoy(t *testing.T) {
 	}
 }
 
-// TestConfirmsOneLayout: within one Detect at most confirmMaxLayouts layouts are built; one more grid
-// is refused.
+// TestConfirmsOneLayout: within one Detect at most confirmMaxLayouts distinct grids are used; one
+// more is refused, a grid already used is not, and layouts are cached by grid.
 func TestConfirmsOneLayout(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 4, 2, 1, 27)
 	f := geomPlain(c, 0)
 	v, _ := geomView(f)
-	other, err := frame.NewLayout(240, 135)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := FinderDetector{layout: other, built: confirmMaxLayouts}
+	d := FinderDetector{grids: [][2]int{{240, 135}, {300, 180}}}
 	if d.confirms(f, &v, geomPlainQuad(c)) {
-		t.Error("a layout beyond the cap was built in one Detect")
+		t.Error("a grid beyond the cap was used in one Detect")
 	}
-	d.built = 0
-	if !d.confirms(f, &v, geomPlainQuad(c)) || d.layout.GridX() != 212 {
-		t.Error("true quad not confirmed with a fresh layout")
+	d.grids = [][2]int{{240, 135}, {212, 120}}
+	if !d.confirms(f, &v, geomPlainQuad(c)) {
+		t.Error("true quad not confirmed with its grid among those used")
+	}
+	cached := d.layouts[len(d.layouts)-1]
+	d.grids = nil
+	if !d.confirms(f, &v, geomPlainQuad(c)) || d.layouts[len(d.layouts)-1] != cached {
+		t.Error("the layout was not reused from the cache")
 	}
 }
 
