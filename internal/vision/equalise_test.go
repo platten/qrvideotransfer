@@ -52,7 +52,7 @@ func newSynth(t testing.TB, gridX, gridY int, mod uint8, sigma float64, wb float
 		return modem.Obs{Y: ce[0] + float32(sigma*gauss(&g)), Cb: ce[1] + float32(sigma*gauss(&g)), Cr: ce[2] + float32(sigma*gauss(&g))}
 	}
 	for _, cell := range l.DataCells() {
-		lv := int(g.Next() % uint64(c.Levels())) //nolint:gosec // small
+		lv := int(g.Next() % uint64(c.Levels()))
 		s.levels = append(s.levels, lv)
 		s.obs = append(s.obs, noisy(s.centre(lv, int(cell.X), int(cell.Y))))
 	}

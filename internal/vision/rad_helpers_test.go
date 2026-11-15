@@ -48,7 +48,7 @@ func newRadSession(t testing.TB, gridX, gridY, pitch int, mod uint8, n int, seed
 	}
 	c, _ := modem.ByID(mod)
 	s := &radSession{
-		hdr:    frame.Header{Version: 1, Session: 0x5a17, TotalFrames: uint32(n), GridX: uint16(gridX), GridY: uint16(gridY), Modulation: mod, InnerCode: 2}, //nolint:gosec // small test values
+		hdr:    frame.Header{Version: 1, Session: 0x5a17, TotalFrames: uint32(n), GridX: uint16(gridX), GridY: uint16(gridY), Modulation: mod, InnerCode: 2},
 		layout: r.Layout(), mod: c, pitch: pitch,
 	}
 	g := prng.SplitMix64{State: seed}
@@ -61,7 +61,7 @@ func newRadSession(t testing.TB, gridX, gridY, pitch int, mod uint8, n int, seed
 	}
 	w, h := r.Size()
 	for i := range n {
-		s.hdr.FrameIndex = uint32(i) //nolint:gosec // small
+		s.hdr.FrameIndex = uint32(i)
 		sym := make([]uint8, cells)
 		if encode {
 			mp := render.NewMapper(s.mapping)
@@ -76,13 +76,13 @@ func newRadSession(t testing.TB, gridX, gridY, pitch int, mod uint8, n int, seed
 				cws[k] = make([]byte, (s.code.N()+7)/8)
 				s.code.Encode(cws[k], sh)
 			}
-			if err := mp.Symbols(sym, uint32(i), cws); err != nil { //nolint:gosec // small
+			if err := mp.Symbols(sym, uint32(i), cws); err != nil {
 				t.Fatal(err)
 			}
 			s.shards = append(s.shards, shards)
 		} else {
 			for j := range sym {
-				sym[j] = uint8(g.Next() & 7) //nolint:gosec // masked
+				sym[j] = uint8(g.Next() & 7)
 			}
 		}
 		f := &video.Frame{Y: make([]uint16, w*h), Cb: make([]uint16, w*h/4), Cr: make([]uint16, w*h/4)}
@@ -256,15 +256,6 @@ func (rc *radCapture) trueMix(l *frame.Layout) [][]channel.Weight {
 		out[i] = rc.tr.CellMix(int(c.X), int(c.Y))
 	}
 	return out
-}
-
-// trueAnchorWeights returns the true weight of each phase at an anchor's phase marker centre.
-func (rc *radCapture) truePhase(x, y float64, pitch int) [4]float64 {
-	var w [4]float64
-	for _, m := range rc.tr.Mix(x*float64(pitch), y*float64(pitch)) {
-		w[m.Frame%4] += m.W
-	}
-	return w
 }
 
 // preset returns a simulator preset at a smaller camera size.

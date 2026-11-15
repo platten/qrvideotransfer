@@ -81,7 +81,8 @@ func (e *TileEqualiser) start(palette []modem.Obs, l *frame.Layout, a []AnchorOb
 	n := c.Levels()
 	def := c.DefaultStats(1)
 	p, ok := paletteLevels(palette, n)
-	if !ok || !(p[n-1][0]-p[0][0] >= minContrast) {
+	hi := (n - 1) & (modem.MaxLevels - 1) // the lightest level; n is 2, 4 or 8
+	if !ok || !(p[hi][0]-p[0][0] >= minContrast) {
 		for lv := range n {
 			p[lv] = def.Centre[lv]
 		}
@@ -107,13 +108,13 @@ func (e *TileEqualiser) start(palette []modem.Obs, l *frame.Layout, a []AnchorOb
 		}
 		refs[dst] = s
 	}) {
-		top := p[n-1]
+		top := p[hi]
 		for k := range refs {
 			refs[k] = [2]modem.Obs{{Y: p[0][0], Cb: p[0][1], Cr: p[0][2]}, {Y: top[0], Cb: top[1], Cr: top[2]}}
 		}
 	}
 	f := &Field{TilesX: lat.nx, TilesY: lat.ny, TileW: TileW, TileH: TileH, Tiles: make([]modem.LocalStats, len(refs))}
-	span := p[n-1][0] - p[0][0]
+	span := p[hi][0] - p[0][0]
 	for k, r := range refs {
 		st := &f.Tiles[k]
 		st.Levels = n
@@ -122,8 +123,8 @@ func (e *TileEqualiser) start(palette []modem.Obs, l *frame.Layout, a []AnchorOb
 		sd := sp / float32(n-1) / 6 // a sixth of the level spacing
 		for lv := range n {
 			st.Centre[lv][0] = b.Y + sp*(p[lv][0]-p[0][0])/span
-			st.Centre[lv][1] = p[lv][1] + ((b.Cb+w.Cb)-(p[0][1]+p[n-1][1]))/2
-			st.Centre[lv][2] = p[lv][2] + ((b.Cr+w.Cr)-(p[0][2]+p[n-1][2]))/2
+			st.Centre[lv][1] = p[lv][1] + ((b.Cb+w.Cb)-(p[0][1]+p[hi][1]))/2
+			st.Centre[lv][2] = p[lv][2] + ((b.Cr+w.Cr)-(p[0][2]+p[hi][2]))/2
 			st.Variance[lv] = max(sd*sd, modem.MinVariance)
 		}
 	}

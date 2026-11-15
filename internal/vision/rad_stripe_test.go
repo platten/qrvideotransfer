@@ -13,13 +13,13 @@ import (
 // stated and how many of those decoded to the shard sent.
 func (s *radSession) decodeFrame(soft []int8, fr int) (tried, good int) {
 	m := s.mapping
-	scr := m.Scrambler(uint32(fr)) //nolint:gosec // small
+	scr := m.Scrambler(uint32(fr))
 	llr := make([]int8, m.Sent())
 	shard := make([]byte, s.code.ShardSize())
 	for c := range m.CodewordsPerFrame() {
 		stated := 0
 		for t := range llr {
-			q := m.Position(uint32(fr), c, t) //nolint:gosec // small
+			q := m.Position(uint32(fr), c, t)
 			v := soft[q]
 			if scr.Bit(q) == 1 {
 				v = -v
