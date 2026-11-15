@@ -6,11 +6,10 @@ name: ci
 on:
   push:
     branches: [main]
-  # edited: a pull request whose base branch changes is classified again against the new base.
-  # Editing the title or body also starts a run, which cancels the older run of the same pull
-  # request. A stacked pull request (base not the default branch) never skips (tools/dev changes).
+  # Default types only. A stacked pull request (base not the default branch) never skips (tools/dev
+  # changes), which closes the retarget hole without the edited type, whose every title or body edit
+  # would cost a full run.
   pull_request:
-    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
