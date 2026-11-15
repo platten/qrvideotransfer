@@ -313,8 +313,13 @@ signed by any other key are rejected; verification happens before the passphrase
 
 ### 9.5 Resource tests
 
-Decoding each hostile input that aims at a limit in section 5 stays under 1 GiB of peak memory and
-finishes within 60 seconds on a CI runner. Both are asserted in the test. Among them: a small file of
+Decoding each hostile input that aims at a limit in section 5 finishes within 60 seconds on a CI
+runner, and its memory stays under 1 GiB in each of the two processes involved. The test process's Go
+heap growth is sampled and asserted. The worker's memory is bounded by construction (its 512 MiB
+linear-memory reservation, about 920 MB of process memory per instance at worst in spike S1), and on
+Unix it is also measured: each worker's peak resident memory, from its rusage when it exits, is
+asserted under 1 GiB (Windows' process state carries no memory figure, so there it is not measured).
+Among them: a small file of
 many skip pictures (a few kilobytes declaring hours of 4K video) is refused from the probe by
 `MaxDecodedPixelsPerInputByte`, and the same file with a lying container is stopped while decoding.
 Written in M1 stream D: `testdata/video/skip.mkv` holds 600 flat 3840 x 2160 pictures (20 s) in 36 KB
@@ -327,9 +332,10 @@ under the race detector on macos-26-intel. It also stops after 43 frames. Race b
 times the 60-second bound; the non-race step on every runner decodes the 4K clip within 60 seconds.
 Measured (linux amd64, PR #24): the 4K clip, non-race, 2.4 s with the process's Go heap 16 MiB above
 where it started; `skip1080.mkv` under the race detector, 10 s and 5 MiB. Since PR #15 the engine
-decodes in a worker process, so the engine's linear memory is not in the test process's heap and the
-test's in-process sample of it reads 0; the worker's memory is bounded by its 512 MiB reservation
-(section 5). Before the worker processes the 4K check measured 76 MiB of linear memory and 245 MiB
+decodes in a worker process, so the engine's linear memory is not in the test process's heap; the
+test's in-process sample of linear memory, which then read 0, is replaced by the worker's peak
+resident memory: 223 MiB for the 4K clip and 448 MiB for `skip1080.mkv` under the race detector
+(linux amd64, development machine). Before the worker processes the 4K check measured 76 MiB of linear memory and 245 MiB
 of Go heap. The video-file cases of section 9.2 are tested there too (`TestHostileFiles`):
 empty, truncated, text and PNG content, an MP4 without its track or without its codec configuration,
 random NAL units and a live HLS playlist named `.mp4` each end in `video.ErrInvalidVideo`; the test
@@ -446,3 +452,4 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | PR #24 (CI robustness): section 9.5 names `skip1080.mkv`, the quarter-frame-size clip that race builds use for the skip-picture decode check, with five times the 60-second bound, while the non-race step on every runner decodes the 4K clip within 60 seconds; it gives the current measurements and says the in-process linear-memory sample reads 0 now that the engine decodes in a worker process |
 | 2026-11-14 | M1 stream D, round 3 of the review of PR #20: section 5 raises `EngineProbeTime` from 15 s to 60 s, with the reasoning and evidence (probes take 0.05-0.3 s unloaded; a capped CI run recorded 13 s under load; the tick accounting can over-count by at most one tick (1 s), when the instance stops waiting, and otherwise only under-counts; so about four times the worst seen), states that the whitelist, the read bound and the stall watchdog are the primary controls and the time bound a backstop, and what it costs (a hostile file inside the read bound can hold one worker for up to 60 s); race builds use the same bound. The cap's account no longer implies it fixed the slow probe: the cause is believed to be CPU starvation, the cap limits starvation from qrvt's own workers only, and a capped run still recorded 13 s |
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 5 corrects the tick accounting (it can over-count by at most one tick, when the instance stops waiting, and otherwise only under-counts; the round-3 row above is corrected the same way) and says that an error from a limit on time carries a sanitised breakdown of where the instance's time went; T1 says a cancelled encoder or `Concat` reports the cancellation, not the engine's error for its closed input |
+| 2026-11-14 | M1 stream D, time-bound diagnostics: section 9.5 separates the test process's Go heap (sampled and asserted) from the worker's memory (bounded by construction, and on Unix measured as the worker's peak resident memory at exit and asserted under 1 GiB; not measured on Windows), replacing the in-process linear-memory sample that read 0 since PR #15 |
