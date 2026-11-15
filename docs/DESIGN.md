@@ -843,7 +843,9 @@ Costs a user should expect:
   standard input closes, which happens when the parent exits or dies, and runs with GOMAXPROCS of at
   least 2 so that the goroutine watching the pipe can run while the engine occupies a core; on Windows
   it is also placed in a kill-on-close Job Object: it is created suspended and resumed only once it is
-  in the job, so it never runs outside it (if it cannot be assigned it runs without one). That exit is best effort: with close-on-cancel off
+  in the job, so it never runs outside it (if it cannot be assigned it runs without one); on Linux it
+  is started with SIGKILL as its parent-death signal, from a thread held until it has been waited
+  for (the signal fires when the starting thread exits). That exit is best effort: with close-on-cancel off
   a spinning guest never returns to Go, and it also blocks Go's stop-the-world garbage collection, so
   while it spins the worker's own timers and goroutines cannot be trusted. The parent's kill is the
   control. Loading and compiling the engine, which on a first run
@@ -1487,3 +1489,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Stream G, CI budget: section 17 says a newer push to a pull request cancels its older `ci` and `codeql` runs, that runs on main, tags and schedules are never cancelled, and that the workflow policy test enforces this |
 | 2026-11-15 | Reservation stall fix: section 12 starts the stall clock when an instance's 512 MiB of linear memory has been reserved, on the worker and in-process paths; `EngineLoadLimit` now bounds the phase until the reservation (from a worker's start, or from an in-process instance's turn, after which the instance is cancelled); the worker reports the reservation in its progress message, clamped to the message's arrival. Prompted by two false stalls on macos-26-intel (CI run 43693218308) |
 | 2026-11-15 | Reservation stall fix, round 2: section 12 says the worker reports its reservation from the goroutine that made it, before any guest code runs, not in its periodic progress report, which a spinning guest can hold back for good by blocking the garbage collection the reservation starts (CI run 43704037510) |
+| 2026-11-15 | Worker parent-death signal, review of PR #37: section 12 says that on Linux the worker is started with SIGKILL as its parent-death signal, from a thread held until it has been waited for |

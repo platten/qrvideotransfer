@@ -251,10 +251,15 @@ typed error and no process left; this kill is the control, because while a guest
 own timers cannot be trusted (close-on-cancel is off in the worker, and a spinning guest blocks Go's
 stop-the-world garbage collection there). A worker whose parent is killed mid-job exits by itself
 within 5 s in the test, where the guest is the same spinning module; that exit, on its pipe closing,
-is best effort and is not relied on. The test runs twice: with the worker in its Job Object and
-without one. On Unix there is no Job Object, so both runs test the pipe exit. On Windows the run
-without a job tests the pipe exit alone; the run with the job cannot tell which of the two ended the
-worker. The Job Object is tested on its own (`TestWorkerJobObject`, Windows): the worker is created
+is best effort and is not relied on. The test runs twice: with the worker in its Job Object (on
+Linux, with its parent-death signal) and without. The run without tests the pipe exit alone on every
+platform; the run with cannot tell which of the two ended the worker. On macOS there is neither, so
+both runs test the pipe exit. On Linux the worker gets SIGKILL as its parent-death signal, from a
+thread held until the worker has been waited for (`TestStartProcJob` checks that the signal is set
+with the job flag and not without); `TestWorkerParentKilledReserved` (Linux) kills a fake parent as
+soon as its worker, run with GOMAXPROCS 2, has reported reserving 512 MiB, and the worker is gone
+within 5 s, where without the signal it survived 8 runs in 8 (its guest's spin blocks the pipe
+exit, docs/spikes/S1.md section 14.4). The Job Object is tested on its own (`TestWorkerJobObject`, Windows): the worker is created
 suspended, assigned to its kill-on-close job and only then resumed; it then runs (it answers),
 `IsProcessInJob` finds it in that job, and closing the job's handle kills it while its pipe from the
 parent is still open. That the operating system closes the handle when qrvt crashes is Windows'
@@ -472,3 +477,4 @@ instruction and states which versions receive fixes.
 | 2026-11-15 | Reservation stall fix, round 2: section 5 says a worker reports its reservation from the goroutine that made it, before any guest code runs, since a spinning guest can block the garbage collection the reservation starts and with it every other goroutine of the worker (CI run 43704037510) |
 | 2026-11-15 | Reservation stall fix, review: T1 says `EngineLoadLimit` bounds a worker until it reports the engine loaded and the instance's memory reserved, not only the engine loaded |
 | 2026-11-15 | Worker parent-death signal: T1 says the worker's exit through its pipe fails once its guest has reserved its memory and spins, that on Linux the worker is killed by its parent-death signal (SIGKILL) and on Windows by its Job Object when qrvt dies, and that on macOS an orphaned spinning worker can survive |
+| 2026-11-15 | Worker parent-death signal, review of PR #37: section 9.5 says the orphan test's run with the job uses the Job Object on Windows and the parent-death signal on Linux, that the run without tests the pipe exit alone everywhere, and names `TestStartProcJob` and `TestWorkerParentKilledReserved` |
