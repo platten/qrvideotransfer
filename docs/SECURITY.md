@@ -131,13 +131,15 @@ that raises it. Two limits have a flag in version 1: the unpacked size (`--max-s
 wall time, start to ready, ready to first read, the input's reads and bytes, time since the last
 progress, and the worker processes and in-process instances running. It is sanitised like other
 engine text. On the normal path it costs, per instance, one memory-allocator wrapper and one
-close notifier (three small allocations, 112 bytes, about 40 ns to set up, and one timestamp each
-when the memory is reserved and when the module closes); per read of the input, two atomic additions
-(about 8 ns, a compare-and-swap added on the first); and, from each worker, a 48-byte progress
-message every 200 ms while its counts change, about 0.4 µs for the worker to build and send, so at
-most about 2.5 µs a second (the parent's handling was not timed separately); before, only probes
-sent progress messages. Measured on the S1 development machine (spike S1 section 14.2); decoding `hevc8.mp4` in process took a median 579 ms with the instrumentation and
-605 ms without it, 15 runs each, within run-to-run noise. A worker's figures in it are the worker's
+close notifier (three small allocations, 112 bytes, about 40 ns to set up) and four timestamps (when
+the memory is reserved, when the module begins to close, when its memory is freed and when the run
+call returns); per read of the input, two atomic additions (about 8 ns, a timestamp and a
+compare-and-swap added on the first); and, from each worker, a progress message (48-byte payload)
+every 200 ms while its counts change, about 0.4 µs for the worker to build and send, so at most about
+2.5 µs a second (the parent's handling was not timed separately); before, only probes sent progress
+messages. Measured on the S1 development machine (spike S1 section 14.2); decoding `hevc8.mp4` in
+process took a median 579 ms with the allocator wrapper and close notifier and 605 ms without them,
+15 runs each, within run-to-run noise. A worker's figures in it are the worker's
 word (its progress message), clamped by the parent.
 
 ## 6. Sender authenticity
@@ -464,4 +466,4 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 5 corrects the tick accounting (it can over-count by at most one tick, when the instance stops waiting, and otherwise only under-counts; the round-3 row above is corrected the same way) and says that an error from a limit on time carries a sanitised breakdown of where the instance's time went; T1 says a cancelled encoder or `Concat` reports the cancellation, not the engine's error for its closed input |
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 9.5 separates the test process's Go heap (sampled and asserted) from the worker's memory (bounded by construction, and measured by sampling each worker while it runs (VmHWM on Linux, ps on macOS) and asserted under 1 GiB; not measured on Windows; a worker's rusage carries the parent's high-water mark on Linux), replacing the in-process linear-memory sample that read 0 since PR #15 |
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 5 states only the measured stop times: on the default path a worker is stopped by killing its process, measured at most 0.46 s after cancellation; on the fallback path the watchdog cancelled on time, but one instance returned 8.4 s after its cancellation on an oversubscribed 4-vCPU runner, cause not established, and no stop time after cancellation is claimed for it. `TestWatchdogUnderLoad` asserts the cancellation and the stop and logs the return time; section 9.3's 3 s is labelled a measurement on one machine |
-| 2026-11-15 | M2 open risks: section 5 states the measured normal-path cost of the time-bound breakdown (commit 7469139): an allocator wrapper and close notifier per instance (112 bytes, about 40 ns), two atomic additions per read (about 8 ns), and each worker's progress message every 200 ms while its counts change (about 0.4 µs each), where it said "a few atomic operations per read and nothing else"; no measurable change to an in-process decode (review of PR #26, L2) |
+| 2026-11-15 | M2 open risks: section 5 states the measured normal-path cost of the time-bound breakdown (commits cec1dc3, 0f2f4fc and 7469139): an allocator wrapper and close notifier per instance (112 bytes, about 40 ns) and four timestamps per instance, two atomic additions per read (about 8 ns), and each worker's progress message every 200 ms while its counts change (about 0.4 µs each), where it said "a few atomic operations per read and nothing else"; no measurable change to an in-process decode (review of PR #26, L2) |
