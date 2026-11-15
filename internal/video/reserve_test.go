@@ -92,6 +92,25 @@ func TestWorkerReservationNotStall(t *testing.T) {
 	gone(t, ps.all(), 5*time.Second)
 }
 
+// TestWorkerReservedSpin: a worker whose guest reserves the whole 512 MiB and then spins without
+// calling the host is stopped as a stall (3 s) soon after, not held to EngineLoadLimit. The worker
+// must report its reservation before the guest runs: once it spins, the garbage collection that the
+// reservation can start never reaches its stop-the-world, and no other goroutine of the worker runs
+// (SECURITY.md T1), its periodic progress report included (CI run 43704037510).
+func TestWorkerReservedSpin(t *testing.T) {
+	t.Parallel()
+	const limit = 3 * time.Second
+	p, ps := testWorkers(t)
+	m := &meter{}
+	err := run(testCtx(t, 2*time.Minute), workerRunner{p}, job{prog: "ffmpeg", module: "spinbig",
+		args: func(string, string) []string { return nil }, timeout: limit, meter: m})
+	stallFromReservation(t, "reserved spin", err, m, limit)
+	if d := time.Duration(m.cancelledAt.Load() - m.memAt.Load()); d > limit+5*time.Second {
+		t.Errorf("stopped %v after its reservation", d)
+	}
+	gone(t, ps.all(), 5*time.Second)
+}
+
 // TestWorkerFutureReservation: a worker's reservation time is its word, so one that claims a time a
 // day ahead does not hold off the stall watchdog: the claim is taken as the time it arrived, and the
 // worker is stopped as a stall (2 s) within the limit plus a few seconds.

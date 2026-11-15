@@ -23,15 +23,28 @@ import (
 )
 
 // spinWasm is a module whose _start loops forever without calling the host. Like the engine, it
-// declares a linear memory, so its instance reserves 512 MiB before it runs; the stall clock starts
-// when that reservation completes.
-var spinWasm = []byte{
-	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
-	0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: func () -> ()
-	0x03, 0x02, 0x01, 0x00, // function 0 has type 0
-	0x05, 0x03, 0x01, 0x00, 0x00, // one memory, at least 0 pages, no maximum
-	0x07, 0x0a, 0x01, 0x06, '_', 's', 't', 'a', 'r', 't', 0x00, 0x00, // export "_start"
-	0x0a, 0x09, 0x01, 0x07, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b, // loop { br 0 }
+// declares a linear memory, so its instance reserves memory before it runs and the stall clock starts
+// then; but its memory has a maximum of one page, so it reserves 64 KiB, not 512 MiB. A 512 MiB
+// allocation can start a garbage collection whose stop-the-world the spinning guest then blocks for
+// ever in an unguarded worker (SECURITY.md T1), which the tests using this module are not about.
+var spinWasm = spinModule(0x05, 0x04, 0x01, 0x01, 0x00, 0x01) // one memory, 0 to 1 pages
+
+// spinBigWasm is spinWasm with a memory of no maximum, so its instance reserves the whole 512 MiB,
+// as the engine's does, before it spins.
+var spinBigWasm = spinModule(0x05, 0x03, 0x01, 0x00, 0x00) // one memory, at least 0 pages
+
+// spinModule is the spinning module with the given memory section.
+func spinModule(memory ...byte) []byte {
+	b := []byte{
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
+		0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: func () -> ()
+		0x03, 0x02, 0x01, 0x00, // function 0 has type 0
+	}
+	b = append(b, memory...)
+	return append(b,
+		0x07, 0x0a, 0x01, 0x06, '_', 's', 't', 'a', 'r', 't', 0x00, 0x00, // export "_start"
+		0x0a, 0x09, 0x01, 0x07, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b, // loop { br 0 }
+	)
 }
 
 // fakeParent is the argument with which the test binary plays a parent that starts a spinning worker
@@ -44,6 +57,7 @@ const fakeParent = "__test-fake-parent"
 // to the test's coverage directory.
 func TestMain(m *testing.M) {
 	testModules["spin"] = spinWasm
+	testModules["spinbig"] = spinBigWasm
 	testModules["broken"] = []byte("not wasm")
 	if len(os.Args) > 2 && os.Args[1] == WorkerArg {
 		os.Exit(hostileWorker(os.Args[2]))
