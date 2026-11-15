@@ -231,7 +231,7 @@ func TestCIRetargetAndCodeOutput(t *testing.T) {
 	}
 	s := string(b)
 	for _, want := range []string{
-		"  pull_request:\n    types: [opened, synchronize, reopened, edited]\n",
+		"  pull_request:\n    types: [opened, synchronize, reopened, edited]\n", //nolint:misspell // a GitHub event type
 		`if [ "$CODE" != true ] && [ "$CODE" != false ]; then`,
 		`-base-ref "$BASE_REF" -default-branch "$DEFAULT_BRANCH"`,
 		"BASE_REF: ${{ github.event.pull_request.base.ref }}",

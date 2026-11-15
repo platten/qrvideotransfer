@@ -25,7 +25,6 @@ linters:
         - analyze
         - artifact # the GitHub and GoReleaser term
         - artifacts
-        - synchronize # a GitHub pull_request event type
     revive:
       rules:
         - name: exported
