@@ -13,7 +13,8 @@ import (
 
 // The workflow policy of SECURITY.md section 8: every action is pinned by a full commit SHA with a
 // version comment, every workflow declares top-level permissions (and not a blanket read-all or
-// write-all), and nothing runs on pull_request_target. YAML is checked line by line, which is
+// write-all), nothing runs on pull_request_target, and in-progress runs are cancelled only for pull
+// requests (DESIGN.md section 17). YAML is checked line by line, which is
 // enough for workflows written by hand in this repository's style.
 
 // actionRef is a `uses:` reference pinned by commit, with the version its comment claims.
@@ -26,6 +27,10 @@ var (
 	dockerPin   = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
 	prTarget    = regexp.MustCompile(`(^|[\s\[,'"])pull_request_target($|[\s\]:,'"])`)
 )
+
+// cancelOnPR is the only cancel-in-progress expression allowed besides false: a newer push to a
+// pull request cancels its older run, while runs on main, tags and schedules always finish.
+const cancelOnPR = "${{ github.event_name == 'pull_request' }}"
 
 // stripComment removes a trailing YAML comment; it is not quote-aware beyond requiring a space
 // before the #, which is how comments are written here.
@@ -79,6 +84,11 @@ func workflowProblems(name string, data []byte, workflow bool) []string {
 		code := stripComment(line)
 		if prTarget.MatchString(code) {
 			add(n, "pull_request_target is not allowed")
+		}
+		if v, ok := strings.CutPrefix(strings.TrimSpace(code), "cancel-in-progress:"); ok {
+			if v = strings.TrimSpace(v); v != "false" && v != cancelOnPR {
+				add(n, "cancel-in-progress must be false or %s, so that runs on main and tags are never cancelled", cancelOnPR)
+			}
 		}
 		if workflow && strings.HasPrefix(code, "permissions:") {
 			perms = true

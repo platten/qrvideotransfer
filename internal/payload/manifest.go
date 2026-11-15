@@ -27,12 +27,31 @@ type Entry struct {
 // perm returns the meaningful mode bits: the low nine.
 func (e Entry) perm() uint32 { return e.Mode & 0o777 }
 
+// The modification times a manifest can hold: RFC 3339 writes a four-digit year (FORMAT.md section 12).
+var (
+	minMTime = time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC)
+	maxMTime = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
+)
+
 // MarshalManifest encodes entries as the manifest an encoder writes: keys in the order of FORMAT.md
-// section 12, no whitespace, mode limited to the low nine bits, mtime in whole seconds UTC.
-func MarshalManifest(entries []Entry) []byte {
+// section 12, no whitespace, mode limited to the low nine bits, mtime in whole seconds UTC and
+// clamped to years 0000 to 9999. It writes nothing [ParseManifest] would refuse: a file with a
+// negative size or a path that is not valid UTF-8 (which JSON encoding would replace) stops it with
+// an [InputError] naming the entry, and more entries or bytes than the format limits with a
+// [LimitError].
+func MarshalManifest(entries []Entry) ([]byte, error) {
+	if len(entries) > MaxManifestEntries {
+		return nil, &LimitError{"manifest entries", int64(len(entries)), MaxManifestEntries, ""}
+	}
 	var b bytes.Buffer
 	b.WriteString(`{"version":1,"entries":[`)
 	for i, e := range entries {
+		switch {
+		case !utf8.ValidString(e.Path):
+			return nil, &InputError{e.Path, "the path is not valid UTF-8"}
+		case !e.Dir && e.Size < 0:
+			return nil, &InputError{e.Path, fmt.Sprintf("negative size %d", e.Size)}
+		}
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -47,7 +66,8 @@ func MarshalManifest(entries []Entry) []byte {
 		b.WriteString(`,"mode":`)
 		b.WriteString(strconv.FormatUint(uint64(e.perm()), 10))
 		b.WriteString(`,"mtime":"`)
-		b.WriteString(e.MTime.UTC().Truncate(time.Second).Format(time.RFC3339))
+		t, _ := clampMTime(e.MTime)
+		b.WriteString(t.Format(time.RFC3339))
 		b.WriteByte('"')
 		if !e.Dir {
 			b.WriteString(`,"sha256":"`)
@@ -57,7 +77,23 @@ func MarshalManifest(entries []Entry) []byte {
 		b.WriteByte('}')
 	}
 	b.WriteString(`]}`)
-	return b.Bytes()
+	if b.Len() > MaxManifestBytes {
+		return nil, &LimitError{"manifest size", int64(b.Len()), MaxManifestBytes, ""}
+	}
+	return b.Bytes(), nil
+}
+
+// clampMTime returns t in whole seconds UTC, clamped to the years 0000 to 9999 that FORMAT.md
+// section 12 can write, and whether clamping (not the rounding to seconds) changed it.
+func clampMTime(t time.Time) (time.Time, bool) {
+	t = t.UTC().Truncate(time.Second)
+	switch {
+	case t.Before(minMTime):
+		return minMTime, true
+	case t.After(maxMTime):
+		return maxMTime, true
+	}
+	return t, false
 }
 
 // writeString writes s as a JSON string without HTML escaping.

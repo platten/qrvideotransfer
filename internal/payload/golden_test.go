@@ -325,14 +325,16 @@ func writeGolden(t *testing.T, srcs []source, unsigned, signed []byte) {
 		}
 	}
 	for _, r := range acceptedRules {
-		g.Accepted = append(g.Accepted, goldenManifest{Rule: r.rule, Manifest: string(MarshalManifest(r.entries()))})
+		g.Accepted = append(g.Accepted, goldenManifest{Rule: r.rule, Manifest: string(marshal(r.entries()))})
 	}
 	for _, r := range refusedRules {
 		es := r.entries()
-		m := MarshalManifest(es)
-		if !utf8.ValidString(r.path) { // JSON encoding would replace the invalid bytes: splice them in
+		var m []byte
+		if utf8.ValidString(r.path) {
+			m = marshal(es)
+		} else { // MarshalManifest refuses the invalid bytes: splice them in
 			es[0].Path = "PLACEHOLDER"
-			m = bytes.Replace(MarshalManifest(es), []byte("PLACEHOLDER"), []byte(r.path), 1)
+			m = bytes.Replace(marshal(es), []byte("PLACEHOLDER"), []byte(r.path), 1)
 		}
 		if utf8.Valid(m) {
 			g.Refused = append(g.Refused, goldenManifest{Rule: r.rule, Manifest: string(m)})
@@ -351,8 +353,8 @@ func writeGolden(t *testing.T, srcs []source, unsigned, signed []byte) {
 
 func FuzzUnpackArchive(f *testing.F) {
 	es := []tarEntry{dirHdr("d"), fileHdr("d/f", "content")}
-	f.Add(archive(f, MarshalManifest(manifestFor(es...)), es...))
-	f.Add(archive(f, MarshalManifest(manifestFor(es[0])), es[0]))
+	f.Add(archive(f, marshal(manifestFor(es...)), es...))
+	f.Add(archive(f, marshal(manifestFor(es[0])), es[0]))
 	f.Add([]byte{0, 0, 0, 2, '{', '}'})
 	f.Fuzz(func(t *testing.T, a []byte) {
 		parent := t.TempDir()
