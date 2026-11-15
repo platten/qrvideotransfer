@@ -29,9 +29,11 @@ type meter struct {
 	inCalls, inBytes                    atomic.Int64
 	// In a worker, the phases between readiness and the first read: when the instance's linear
 	// memory was reserved and when it opened its input.
-	memAt, openAt           atomic.Int64
-	cancelledAt             atomic.Int64 // when the watchdog cancelled the instance
-	checkAt, freedAt, runAt atomic.Int64 // stubs for the test commit
+	memAt, openAt atomic.Int64
+	cancelledAt   atomic.Int64 // when the watchdog cancelled the instance
+	// For an in-process stop: when the guest reached a check and its module began to close, when its
+	// memory was freed, and when the run call returned.
+	checkAt, freedAt, runAt atomic.Int64
 }
 
 // ready records that the instance is ready to run.
@@ -82,6 +84,11 @@ func (m *meter) breakdown(now time.Time) string {
 	}
 	if m.cancelledAt.Load() != 0 {
 		s += ", stopped " + secs(now.Sub(at(&m.cancelledAt))) + " after its cancellation"
+		if m.checkAt.Load() != 0 && m.freedAt.Load() != 0 && m.runAt.Load() != 0 {
+			s += " (cancellation to guest check " + secs(at(&m.checkAt).Sub(at(&m.cancelledAt))) +
+				", module close " + secs(at(&m.freedAt).Sub(at(&m.checkAt))) +
+				", run return " + secs(at(&m.runAt).Sub(at(&m.freedAt))) + ")"
+		}
 	}
 	return s + fmt.Sprintf(", %d of %d worker processes running, %d of %d in-process instances running",
 		len(workerSlots), cap(workerSlots), len(slots), cap(slots))

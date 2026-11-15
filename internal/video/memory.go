@@ -1,11 +1,15 @@
 package video
 
-import "github.com/tetratelabs/wazero/experimental"
+import (
+	"time"
 
-// timedAlloc is the linear-memory allocator of a worker's instance: it allocates as wazero's own
+	"github.com/tetratelabs/wazero/experimental"
+)
+
+// timedAlloc is the linear-memory allocator of every engine instance: it allocates as wazero's own
 // does (a Go slice with the capacity wazero asks for, here the whole 512 MiB reservation, grown by
 // copying only past it), and records in m when the reservation has been made, for a time-bound
-// error's breakdown.
+// error's breakdown, and when the memory is freed (as the module closes).
 type timedAlloc struct{ m *meter }
 
 // Allocate implements experimental.MemoryAllocator.
@@ -34,5 +38,8 @@ func (t *timedMem) Reallocate(size uint64) []byte {
 	return t.buf
 }
 
-// Free implements experimental.LinearMemory.
-func (t *timedMem) Free() { t.buf = nil }
+// Free implements experimental.LinearMemory. wazero frees the memory as it closes the module.
+func (t *timedMem) Free() {
+	t.buf = nil
+	t.m.freedAt.CompareAndSwap(0, time.Now().UnixNano())
+}

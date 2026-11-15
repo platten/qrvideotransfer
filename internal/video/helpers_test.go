@@ -186,5 +186,5 @@ func (m *peakMem) Free() { m.buf = nil }
 
 // withPeak returns a context that makes instances started with it record their peak memory in p.
 func withPeak(ctx context.Context, p *peakAlloc) context.Context {
-	return experimental.WithMemoryAllocator(ctx, p)
+	return context.WithValue(experimental.WithMemoryAllocator(ctx, p), ownAllocator{}, true)
 }

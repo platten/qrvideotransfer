@@ -14,8 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/tetratelabs/wazero/experimental"
 )
 
 // WorkerArg is the first argument with which qrvt re-executes itself as an engine worker: a child
@@ -326,8 +324,7 @@ func runJob(j *workerJob, stdin io.Reader, w *msgWriter) (int, error) {
 	if j.Reads {
 		wj.progress = progReads
 	}
-	// The allocator records when the linear memory is reserved, for a time-bound error's breakdown.
-	return e.exec(experimental.WithMemoryAllocator(ctx, timedAlloc{m}), wj, m)
+	return e.exec(ctx, wj, m)
 }
 
 // reportProgress sends m's reads to the parent every progressTick while they change, until done:
