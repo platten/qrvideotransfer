@@ -19,6 +19,27 @@ type phaseStats struct {
 	sumSq                float64 // summed squared weight error over all cells and phases
 	credited, wrong      int     // cells credited to some phase; those whose true frame weight is below 0.5
 	minTrue              float64 // smallest true weight among credited cells
+	clean, cleanCredited int     // cells truly clean (a frame's weight at least CleanWeight); those credited
+}
+
+// merge adds another summary.
+func (st *phaseStats) merge(o *phaseStats) {
+	if o.credited > 0 && (st.credited == 0 || o.minTrue < st.minTrue) {
+		st.minTrue = o.minTrue
+	}
+	st.cells, st.mixed, st.pocket = st.cells+o.cells, st.mixed+o.mixed, st.pocket+o.pocket
+	st.maxErr, st.maxPocket = math.Max(st.maxErr, o.maxErr), math.Max(st.maxPocket, o.maxPocket)
+	st.sumSq += o.sumSq
+	st.credited, st.wrong = st.credited+o.credited, st.wrong+o.wrong
+	st.clean, st.cleanCredited = st.clean+o.clean, st.cleanCredited+o.cleanCredited
+}
+
+// yield returns the share of truly clean cells that were credited.
+func (st *phaseStats) yield() float64 {
+	if st.clean == 0 {
+		return 0
+	}
+	return float64(st.cleanCredited) / float64(st.clean)
 }
 
 // pocketCells reports, per data cell, whether its weights depend on a phase marker that was not
@@ -61,6 +82,13 @@ func (st *phaseStats) measure(s *radSession, rc *radCapture, pf *PhaseField) {
 		}
 		if pocket[i] {
 			st.pocket++
+		}
+		_, credit := pf.Phase(i)
+		if top >= CleanWeight {
+			st.clean++
+			if credit {
+				st.cleanCredited++
+			}
 		}
 		for p := range 4 {
 			d := math.Abs(float64(pf.Weights[i][p]) - w[p])
@@ -110,21 +138,34 @@ func boundaryAngle(s *radSession, rc *radCapture) (float64, bool) {
 	return a, true
 }
 
-// maxPhaseErr is the largest phase weight error allowed at an inner cell (DESIGN.md section 15).
-// It is not met: the long version measured up to 0.082, above 0.05 in 9 of its 24 cases, chiefly
-// where the panel and the camera scan in opposite directions or a blend lies beyond the anchors;
-// DESIGN.md records it in section 15 and its change log. The assertion is left failing, as an exit
-// test that could not be met.
-const maxPhaseErr = 0.05
+// Limits of the frame-mixing assertions (DESIGN.md section 15, as the owner decided on 2026-11-15).
+// The phase weight error is a regression check at today's accuracy, not the 0.05 first asked for:
+// inner cells measured up to 0.082 and pocket cells up to 0.149. minCreditedWeight is the smallest
+// true weight of a credited cell measured (0.80). minYield is, per preset, the share of truly clean
+// cells that are credited, measured less a margin of 0.02 and rounded down; the CI and long versions differ in
+// captures and rolls, so each has its own figure.
+const (
+	maxInnerErr       = 0.09
+	maxPocketErr      = 0.16
+	minCreditedWeight = 0.80
+)
+
+// minYield gives the yield floor per preset for the CI version (index 0) and the long version.
+var minYield = map[string][2]float64{
+	"tripod":   {0.96, 0.96}, // measured 0.9857 and 0.9863
+	"handheld": {0.96, 0.97}, // measured 0.9886 and 0.9904
+}
 
 // TestPhaseWeights asserts DESIGN.md section 15 for frame mixing on `tripod` and `handheld` with
 // their 4K cameras filming a 480 x 270 grid (8 frames shown at 30 fps, camera 60 fps, fixed seeds),
-// with the panel scanning in each of its four directions and the screen rolled in the capture: the
-// phase weight error of every inner cell is at most maxPhaseErr, and no cell is credited to a code
-// frame other than the one it mostly shows. Pocket cells (see phaseStats) are reported, not bounded.
+// with the panel scanning in each of its four directions and the screen rolled in the capture: no
+// cell is credited to a code frame other than the one it mostly shows; every credited cell's true
+// weight is at least minCreditedWeight; per preset, the share of truly clean cells credited is at
+// least minYield; and as a regression check the phase weight error is at most maxInnerErr at inner
+// cells and maxPocketErr at pocket cells (see phaseStats).
 // The CI version runs the four directions with rolls 0 and 30 degrees, 2 captures each (about
 // 234,000 cells per case); the long version also roll 60, 8 captures each; the race version one
-// combination.
+// combination, without the yield floor.
 func TestPhaseWeights(t *testing.T) {
 	t.Parallel()
 	ncap := 2
@@ -137,6 +178,7 @@ func TestPhaseWeights(t *testing.T) {
 	}
 	s := newRadSession(t, 480, 270, 4, 2, 8, 0x77, false)
 	for pi, name := range []string{"tripod", "handheld"} {
+		var all phaseStats
 		for _, rot := range rots {
 			for _, roll := range rolls {
 				t.Run(fmt.Sprintf("%s/scan%d/roll%.0f", name, rot, roll), func(t *testing.T) {
@@ -161,14 +203,26 @@ func TestPhaseWeights(t *testing.T) {
 					if st.mixed == 0 || st.credited == 0 {
 						t.Fatalf("%d mixed and %d credited cells: the case does not exercise the estimator", st.mixed, st.credited)
 					}
-					if st.maxErr > maxPhaseErr {
-						t.Errorf("largest phase weight error %.4f above %.2f", st.maxErr, maxPhaseErr)
+					if st.maxErr > maxInnerErr || st.maxPocket > maxPocketErr {
+						t.Errorf("largest phase weight error %.4f inner, %.4f pocket, above %.2f and %.2f", st.maxErr, st.maxPocket, maxInnerErr, maxPocketErr)
 					}
 					if st.wrong != 0 {
 						t.Errorf("%d cells credited to the wrong code frame", st.wrong)
 					}
+					if st.minTrue < minCreditedWeight {
+						t.Errorf("a credited cell's true weight is %.4f, below %.2f", st.minTrue, minCreditedWeight)
+					}
+					all.merge(&st)
 				})
 			}
+		}
+		lim := minYield[name][0]
+		if longTests() {
+			lim = minYield[name][1]
+		}
+		t.Logf("%s: yield %.4f (%d of %d truly clean cells credited), smallest true weight credited %.4f", name, all.yield(), all.cleanCredited, all.clean, all.minTrue)
+		if !radRace && all.yield() < lim {
+			t.Errorf("%s: yield %.4f below %.2f", name, all.yield(), lim)
 		}
 	}
 }
