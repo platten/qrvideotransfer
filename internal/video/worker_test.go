@@ -22,11 +22,14 @@ import (
 	"unicode/utf8"
 )
 
-// spinWasm is a module whose _start loops forever without calling the host.
+// spinWasm is a module whose _start loops forever without calling the host. Like the engine, it
+// declares a linear memory, so its instance reserves 512 MiB before it runs; the stall clock starts
+// when that reservation completes.
 var spinWasm = []byte{
 	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
 	0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: func () -> ()
 	0x03, 0x02, 0x01, 0x00, // function 0 has type 0
+	0x05, 0x03, 0x01, 0x00, 0x00, // one memory, at least 0 pages, no maximum
 	0x07, 0x0a, 0x01, 0x06, '_', 's', 't', 'a', 'r', 't', 0x00, 0x00, // export "_start"
 	0x0a, 0x09, 0x01, 0x07, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b, // loop { br 0 }
 }
@@ -112,6 +115,15 @@ func hostileWorker(mode string) int {
 		_ = writeMsg(os.Stdout, msgOut, make([]byte, 16*16*3/2))
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
 	case "noready": // never says the engine is loaded
+		time.Sleep(time.Hour)
+	case "slowreserve": // reserves its memory 5 s after it is ready, then hangs
+		time.Sleep(5 * time.Second)
+		b := bytes.Repeat([]byte{0xff}, progressLen) // -1: not yet
+		binary.BigEndian.PutUint64(b[0:], 0)
+		binary.BigEndian.PutUint64(b[8:], 0)
+		binary.BigEndian.PutUint64(b[16:], 0)
+		binary.BigEndian.PutUint64(b[32:], uint64(5*time.Second)) // ready to memory reserved
+		_ = writeMsg(os.Stdout, msgProgress, b)
 		time.Sleep(time.Hour)
 	case "readyhang": // says it is ready, then hangs
 		_ = writeMsg(os.Stdout, msgReady, nil)

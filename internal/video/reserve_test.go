@@ -1,0 +1,111 @@
+package video
+
+import (
+	"errors"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// Reserving an instance's 512 MiB happens before any guest code runs, so nothing in a recording can
+// slow it: it belongs to loading the engine, which EngineLoadLimit bounds, not to the stall watchdog,
+// whose clock starts when the reservation completes. On macos-26-intel two reservations once took
+// 30 s under the full test load and both instances were stopped as stalls (CI run 43693218308).
+
+// delayReserve makes the reservation of m's instance take d, until the test ends. Tests that use it
+// are not parallel: it replaces a package hook.
+func delayReserve(t *testing.T, m *meter, d time.Duration) {
+	t.Helper()
+	var slow atomic.Pointer[meter]
+	slow.Store(m)
+	beforeReserve = func(x *meter) {
+		if x == slow.Load() {
+			time.Sleep(d)
+		}
+	}
+	t.Cleanup(func() { beforeReserve = func(*meter) {} })
+}
+
+// stallFromReservation checks that m's instance was stopped as a stall, with the stall counted from
+// its reservation: at least the limit after it, less the tick by which the watchdog may count early.
+func stallFromReservation(t *testing.T, what string, err error, m *meter, limit time.Duration) {
+	t.Helper()
+	var le *LimitError
+	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
+		t.Fatalf("%s: got %v", what, err)
+	}
+	mem, cancelled := m.memAt.Load(), m.cancelledAt.Load()
+	if mem == 0 || cancelled == 0 {
+		t.Fatalf("%s: stopped before its memory was reserved: %v", what, err)
+	}
+	if d := time.Duration(cancelled - mem); d < limit-watchTick {
+		t.Errorf("%s: stopped %v after its reservation, limit %v: the reservation counted as a stall (%v)", what, d, limit, err)
+	}
+}
+
+// TestReservationNotStall: an in-process instance whose reservation takes longer than the stall
+// limit (5 s against 2 s) is not stopped as a stall while it reserves; once it has reserved, the
+// watchdog stops it as usual. Not parallel: it replaces a package hook.
+func TestReservationNotStall(t *testing.T) {
+	e := engineFor(t)
+	const limit = 2 * time.Second
+	m := &meter{}
+	delayReserve(t, m, 5*time.Second)
+	err := run(testCtx(t, time.Minute), e, job{prog: "ffmpeg", progress: progOutput, timeout: limit, meter: m,
+		args: func(string, string) []string { return spin }})
+	stallFromReservation(t, "in process", err, m, limit)
+}
+
+// TestReservationLoadLimit: an in-process instance whose reservation outlasts EngineLoadLimit
+// (shortened to 2 s; the reservation takes 5 s) is stopped with that limit's error, cancelled when
+// the limit runs out after it got its turn, and not stopped as a stall (1 s) before then. Not
+// parallel: it replaces a package hook and shortens the limit.
+func TestReservationLoadLimit(t *testing.T) {
+	loadLimit = 2 * time.Second
+	t.Cleanup(func() { loadLimit = EngineLoadLimit })
+	e := engineFor(t)
+	m := &meter{}
+	delayReserve(t, m, 5*time.Second)
+	err := run(testCtx(t, time.Minute), e, job{prog: "ffmpeg", progress: progOutput, timeout: time.Second, meter: m,
+		args: func(string, string) []string { return spin }})
+	var le *LimitError
+	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" || !strings.Contains(err.Error(), "wall ") {
+		t.Fatalf("got %v", err)
+	}
+	if d := time.Duration(m.cancelledAt.Load() - m.readyAt.Load()); d < loadLimit || d > loadLimit+time.Second {
+		t.Errorf("cancelled %v after its turn, limit %v", d, loadLimit)
+	}
+}
+
+// TestWorkerReservationNotStall: a worker that reports its reservation 5 s after it is ready, then
+// hangs, is not stopped as a stall (2 s) while it reserves, and is stopped as one counted from the
+// reservation. Not parallel: the timing is the worker's own.
+func TestWorkerReservationNotStall(t *testing.T) {
+	const limit = 2 * time.Second
+	p, ps := testWorkers(t, "slowreserve")
+	m := &meter{}
+	err := run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
+		timeout: limit, meter: m})
+	stallFromReservation(t, "worker", err, m, limit)
+	gone(t, ps.all(), 5*time.Second)
+}
+
+// TestWorkerReservationLoadLimit: a worker that is ready but never reports its reservation is killed
+// when EngineLoadLimit (shortened to 3 s) runs out, with that limit's error and no process left, and
+// is not stopped as a stall (1 s) before then. Not parallel: it shortens the limit.
+func TestWorkerReservationLoadLimit(t *testing.T) {
+	loadLimit = 3 * time.Second
+	t.Cleanup(func() { loadLimit = EngineLoadLimit })
+	p, ps := testWorkers(t, "readyhang")
+	err := run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
+		timeout: time.Second})
+	var le *LimitError
+	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" || strings.Contains(err.Error(), "never ready") {
+		t.Fatalf("got %v", err)
+	}
+	if el := ps.since(); el < loadLimit || el > loadLimit+10*time.Second {
+		t.Errorf("stopped after %v", el)
+	}
+	gone(t, ps.all(), 5*time.Second)
+}
