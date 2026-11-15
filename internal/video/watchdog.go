@@ -160,7 +160,10 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 					m.progressAt.Store(now.UnixNano())
 				}
 				last, since = v, now
-			} else if now.Sub(since) >= timeout {
+			} else if at := m.memAt.Load(); m.loading.Load() && at > since.UnixNano() {
+				since = time.Unix(0, at) // the stall clock starts when the reservation completed
+			}
+			if now.Sub(since) >= timeout {
 				m.cancelledAt.Store(time.Now().UnixNano())
 				cancel(stallError(timeout))
 				return
