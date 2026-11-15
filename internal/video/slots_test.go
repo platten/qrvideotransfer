@@ -32,6 +32,7 @@ func TestWatchdogUnderLoad(t *testing.T) {
 		old := slots
 		slots = make(chan struct{}, k)
 		start := time.Now()
+		measureRoundStart() // TEMPORARY measurement
 		var wg sync.WaitGroup
 		errs := make([]error, n)
 		ms := make([]*meter, n)
@@ -56,6 +57,7 @@ func TestWatchdogUnderLoad(t *testing.T) {
 			lateCancel = max(lateCancel, cancelled.Sub(ready)-limit)
 			lateStop = max(lateStop, ends[i].Sub(cancelled))
 		}
+		measureWatchdog(k == capped, time.Since(start), lateCancel, lateStop, ms, ends, n) // TEMPORARY measurement
 		t.Logf("%d instances in %d slots (GOMAXPROCS %d): %v; cancelled at most %v after turn + limit, returned at most %v after the cancellation",
 			n, k, runtime.GOMAXPROCS(0), time.Since(start), lateCancel, lateStop)
 		if k == capped && (lateCancel > margin || lateStop > margin) {

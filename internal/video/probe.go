@@ -30,6 +30,14 @@ type probeInfo struct {
 // the old 15 s, which is the 60 s every build now uses.
 var probeTime = EngineProbeTime
 
+// observeProbe, when set, is told each probe's active time at every watchdog tick. TEMPORARY
+// measurement, removed before review.
+var observeProbe func(r runner, path string, m *meter, active time.Duration)
+
+// observeExec, when set, is told each job's start (+1) and end (-1), and whether it runs in a
+// worker. TEMPORARY measurement, removed before review.
+var observeExec func(j *job, worker bool, delta int)
+
 // maxProbeOutput bounds what is read from ffprobe.
 const maxProbeOutput = 1 << 20
 
@@ -53,8 +61,16 @@ func probe(ctx context.Context, r runner, path string) (probeInfo, error) {
 		return probeInfo{}, fmt.Errorf("%w: empty file", ErrInvalidVideo)
 	}
 	out := &capped{max: maxProbeOutput}
+	check := probeLimits(st.Size(), probeTime)
+	var pm *meter            // TEMPORARY measurement
+	if observeProbe != nil { // TEMPORARY measurement
+		inner := check
+		check = func(m *meter, active time.Duration) error { observeProbe(r, path, m, active); return inner(m, active) }
+		pm = &meter{}
+		defer observeProbe(r, path, pm, -1) // -1: the probe has ended
+	}
 	err = run(ctx, r, job{prog: "ffprobe", args: func(in, _ string) []string { return probeArgs(in) },
-		input: path, stdout: out, progress: progReads, check: probeLimits(st.Size(), probeTime)})
+		input: path, stdout: out, progress: progReads, check: check, meter: pm})
 	if errors.Is(err, ErrEngine) {
 		return probeInfo{}, fmt.Errorf("%w: %w", ErrInvalidVideo, err)
 	}

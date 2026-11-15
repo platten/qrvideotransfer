@@ -50,7 +50,7 @@ func cover(args []string) error {
 	for i, a := range isolatedRuns(goTest(tags, "-coverprofile=PROFILE", "./..."), list) {
 		part := fmt.Sprintf("%s.%d", *profile, i)
 		parts = append(parts, part)
-		a = slices.Clone(a)
+		a = slices.Clone(measureVerbose(a))
 		a[slices.Index(a, "-coverprofile=PROFILE")] = "-coverprofile=" + part
 		errs = append(errs, run([]string{"CGO_ENABLED=0"}, "go", a...))
 	}
