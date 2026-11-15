@@ -42,9 +42,9 @@ const (
 	// sampleClipRim is how many of a clipped cell's eight neighbours must be in a clipped area for
 	// the cell to count as a patch's rim: two or three for a cell on a patch's edge, the inner side
 	// of its neighbourhood, and less often so for a white data cell among scrambled ones. With these
-	// values a perfect digital frame loses 1.75% of its black-and-white cells, 0.04% with four greys
-	// and none with eight colours or levels, and a simulated 5% patch leaves 2.4% of the cells it
-	// turns near-white unflagged.
+	// values a perfect digital frame loses 1.46-2.80% of its black-and-white cells (mean about 2.1%
+	// over 30 codes), at most 0.04% with four greys and none with eight colours or levels, and a
+	// simulated 5% patch leaves 2.4% of the cells it turns near-white unflagged.
 	sampleClipRim = 2
 )
 

@@ -535,8 +535,8 @@ For each capture:
    image's size; when the copies decode headers with different grids (a false CRC pass, or crafted
    content), each grid is tried, the one more copies give first; layouts are cached by grid and at most two
    distinct grids are used per capture, on the three-finder path too. With that grid the anchors are located as in step 3, giving up after 64 tried with
-   fewer than eight found (a header claiming the largest grid the gate allows at 4K then costs 0.23
-   s and 25 MB per capture); at least eight, and a quarter of those inside the capture, must be
+   fewer than eight found (a header claiming the largest grid the gate allows at 4K then costs about
+   11-16 MB and 3.7 times a real code's detection per capture); at least eight, and a quarter of those inside the capture, must be
    found, and each finder in turn must lie within the smaller of one cell and half a module of where
    a model fitted to the located anchors and the other three finders puts it (a visible finder more
    than half a module off is a wrong one). One copy can decode with one finder wrong (it happened once in 200
@@ -557,8 +557,10 @@ For each capture:
    (header, anchors, each visible finder agreeing within the tolerance), with at least four anchors located
    in the quarter of the grid nearest the hidden finder. A quad is never accepted on three finders
    alone; with two hidden, nothing is located. To bound the cost on hostile frames the three-finder
-   path runs on the last scan only, tries two candidate quads, and is skipped when a four-finder
-   quad decoded a header whose grid failed the 1.5-pixel gate. The hidden centre is an estimate. The tests judge
+   path runs on the last scan only and tries three candidate quads, built without the finders of
+   a rejected four-finder quad that decoded a grid failing the 1.5-pixel gate (all four) or that
+   disagreed with its anchors (decoys); a gate failure thus counts against its own quad, not
+   against another code in the same capture. The hidden centre is an estimate. The tests judge
    quads by the designer's line: a visible finder more than half a module from the truth makes the
    quad wrong; only the hidden finder may be up to one module off, and only when the header reads,
    the mesh fits and the capture's cell-centre error is at most 0.15 cell, which makes it imprecise
@@ -566,7 +568,7 @@ For each capture:
    area on each finder in turn, 200 handheld 4K poses each: 200 of 200 located and read, none
    imprecise, no wrong quad or header, cell-centre error outside the patch 0.019 cell RMS
    (four-finder captures: 0.019).
-   **Measured limit** (`TestDetectModuleSweep`, measured at commit 12933bb): a 240 x 135 grid,
+   **Measured limit** (`TestDetectModuleSweep`, measured at commit 2ec594f): a 240 x 135 grid,
    whose finder module is one cell, filmed at 1920 x 1080 with each preset's own blur, 200 poses per
    size (seeds 7000 to 7199). Codes located, exact or imprecise, by untilted camera pixels per cell,
    with the wrong quads in brackets where there were any:
@@ -574,16 +576,16 @@ For each capture:
    | Preset (blur) | 2.8 | 3.2 | 3.6 | 4.0 | 4.4 | 4.8 | 6.0 | 7.2 |
    | --- | --- | --- | --- | --- | --- | --- | --- | --- |
    | tripod (1.0) | 200 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
-   | handheld (1.5) | 20 (2) | 185 (3) | 199 (1) | 200 | 200 | 200 | 200 | 200 |
+   | handheld (1.5) | 19 (2) | 186 (4) | 199 (1) | 200 | 200 | 200 | 200 | 200 |
    | budget-android (1.5) | 19 | 191 | 200 | 200 | 200 | 200 | 200 | 200 |
-   | iphone-hdr (1.5, 10-bit HLG) | 0 | 80 (1) | 157 | 194 | 200 | 200 | 200 | 200 |
+   | iphone-hdr (1.5, 10-bit HLG) | 0 | 76 (1) | 158 (1) | 194 | 200 | 200 | 200 | 200 |
    | harsh (2.0, tilt 25, glare 2%) | 0 | 0 | 1 | 17 | 65 | 101 (1) | 169 | 158 |
 
    At most 1 of a column's located quads was imprecise (harsh at 6.0 and 7.2). The wrong quads were the
    code with a centre between half a module and about 0.75 module off (their headers read
    correctly), counted wrong by the line above. The cell-centre error at 4.0 pixels per cell was
    0.044 (tripod), 0.086 (handheld), 0.076 (budget-android) and 0.124 (iphone-hdr) cell RMS.
-   **Limit (accepted trade-off):** the three-finder path's cost limits (last scan only, two candidates) located fewer codes below the
+   **Limit (accepted trade-off):** the three-finder path's cost limit (it runs on the last scan only) located fewer codes below the
    reliable sizes than before them, most for harsh at 1080p (184 and 181 at 6.0 and 7.2 before, 169
    and 158 now); harsh at 4K is unchanged at 997 of 1,000. The
    smallest cells at which the code is reliably located (at least 199 of 200, none wrong), against
@@ -652,9 +654,11 @@ For each capture:
    turns near-white unflagged, no untouched cell flagged; on the ideal preset 0.00% (four greys) and
    0.3% (black and white) of cells flagged; with white at the clip over part of a rendered code, at
    most 1.7% (black and white) and 0.04% (four greys). **Accepted cost:** on a perfect digital
-   frame, whose white is exactly the limited-range white, the rule discards about 1.75% of
-   black-and-white cells (white cells among mostly white neighbours), 0.04% with four greys and none
-   with eight colours or levels (`TestSamplePlain` allows 2% and 0.1%); M3 checks that the digital
+   frame, whose white is exactly the limited-range white, the rule discards 1.46-2.80% of
+   black-and-white cells, mean about 2.1% (white cells among mostly white neighbours; measured over
+   seeds 30 to 39 on 212 x 120, 240 x 135 and 480 x 270 grids), at most 0.04% with four greys and none
+   with eight colours or levels. The tests allow 3.5% and 0.1% (designer ruling, 2026-11-15: the
+   earlier 2% ceiling came from one seed); M3 checks that the digital
    loopback still passes with margin under that loss (section 18). Cells on a patch's soft edge,
    brightened but under the clip, are not flagged here; the equaliser compares them with the
    learned white and the neighbouring tiles (steps 5 and 6). Anchors' Black and White are not
@@ -1530,7 +1534,7 @@ writing each package format by hand.
 | S2 | The owner films a test pattern on each device; the real channel is measured and the default mode confirmed or changed. Does not block M1-M3 |
 | M1 | Building blocks in parallel, including keys and signing |
 | M2 | Vision, including header reading and stripe cancellation |
-| M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards about 1.75% of black-and-white cells of a perfect frame (section 10, step 4) |
+| M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards 1.46-2.80% of black-and-white cells of a perfect frame, mean about 2.1% (section 10, step 4) |
 | M4 | `calibrate`, `inspect`, profiles |
 | G1 | The owner films the calibration video and sample transfers |
 | M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings; inferring the frame index of a capture whose header copies all fail, from the last index and the phase markers with the quad carried by tracking (deferred from M2, section 7 rule 1); mirrored recordings (FORMAT.md section 4.1) |
@@ -1638,3 +1642,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 Geometry, follow-up to PR #30, designer ruling: section 10 step 1 states the line between exact, imprecise and wrong quads (only a hidden finder may be up to a module off, and only when the header reads, the mesh fits and the centre error is at most 0.15; imprecise quads at most 3%), re-measures the table of codes located under it at a stated commit, with the wrong quads (all below the reliable sizes) shown; step 4 records that the glare rule discards up to 1% of black-and-white cells of a perfect digital frame; section 18 adds to M3 a check that the digital loopback passes with margin under that loss |
 | 2026-11-15 | M2 Geometry, round 3 of PR #30: section 7 rule 1 records the deferral of its index inference to M5 as a designer ruling (2026-11-15); rule 9 no longer cites a bound that M2 does not apply; section 18's M5 row adds that inference and mirrored recordings. Section 10 step 1: a visible finder must agree within the smaller of one cell and half a module, Fit drops the finders from its global model once eight anchors are located, a capture's headers are kept whole and each distinct grid is tried (up to two layouts), and the confirmation gives up after 64 anchors with fewer than eight found. The table of codes located is re-measured at adfba68 and states its commit; handheld's smallest reliable size becomes 4.0 (3.6 gave 199 located and 1 wrong under the stricter tolerance), also in section 11 condition 2 |
 | 2026-11-15 | M2 Geometry, review of PR #38: section 10 step 1 says layouts are cached by grid with at most two distinct grids per capture on the three-finder path too, and gives that path's cost limits (last scan only, two candidates, skipped after a gate failure) and their effect below the reliable sizes; the table of codes located is re-measured at 12933bb with its cell-centre errors. Step 3: a finder stays in the global fit while within a quarter cell of the anchors' model, instead of leaving it once eight anchors are found. Step 4: the glare decision is local (area, or two area neighbours for a rim), with the measured rates, and the perfect-frame cost is about 1.75% of black-and-white cells, also in section 18's M3 row. The fewer codes located below the reliable sizes (harsh at 1080p: 184 to 169 and 181 to 158 of 200) is recorded as an accepted limit |
+| 2026-11-15 | M2 Geometry, review round 2 of PR #38, designer ruling (2026-11-15): section 10 step 4 and section 18's M3 row state the glare rule's cost on perfect black-and-white frames as measured over 30 codes (seeds 30 to 39 on three grids), 1.46-2.80% with a mean of about 2.1%, and the tests' ceiling as 3.5%; the earlier 2% came from one seed. Section 10 step 1: a rejected quad excludes only its own finders from the three-finder path (all four after a gate failure, the disagreeing ones otherwise), three candidates are tried, the gate-edge header cost is updated, and the table of codes located is re-measured at 2ec594f; the accepted limit below the reliable sizes comes from running the three-finder path on the last scan only |
