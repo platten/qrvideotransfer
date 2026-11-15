@@ -29,8 +29,6 @@ type procRunner struct {
 	started func(pid int)
 	// noJob leaves the worker out of a Job Object on Windows (tests).
 	noJob bool
-	// exited, when set, is given each worker's state once it has been reaped (tests: its peak memory).
-	exited func(*os.ProcessState)
 }
 
 // errWorkerStart marks a worker that could not be started; the job then runs in process.
@@ -134,9 +132,6 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 	_ = toWorker.Close() // the worker's lifeline: it exits when this closes
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
-	if p.exited != nil && cmd.ProcessState != nil {
-		p.exited(cmd.ProcessState)
-	}
 	if ctx.Err() != nil {
 		return 0, ctx.Err()
 	}

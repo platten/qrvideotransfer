@@ -1,8 +1,10 @@
-//go:build !unix
+//go:build !linux && !darwin
 
 package video
 
-import "os"
+// sampleRSS is not measured here: on Windows the peak working set needs a process handle query
+// (GetProcessMemoryInfo, through a struct address), which this test does not add.
+func sampleRSS(int) (uint64, bool) { return 0, false }
 
-// maxRSS is not available outside Unix: on Windows os.ProcessState's rusage holds times only.
-func maxRSS(*os.ProcessState) (uint64, bool) { return 0, false }
+// rssIsPeak says whether sampleRSS gives the true peak (true) or a sampled current size.
+const rssIsPeak = false

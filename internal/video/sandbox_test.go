@@ -890,25 +890,35 @@ var (
 
 // TestSkipPictures: a small file of many skip pictures is refused from the probe by
 // MaxDecodedPixelsPerInputByte; the same file in a container that lies about its length is stopped
-// while decoding (SECURITY.md 9.5), within 60 s. Memory is measured in both processes: the test
-// process's Go heap growth, sampled while it runs (not parallel, so that the heap is this decode's),
-// and, on Unix, each worker's peak resident memory when it exits (its rusage); both must stay under
-// 1 GiB. Windows reports no peak memory for an exited process through os.ProcessState, so there only
-// the heap is asserted. Race builds use a smaller clip and a longer time bound (race_test.go); every
-// runner's non-race step asserts the 4K clip within 60 s.
+// while decoding (SECURITY.md 9.5), within 60 s. Memory is measured in both processes, and both must
+// stay under 1 GiB: the test process's Go heap growth, sampled while it runs (not parallel, so that
+// the heap is this decode's), and each worker's resident memory, sampled while it runs: on Linux its
+// peak since exec (VmHWM), on macOS its current size from ps, whose largest sample approximates the
+// peak. A worker's rusage cannot be used: on Linux it carries the parent's high-water mark. Windows is
+// not measured. Race builds use a smaller clip and a longer time bound (race_test.go); every runner's
+// non-race step asserts the 4K clip within 60 s.
 func TestSkipPictures(t *testing.T) {
 	w, _ := currentWorkers()
 	defer setWorkers(w, nil)
 	var peakRSS atomic.Uint64
 	measured := atomic.Bool{}
-	withExit := *w
-	withExit.exited = func(ps *os.ProcessState) {
-		if rss, ok := maxRSS(ps); ok {
-			measured.Store(true)
-			peakRSS.Store(max(peakRSS.Load(), rss))
-		}
+	var sampling sync.WaitGroup
+	defer sampling.Wait()
+	sampler := *w
+	sampler.started = func(pid int) {
+		sampling.Go(func() {
+			for {
+				rss, ok := sampleRSS(pid)
+				if !ok {
+					return
+				}
+				measured.Store(true)
+				peakRSS.Store(max(peakRSS.Load(), rss))
+				time.Sleep(20 * time.Millisecond)
+			}
+		})
 	}
-	setWorkers(&withExit, nil)
+	setWorkers(&sampler, nil)
 	b := embedded(t)
 	_, err := b.NewDecoder(t.Context(), clip("skip.mkv"), DecodeConfig{BrightnessOnly: true})
 	var le *LimitError
@@ -983,13 +993,13 @@ func TestSkipPictures(t *testing.T) {
 	}
 	switch {
 	case !measured.Load() && runtime.GOOS != "windows":
-		t.Error("no worker's peak resident memory was measured")
+		t.Error("no worker's resident memory was measured")
 	case !measured.Load():
 		t.Log("worker memory not measured on Windows")
 	case peakRSS.Load() > 1<<30:
-		t.Errorf("a worker's peak resident memory was %d MiB", peakRSS.Load()>>20)
+		t.Errorf("a worker's resident memory reached %d MiB (peak measured: %v)", peakRSS.Load()>>20, rssIsPeak)
 	default:
-		t.Logf("workers' peak resident memory %d MiB", peakRSS.Load()>>20)
+		t.Logf("workers' resident memory at most %d MiB (peak measured: %v)", peakRSS.Load()>>20, rssIsPeak)
 	}
 	if n > 50 {
 		t.Errorf("%d frames decoded before the stop", n)
