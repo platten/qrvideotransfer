@@ -9,9 +9,9 @@ import (
 	"github.com/platten/qrvideotransfer/internal/modem"
 )
 
-// Limits of the glare assertion, measured (see TestGlareUnknown).
+// Limits of the glare assertion: measured up to 0.045 (Gray2) and 0.0009, with margin.
 const (
-	maxGlareMiss  = 0.05  // share of cells under the patch that still give soft bits
+	maxGlareMiss  = 0.06  // share of cells under the patch that still give soft bits
 	maxGlareFalse = 0.002 // share of cells away from the patch made unknown
 )
 

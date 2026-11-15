@@ -41,7 +41,11 @@ type TileEqualiser struct {
 // Fit returns the level statistics of every tile. obs holds one observation per data cell in
 // data-cell order; palette holds patch k of strip c (a frame.Corner) at 8c + k and may be empty.
 // Saturated and non-finite observations are ignored. With Stripes set, Fit subtracts the stripes
-// it finds from obs (CancelStripes).
+// it finds from obs (CancelStripes). Fit always marks as saturated in obs, so that they give zero
+// soft bits, the cells that show more light than the screen emits or sit among cells that all read
+// as the lightest level, as a glare patch makes them (see flagUnknown). It does not fit again
+// without them: the brightest of the remaining cells are the levels' own tails, and leaving them
+// out made RGB8 on handheld overconfident.
 //
 // Each tile starts from its anchor's black and white (or its neighbours' when the anchor is
 // unusable), with the middle levels placed between them where the palette shows them relative to
@@ -78,6 +82,7 @@ func (e *TileEqualiser) Fit(obs []modem.Obs, palette []modem.Obs, l *frame.Layou
 			}
 		}
 	}
+	flagUnknown(obs, l, f, e.Mod)
 	return f
 }
 
