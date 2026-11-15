@@ -31,16 +31,21 @@ func TestWatchdogUnderLoad(t *testing.T) {
 		start := time.Now()
 		var wg sync.WaitGroup
 		errs := make([]error, n)
+		ms := make([]*meter, n)      // TEMPORARY measurement
+		ends := make([]time.Time, n) // TEMPORARY measurement
 		for i := range n {
+			ms[i] = &meter{} // TEMPORARY measurement
 			wg.Go(func() {
 				errs[i] = run(t.Context(), e, job{prog: "ffmpeg", progress: progOutput, timeout: limit,
-					args: func(string, string) []string { return spin }})
+					args: func(string, string) []string { return spin }, meter: ms[i]})
+				ends[i] = time.Now() // TEMPORARY measurement
 			})
 		}
 		wg.Wait()
 		slots = old
 		rounds := (n + k - 1) / k
 		el := time.Since(start)
+		measureWatchdog(k == capped, el, time.Duration(rounds)*(limit+2*time.Second)+5*time.Second, limit, ms, ends) // TEMPORARY measurement
 		t.Logf("%d instances in %d slots (GOMAXPROCS %d): %v", n, k, runtime.GOMAXPROCS(0), el)
 		if k == capped && el > time.Duration(rounds)*(limit+2*time.Second)+5*time.Second {
 			t.Errorf("%d instances in %d slots took %v", n, k, el)

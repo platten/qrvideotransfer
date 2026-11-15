@@ -390,7 +390,11 @@ func isolatedRuns(args, pkgs []string) [][]string {
 			others = append(others, p)
 		}
 	}
-	return [][]string{others, append(slices.Clone(head), "./internal/video/...")}
+	video := slices.Clone(head)
+	if os.Getenv("GITHUB_ACTIONS") == "true" && runtime.GOOS == "darwin" && runtime.GOARCH == "amd64" {
+		video = append(video, "-v") // TEMPORARY measurement: the report's lines reach the log
+	}
+	return [][]string{others, append(video, "./internal/video/...")}
 }
 
 // packages lists the module's packages, with the given build tags.

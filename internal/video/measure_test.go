@@ -1,9 +1,10 @@
 package video
 
 // TEMPORARY measurement, removed before review. On the GitHub macos-26-intel runner only, the
-// package's run ends, after every test has run under the full load, with a list of every probe that
+// package's run ends, after every test has run, with a list of every probe that
 // saw at least one watchdog tick (its largest active time, by runner kind and file) and the
-// breakdown of the slowest, and fails so that go test prints it. Nowhere else does it change
+// breakdown of the slowest, and TestWatchdogUnderLoad's figures. The tools/dev task runs
+// internal/video verbosely there, so that the lines reach the job's log. Nowhere else does it change
 // anything.
 
 import (
@@ -65,13 +66,34 @@ func measuring() bool {
 	return os.Getenv("GITHUB_ACTIONS") == "true" && runtime.GOOS == "darwin" && runtime.GOARCH == "amd64"
 }
 
-// measureReport prints the report and fails the package run when measuring.
+var watchdogLines []string // TestWatchdogUnderLoad's figures, in order
+
+// measureWatchdog records one TestWatchdogUnderLoad round: its total time against its bound, and each
+// instance's stop latency, from the time it was ready (its turn) plus the stall limit to its return.
+func measureWatchdog(capped bool, el, bound, limit time.Duration, ms []*meter, ends []time.Time) {
+	worst := time.Duration(0)
+	for i, m := range ms {
+		if r := m.readyAt.Load(); r != 0 {
+			worst = max(worst, ends[i].Sub(time.Unix(0, r))-limit)
+		}
+	}
+	measured.Lock()
+	defer measured.Unlock()
+	watchdogLines = append(watchdogLines, fmt.Sprintf("capped %v: total %v against %v; worst instance stop latency %v (ready + %v to return; the watchdog ticks once a second)",
+		capped, el, bound, worst, limit))
+}
+
+// measureReport prints the report when measuring; the package run's result is unchanged (the
+// isolated run is verbose there, so the lines appear in the job's log).
 func measureReport(code int) int {
 	if !measuring() {
 		return code
 	}
 	measured.Lock()
 	defer measured.Unlock()
+	for _, l := range watchdogLines {
+		fmt.Println("MEASURE watchdog", l)
+	}
 	keys := make([]string, 0, len(measured.probes))
 	for k := range measured.probes {
 		keys = append(keys, k)
@@ -83,6 +105,5 @@ func measureReport(code int) int {
 		fmt.Printf("MEASURE probe active %v: %s\n", measured.probes[k], k)
 	}
 	fmt.Printf("MEASURE slowest: %s\n", measured.detail)
-	fmt.Println("MEASURE this failure is the temporary measurement report, by design")
-	return 1
+	return code
 }
