@@ -27,11 +27,19 @@ type meter struct {
 	// calls and bytes. Kept with a few atomic operations; the text is built only for an error.
 	start, readyAt, firstIn, progressAt atomic.Int64
 	inCalls, inBytes                    atomic.Int64
-	memAt, openAt                       atomic.Int64 // stubs for the test commit
+	// In a worker, the phases between readiness and the first read: when the instance's linear
+	// memory was reserved and when it opened its input.
+	memAt, openAt atomic.Int64
 }
 
 // ready records that the instance is ready to run.
 func (m *meter) ready() { m.readyAt.CompareAndSwap(0, time.Now().UnixNano()) }
+
+// reserved records that the instance's linear memory has been reserved.
+func (m *meter) reserved() { m.memAt.CompareAndSwap(0, time.Now().UnixNano()) }
+
+// opened records that the instance opened its input file.
+func (m *meter) opened() { m.openAt.CompareAndSwap(0, time.Now().UnixNano()) }
 
 // input records a read of n bytes from the input file.
 func (m *meter) input(n int) {
@@ -50,6 +58,16 @@ func (m *meter) breakdown(now time.Time) string {
 		s += ", never ready"
 	} else {
 		s += ", start to ready " + secs(at(&m.readyAt).Sub(at(&m.start)))
+	}
+	if m.readyAt.Load() != 0 {
+		for _, p := range []struct {
+			name string
+			at   *atomic.Int64
+		}{{"memory reserved", &m.memAt}, {"input opened", &m.openAt}} {
+			if p.at.Load() != 0 {
+				s += ", ready to " + p.name + " " + secs(at(p.at).Sub(at(&m.readyAt)))
+			}
+		}
 	}
 	if m.firstIn.Load() == 0 || m.readyAt.Load() == 0 {
 		s += ", no read after ready"
@@ -77,9 +95,9 @@ func withBreakdown(err error, m *meter) error {
 }
 
 // progressLen is the size of a worker's progress message: bytes read counted as progress (probing),
-// input bytes, input read calls, and nanoseconds from its ready message to its first read (-1: none
-// yet), each a big-endian uint64.
-const progressLen = 32
+// input bytes, input read calls, and nanoseconds from its readiness to its first read, to its linear
+// memory being reserved and to its input being opened (-1: not yet), each a big-endian uint64.
+const progressLen = 48
 
 func (m *meter) value() int64 {
 	v := m.n.Load() + m.reads.Load()

@@ -57,7 +57,7 @@ func TestWorkerInProcess(t *testing.T) {
 				t.Fatalf("progress message of %d bytes", len(b))
 			}
 			calls = binary.BigEndian.Uint64(b[16:])
-			mem, opened = int64(binary.BigEndian.Uint64(b[32:])), int64(binary.BigEndian.Uint64(b[40:])) //nolint:gosec // signed
+			mem, opened = int64(binary.BigEndian.Uint64(b[32:])), int64(binary.BigEndian.Uint64(b[40:]))
 		}
 	}
 	if !seen[msgOut] || !seen[msgProgress] || !seen[msgExit] || calls == 0 || mem < 0 || opened < 0 {

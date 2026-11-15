@@ -228,7 +228,7 @@ func readWorker(r io.Reader, j *job, m *meter, loaded func()) (int, error) {
 	}
 }
 
-// workerInput takes a progress message's input counts into m, for a time-bound error's breakdown.
+// workerInput takes a progress message's input counts and phase times into m, for a time-bound error's breakdown.
 // They are the worker's word, so they only ever grow and are clamped, and the first read is placed
 // at most a day after readiness.
 func workerInput(m *meter, b []byte) {
@@ -239,8 +239,10 @@ func workerInput(m *meter, b []byte) {
 	if v := get(2); v > m.inCalls.Load() {
 		m.inCalls.Store(v)
 	}
-	if first := int64(binary.BigEndian.Uint64(b[24:])); first >= 0 && m.readyAt.Load() != 0 { //nolint:gosec // -1: none yet
-		m.firstIn.CompareAndSwap(0, m.readyAt.Load()+min(first, int64(24*time.Hour)))
+	for i, at := range []*atomic.Int64{&m.firstIn, &m.memAt, &m.openAt} {
+		if d := int64(binary.BigEndian.Uint64(b[24+8*i:])); d >= 0 && m.readyAt.Load() != 0 { //nolint:gosec // -1: not yet
+			at.CompareAndSwap(0, m.readyAt.Load()+min(d, int64(24*time.Hour)))
+		}
 	}
 }
 

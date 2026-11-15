@@ -14,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/tetratelabs/wazero/experimental"
 )
 
 // WorkerArg is the first argument with which qrvt re-executes itself as an engine worker: a child
@@ -95,7 +97,7 @@ type workerJob struct {
 
 // protocolVersion is the version of the worker protocol (message types, their bounds, the job's
 // fields); a change to any of them raises it. Tests change the parent's.
-var protocolVersion = 2
+var protocolVersion = 3
 
 // exitVersion is the exit code with which a worker refuses a job of another protocol version. As a
 // worker's first message, the parent takes it for a failure to start and runs the job in process.
@@ -324,7 +326,8 @@ func runJob(j *workerJob, stdin io.Reader, w *msgWriter) (int, error) {
 	if j.Reads {
 		wj.progress = progReads
 	}
-	return e.exec(ctx, wj, m)
+	// The allocator records when the linear memory is reserved, for a time-bound error's breakdown.
+	return e.exec(experimental.WithMemoryAllocator(ctx, timedAlloc{m}), wj, m)
 }
 
 // reportProgress sends m's reads to the parent every progressTick while they change, until done:
@@ -339,12 +342,14 @@ func reportProgress(m *meter, w *msgWriter, done <-chan struct{}) {
 		case <-done:
 			return
 		case <-t.C:
-			first := int64(-1)
-			if f, r := m.firstIn.Load(), m.readyAt.Load(); f != 0 && r != 0 {
-				first = max(0, f-r)
+			since := func(at *atomic.Int64) int64 { // from readiness, -1: not yet
+				if v, r := at.Load(), m.readyAt.Load(); v != 0 && r != 0 {
+					return max(0, v-r)
+				}
+				return -1
 			}
 			var b [progressLen]byte
-			for i, v := range []int64{m.reads.Load(), m.inBytes.Load(), m.inCalls.Load(), first} {
+			for i, v := range []int64{m.reads.Load(), m.inBytes.Load(), m.inCalls.Load(), since(&m.firstIn), since(&m.memAt), since(&m.openAt)} {
 				binary.BigEndian.PutUint64(b[8*i:], uint64(v)) //nolint:gosec // -1 is sent as its two's complement
 			}
 			if b != last {

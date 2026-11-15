@@ -26,6 +26,9 @@ func (v inputFS) Open(name string) (fs.File, error) {
 	case ".":
 		return &inputDir{v: v}, nil
 	case v.name:
+		if v.m != nil {
+			v.m.opened()
+		}
 		f, err := os.Open(v.path)
 		if err != nil {
 			return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
