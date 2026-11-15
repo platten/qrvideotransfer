@@ -286,7 +286,7 @@ func SoftBits(dst []int8, obs []modem.Obs, l *frame.Layout, f *Field, m modem.Mo
 		k, fx, fy := lat.locate(float64(c.X)+0.5-float64(f.TileW)/2, float64(c.Y)+0.5-float64(f.TileH)/2, true)
 		st := f.interpolate(k, fx, fy)
 		if p != nil {
-			blend(&st, 1-float64(p.Weights[i][phase&3]))
+			blend(&st, 1-float64(p.Weights[i][phase&3]), 3)
 		}
 		m.LLR(d, obs[i], &st, 1)
 		n++
@@ -296,7 +296,7 @@ func SoftBits(dst []int8, obs []modem.Obs, l *frame.Layout, f *Field, m modem.Mo
 
 // blend widens every level's variance by what a share u of another code frame, showing a random
 // level, adds to a cell: u^2 times the variance of the level centres, per plane.
-func blend(st *modem.LocalStats, u float64) {
+func blend(st *modem.LocalStats, u float64, np int) {
 	if !(u > 0) {
 		return
 	}

@@ -162,11 +162,23 @@ func TestFitIgnoresBadObservations(t *testing.T) {
 	checkField(t, s, f, 2, 3)
 }
 
-// TestFitNoData: with no usable observation at all, the field holds the starting levels.
+// TestFitNoData: with no usable observation at all, the field holds the starting levels. Where a
+// tile has its own anchor they are within the anchor's noise (sigma 3) of the truth; the tiles
+// without one (the column beside the right border and the corners) take their neighbours' mean and
+// so lag the synthetic gradient by up to one tile, about 7 code values. The variances are not
+// checked: with no cell they stay the starting sixth of a level spacing, which says nothing about
+// the noise.
 func TestFitNoData(t *testing.T) {
 	s := newSynth(t, 212, 120, 2, 3, 0, 11)
 	f := (&TileEqualiser{Mod: s.c}).Fit(nil, s.palette, s.l, s.anchors)
-	checkField(t, s, f, 10, 0)
+	checkField(t, s, f, 8, 0)
+	for k := range f.Tiles {
+		st := &f.Tiles[k]
+		sp := (st.Centre[3][0] - st.Centre[0][0]) / 3 / 6
+		if math.Abs(float64(st.Variance[0]-sp*sp)) > 1e-3*float64(sp*sp) {
+			t.Fatalf("tile %d: variance %v, want the starting %v", k, st.Variance[0], sp*sp)
+		}
+	}
 	if f := (&TileEqualiser{Mod: s.c}).Fit(nil, nil, s.l, nil); f == nil || f.At(0, 0).Levels != 4 {
 		t.Fatal("no default field")
 	}

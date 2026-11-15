@@ -17,6 +17,10 @@ const calBuckets = 10
 // minBucket is the number of bits a bucket needs before it is judged.
 const minBucket = 10000
 
+// pointExpected is the expected error count from which a bucket's observed rate itself must lie
+// within half and twice the stated rate.
+const pointExpected = 100
+
 // calTable accumulates soft bits by stated confidence: bucket j holds |s| in
 // [j * 128/10, (j+1) * 128/10).
 type calTable struct {
@@ -74,8 +78,9 @@ func poisson(k int, mu float64) (le, ge float64) {
 
 // check judges every bucket of at least minBucket bits: its observed error count must be
 // consistent, at the 0.1% level of a Poisson test, with a rate between half and twice the mean
-// stated rate. Where the expected count is large this is the band [stated/2, 2 stated] itself;
-// where it is small, only an excess of errors (overconfidence) can be shown.
+// stated rate, and where at least pointExpected errors are expected the observed rate itself must
+// lie in [stated/2, 2 stated]. Where few errors are expected only an excess of errors
+// (overconfidence) can be shown.
 func (c *calTable) check() []string {
 	var bad []string
 	for j := range calBuckets {
@@ -85,7 +90,8 @@ func (c *calTable) check() []string {
 		mu := c.stated[j]
 		le, _ := poisson(c.errs[j], mu/2)
 		_, ge := poisson(c.errs[j], 2*mu)
-		if ge < 1e-3 || le < 1e-3 {
+		ratio := float64(c.errs[j]) / mu
+		if ge < 1e-3 || le < 1e-3 || mu >= pointExpected && (ratio < 0.5 || ratio > 2) {
 			bad = append(bad, fmt.Sprintf("bucket %d: %d errors in %d bits, stated %.3g", j, c.errs[j], c.n[j], mu/float64(c.n[j])))
 		}
 	}
@@ -108,12 +114,11 @@ func (c *calTable) String() string {
 
 // calibrate runs the radiometry chain on every capture and records each credited soft bit against
 // the bit its true frame carried. It returns the table and the number of credited cells.
-func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (*calTable, int) {
+func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (tab, mixedTab *calTable, cells int) {
 	t.Helper()
-	tab, mixedTab := &calTable{}, &calTable{}
+	tab, mixedTab = &calTable{}, &calTable{}
 	b := s.mod.BitsPerCell()
 	soft := make([]int8, len(s.layout.DataCells())*b)
-	cells := 0
 	for _, rc := range caps {
 		pf := s.phaseOf(rc)
 		eq := &TileEqualiser{Mod: s.mod, Stripes: stripes}
@@ -143,7 +148,7 @@ func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (
 		}
 	}
 	t.Logf("of which credited cells that are not wholly one frame (true weight below 0.999):\n%s", mixedTab)
-	return tab, cells
+	return tab, mixedTab, cells
 }
 
 // TestHonestConfidence is the honest-confidence assertion of DESIGN.md section 15 on `tripod` and
@@ -177,13 +182,13 @@ func TestHonestConfidence(t *testing.T) {
 	for _, mod := range mods {
 		s := newRadSession(t, grid[0], grid[1], pitch, mod, 8, 0x40+uint64(mod), false)
 		for pi, name := range []string{"tripod", "handheld"} {
-			total := &calTable{}
+			total, totalMixed := &calTable{}, &calTable{}
 			for vi, v := range variants {
 				t.Run(fmt.Sprintf("%s/%s/%s", s.mod.Name(), name, v.name), func(t *testing.T) {
 					c := preset(t, name, cw, ch)
 					v.edit(&c)
 					caps := s.shoot(t, c, time.Second/30, ncap, uint64(1000*pi+10*vi)+uint64(mod))
-					tab, cells := s.calibrate(t, caps, false)
+					tab, mixed, cells := s.calibrate(t, caps, false)
 					if cells == 0 {
 						t.Fatal("no cell credited")
 					}
@@ -192,12 +197,19 @@ func TestHonestConfidence(t *testing.T) {
 						t.Error(e)
 					}
 					total.merge(tab)
+					totalMixed.merge(mixed)
 				})
 			}
 			// Pooled over the variants, the buckets are larger and the test stricter.
 			t.Logf("%s %s, all variants:\n%s", s.mod.Name(), name, total)
 			for _, e := range total.check() {
 				t.Errorf("%s %s pooled: %s", s.mod.Name(), name, e)
+			}
+			// The credited cells that hold some of another frame are where the variance widening
+			// of SoftBits acts; they must be honest on their own too.
+			t.Logf("%s %s, all variants, credited cells not wholly one frame:\n%s", s.mod.Name(), name, totalMixed)
+			for _, e := range totalMixed.check() {
+				t.Errorf("%s %s pooled, partly mixed cells: %s", s.mod.Name(), name, e)
 			}
 		}
 	}
@@ -232,6 +244,19 @@ func TestCalTable(t *testing.T) {
 		d.n[1], d.errs[1], d.stated[1] = 10000, k.errs, 20
 		if got := len(d.check()) == 0; got != k.ok {
 			t.Errorf("%d errors: honest %v, want %v", k.errs, got, k.ok)
+		}
+	}
+	// 40 errors where 18 are expected is consistent with twice the stated rate but not below
+	// pointExpected; 400 where 180 are expected is outside the band.
+	for _, k := range []struct {
+		errs int
+		mu   float64
+		ok   bool
+	}{{40, 18, true}, {400, 180, false}, {80, 180, false}, {300, 180, true}} {
+		d := calTable{}
+		d.n[2], d.errs[2], d.stated[2] = 20000, k.errs, k.mu
+		if got := len(d.check()) == 0; got != k.ok {
+			t.Errorf("%d errors where %.0f are expected: honest %v, want %v", k.errs, k.mu, got, k.ok)
 		}
 	}
 	if !strings.Contains(c.String(), "bucket") {

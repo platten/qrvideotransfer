@@ -163,9 +163,10 @@ var minYield = map[string][2]float64{
 // weight is at least minCreditedWeight; per preset, the share of truly clean cells credited is at
 // least minYield; and as a regression check the phase weight error is at most maxInnerErr at inner
 // cells and maxPocketErr at pocket cells (see phaseStats).
-// The CI version runs the four directions with rolls 0 and 30 degrees, 2 captures each (about
-// 234,000 cells per case); the long version also roll 60, 8 captures each; the race version one
-// combination, without the yield floor.
+// The CI version runs the four directions with rolls 0 and 30 degrees, and handheld scanning left
+// to right also at roll 60, 2 captures each (about 234,000 cells per case); the long version all
+// directions with rolls 0, 30 and 60, 8 captures each; the race version one combination, without
+// the yield floor.
 func TestPhaseWeights(t *testing.T) {
 	t.Parallel()
 	ncap := 2
@@ -180,7 +181,13 @@ func TestPhaseWeights(t *testing.T) {
 	for pi, name := range []string{"tripod", "handheld"} {
 		var all phaseStats
 		for _, rot := range rots {
-			for _, roll := range rolls {
+			rr := rolls
+			if !longTests() && !radRace && name == "handheld" && rot == 270 {
+				// The long version's worst case (inner error, smallest credited weight) runs in
+				// CI too.
+				rr = append(rr[:len(rr):len(rr)], 60)
+			}
+			for _, roll := range rr {
 				t.Run(fmt.Sprintf("%s/scan%d/roll%.0f", name, rot, roll), func(t *testing.T) {
 					c := preset(t, name, 3840, 2160)
 					c.Display.ScanRotation = rot
