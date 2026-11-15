@@ -20,10 +20,6 @@ const (
 	defaultRounds = 3
 	priorCells    = 4 // weight, in cells, of a tile's starting levels in every EM round
 	stripePasses  = 2 // rounds of stripe cancellation and refitting
-	// A credited cell the phase field reads at weight w below capWeight holds up to 1 - w of another
-	// frame, and its soft bits state at most ln(w / (1 - w)) + capNats nats (see SoftBits).
-	capWeight = 0.97
-	capNats   = 1.0
 )
 
 // TileEqualiser implements Equaliser: per-tile level statistics started from the palette and the
