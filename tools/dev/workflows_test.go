@@ -233,6 +233,9 @@ func TestCIRetargetAndCodeOutput(t *testing.T) {
 	for _, want := range []string{
 		"  pull_request:\n    types: [opened, synchronize, reopened, edited]\n",
 		`if [ "$CODE" != true ] && [ "$CODE" != false ]; then`,
+		`-base-ref "$BASE_REF" -default-branch "$DEFAULT_BRANCH"`,
+		"BASE_REF: ${{ github.event.pull_request.base.ref }}",
+		"DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}",
 		`if [ "$CODE" != false ] && echo "$NEEDS" | jq -e '[.[].result] | any(. == "skipped")'`,
 	} {
 		if !strings.Contains(s, want) {

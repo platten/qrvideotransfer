@@ -47,6 +47,8 @@ func codeChanged(event string, changes []fileChange) bool {
 	return false
 }
 
+func codeFor(event, baseRef, defaultBranch string, changes []fileChange) bool { return false }
+
 // allowListed reports whether a path is on docsOnlyAllowList and is not code by its type: Go
 // source, module files, test data and .gitattributes are code wherever they sit.
 func allowListed(file string) bool {

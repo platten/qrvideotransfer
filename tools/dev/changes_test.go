@@ -81,6 +81,33 @@ func TestCodeChanged(t *testing.T) {
 	}
 }
 
+// TestCodeForStacked covers the fallback for M2 of the review of PR #35: a pull request whose base
+// is not the default branch (a stacked pull request) always runs everything, because a later
+// retarget to the default branch could otherwise carry untested code under a green ci result.
+func TestCodeForStacked(t *testing.T) {
+	docsOnly := mod("docs/FORMAT.md")
+	cases := []struct {
+		event, baseRef, defaultBranch string
+		want                          bool
+	}{
+		{"pull_request", "main", "main", false},
+		{"pull_request", "feat", "main", true},
+		{"pull_request", "main-old", "main", true},
+		{"pull_request", "", "main", true},
+		{"pull_request", "main", "", true},
+		{"pull_request", "trunk", "trunk", false},
+		{"push", "main", "main", true},
+	}
+	for _, c := range cases {
+		if got := codeFor(c.event, c.baseRef, c.defaultBranch, docsOnly); got != c.want {
+			t.Errorf("codeFor(%q, base %q, default %q) = %v, want %v", c.event, c.baseRef, c.defaultBranch, got, c.want)
+		}
+	}
+	if !codeFor("pull_request", "main", "main", mod("internal/a.go")) {
+		t.Error("a code change against the default branch gave code=false")
+	}
+}
+
 func TestParseNameStatus(t *testing.T) {
 	got, err := parseNameStatus("M\tdocs/FORMAT.md\r\n\nD\tinternal/a.go\nA\tdocs/spikes/S4.md\n")
 	want := []fileChange{{"M", "docs/FORMAT.md"}, {"D", "internal/a.go"}, {"A", "docs/spikes/S4.md"}}
