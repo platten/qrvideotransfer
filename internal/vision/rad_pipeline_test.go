@@ -24,19 +24,10 @@ import (
 //     the bench's 0.09 and 0.16, set by handheld scanning left to right at roll 60, where the long
 //     version measured 0.1105 and 0.1724: the rectifier's anchors are less exact than the true
 //     positions on that steep pose.
-//   - No lower edge is asserted on handheld: its cells are underconfident through the pipeline
-//     (long version, pooled bucket 2: 2 errors where 97 are expected), lost capacity to be measured
-//     with S2. The tables are logged; overconfidence stays bounded as on the bench.
+//   - As on the bench, only overconfidence is asserted; underconfidence is logged.
 const (
 	maxInnerErrPipeline  = 0.12
 	maxPocketErrPipeline = 0.19
-)
-
-// pipeFloor is TestPipelineHonesty's lower edge per preset (see underFloor), and pipeMixedFloor
-// the one for its partly mixed cells' table.
-var (
-	pipeFloor      = map[string]float64{"tripod": 0.10, "handheld": 0}
-	pipeMixedFloor = map[string]float64{"tripod": 0.5, "handheld": 0}
 )
 
 // pipeStats counts what the pipeline did with the captures it was given.
@@ -197,7 +188,7 @@ func TestPipelineHonesty(t *testing.T) {
 				}
 				tab, clean, mixed, cells := s.calibrate(t, caps, false)
 				t.Logf("%d captures through the pipeline of %d, %d credited cells\n%s", len(caps), ps.captures, cells, tab)
-				for _, e := range tab.judge(false, pipeFloor[name], overCeil[name]) {
+				for _, e := range tab.judge(false, overCeil[name]) {
 					t.Error(e)
 				}
 				total.merge(tab)
@@ -205,14 +196,15 @@ func TestPipelineHonesty(t *testing.T) {
 				totalMixed.merge(mixed)
 			})
 		}
-		t.Logf("%s through the pipeline, all variants:\n%sclean cells:\n%spartly mixed cells:\n%s", name, total, totalClean, totalMixed)
-		for _, e := range total.judge(true, pipeFloor[name], overCeil[name]) {
+		t.Logf("%s through the pipeline, all variants:\n%sclean cells:\n%spartly mixed cells:\n%sunderconfident (logged, not asserted): all cells%s clean cells%s partly mixed cells%s",
+			name, total, totalClean, totalMixed, total.under(), totalClean.under(), totalMixed.under())
+		for _, e := range total.judge(true, overCeil[name]) {
 			t.Errorf("%s pooled: %s", name, e)
 		}
-		for _, e := range totalClean.judge(true, pipeFloor[name], 2) {
+		for _, e := range totalClean.judge(true, 2) {
 			t.Errorf("%s pooled, clean cells: %s", name, e)
 		}
-		for _, e := range totalMixed.judge(true, pipeMixedFloor[name], overCeil[name]) {
+		for _, e := range totalMixed.judge(true, overCeil[name]) {
 			t.Errorf("%s pooled, partly mixed cells: %s", name, e)
 		}
 	}

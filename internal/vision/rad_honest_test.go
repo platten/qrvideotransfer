@@ -17,14 +17,6 @@ const calBuckets = 10
 // minBucket is the number of bits a bucket needs before it is judged.
 const minBucket = 10000
 
-// underFloor is, per preset, the smallest observed error rate relative to the stated one that the
-// honesty test accepts; above it the band is [stated/2, 2 stated] as DESIGN.md section 15 has it.
-// On tripod clean cells are underconfident, a residual the designer accepted on 2026-11-15
-// (DESIGN.md sections 10 and 15): pooled over the Gray4 variants, bucket 1 holds 24 errors where 167
-// are expected (0.14 times) and bucket 2 none where 23 are expected. The floor is that 0.14 less a
-// margin, so that the underconfidence cannot grow unnoticed; overconfidence keeps the bound of twice.
-var underFloor = map[string]float64{"tripod": 0.10, "handheld": 0.5}
-
 // overCeil is, per preset, the largest observed error rate relative to the stated one accepted for
 // credited cells that hold some of another frame, and for tables that include them. Above the
 // band's 2 it is a regression bound on a residual the designer accepted on 2026-11-15 and that is
@@ -91,36 +83,51 @@ func poisson(k int, mu float64) (le, ge float64) {
 	return math.Min(1, cdf+pmf(k)), math.Max(0, 1-cdf)
 }
 
-// check judges every bucket of at least minBucket bits: its observed error count must be
-// consistent, at the 0.1% level of a Poisson test, with a rate between half and twice the mean
-// stated rate. Where few errors are expected only an excess of errors (overconfidence) can be
-// shown. checkPooled also requires, where at least pointExpected errors are expected, the observed
-// rate itself to lie in [stated/2, 2 stated]; it judges the tables pooled over the variants. One
-// case alone does not meet that bound: Gray4 on tripod with gamma error +0.3 has 66 errors in
-// bucket 1 where 166 are expected (0.40 times; its clean cells are underconfident), which the
-// Poisson test accepts and the pooled bucket absorbs.
-func (c *calTable) check() []string { return c.judge(false, 0.5, 2) }
+// check judges every bucket of at least minBucket bits against overconfidence: its observed error
+// count must be consistent, at the 0.1% level of a Poisson test, with a rate of at most twice the
+// mean stated rate. checkPooled also requires, where at least pointExpected errors are expected, the
+// observed rate itself to be at most twice the stated one; it judges the tables pooled over the
+// variants. No lower edge is asserted (designer's ruling of 2026-11-15): underconfidence is lost
+// capacity, not a hazard to the decoder, and is logged (see under) for the S2 analysis.
+func (c *calTable) check() []string { return c.judge(false, 2) }
 
 // checkPooled is check with the point estimate also bounded, for tables pooled over the variants.
-func (c *calTable) checkPooled() []string { return c.judge(true, 0.5, 2) }
+func (c *calTable) checkPooled() []string { return c.judge(true, 2) }
 
-// judge is check, bounding the point estimate too when point is set, with low and high (normally
-// 0.5 and 2) the smallest and largest observed rates, relative to the stated one, that are honest.
-func (c *calTable) judge(point bool, low, high float64) []string {
+// judge is check, bounding the point estimate too when point is set, with high (normally 2) the
+// largest observed rate, relative to the stated one, that is honest.
+func (c *calTable) judge(point bool, high float64) []string {
 	var bad []string
 	for j := range calBuckets {
 		if c.n[j] < minBucket {
 			continue
 		}
 		mu := c.stated[j]
-		le, _ := poisson(c.errs[j], low*mu)
 		_, ge := poisson(c.errs[j], high*mu)
-		ratio := float64(c.errs[j]) / mu
-		if ge < 1e-3 || le < 1e-3 || point && mu >= pointExpected && (ratio < low || ratio > high) {
+		if ge < 1e-3 || point && mu >= pointExpected && float64(c.errs[j])/mu > high {
 			bad = append(bad, fmt.Sprintf("bucket %d: %d errors in %d bits, stated %.3g", j, c.errs[j], c.n[j], mu/float64(c.n[j])))
 		}
 	}
 	return bad
+}
+
+// under describes every bucket of at least minBucket bits whose error count is inconsistent, at the
+// 0.1% level, with half the stated rate: the underconfidence that is logged, not asserted.
+func (c *calTable) under() string {
+	var b strings.Builder
+	for j := range calBuckets {
+		if c.n[j] < minBucket {
+			continue
+		}
+		mu := c.stated[j]
+		if le, _ := poisson(c.errs[j], mu/2); le < 1e-3 {
+			fmt.Fprintf(&b, " bucket %d at %.3g times the stated rate (%d errors where %.1f expected);", j, float64(c.errs[j])/mu, c.errs[j], mu)
+		}
+	}
+	if b.Len() == 0 {
+		return " none"
+	}
+	return b.String()
 }
 
 // String formats the table.
@@ -220,7 +227,7 @@ func TestHonestConfidence(t *testing.T) {
 						t.Fatal("no cell credited")
 					}
 					t.Logf("%d captures, %d credited cells\n%s", len(caps), cells, tab)
-					for _, e := range tab.judge(false, underFloor[name], overCeil[name]) {
+					for _, e := range tab.judge(false, overCeil[name]) {
 						t.Error(e)
 					}
 					total.merge(tab)
@@ -229,19 +236,20 @@ func TestHonestConfidence(t *testing.T) {
 				})
 			}
 			// Pooled over the variants, the buckets are larger and the test stricter.
-			t.Logf("%s %s, all variants:\n%s", s.mod.Name(), name, total)
-			for _, e := range total.judge(true, underFloor[name], overCeil[name]) {
+			t.Logf("%s %s, all variants:\n%sunderconfident (logged, not asserted): all cells%s clean cells%s partly mixed cells%s",
+				s.mod.Name(), name, total, total.under(), totalClean.under(), totalMixed.under())
+			for _, e := range total.judge(true, overCeil[name]) {
 				t.Errorf("%s %s pooled: %s", s.mod.Name(), name, e)
 			}
 			// Clean cells and the credited cells that hold some of another frame (where the
 			// variance widening of SoftBits acts) must each be honest on their own, so that errors
 			// in opposite directions cannot cancel in the pooled table.
 			t.Logf("%s %s, all variants, credited cells wholly one frame:\n%s", s.mod.Name(), name, totalClean)
-			for _, e := range totalClean.judge(true, underFloor[name], 2) {
+			for _, e := range totalClean.judge(true, 2) {
 				t.Errorf("%s %s pooled, clean cells: %s", s.mod.Name(), name, e)
 			}
 			t.Logf("%s %s, all variants, credited cells not wholly one frame:\n%s", s.mod.Name(), name, totalMixed)
-			for _, e := range totalMixed.judge(true, 0.5, overCeil[name]) {
+			for _, e := range totalMixed.judge(true, overCeil[name]) {
 				t.Errorf("%s %s pooled, partly mixed cells: %s", s.mod.Name(), name, e)
 			}
 		}
@@ -272,7 +280,7 @@ func TestCalTable(t *testing.T) {
 	for _, k := range []struct {
 		errs int
 		ok   bool
-	}{{20, true}, {200, false}, {0, false}} {
+	}{{20, true}, {200, false}, {0, true}} {
 		d := calTable{}
 		d.n[1], d.errs[1], d.stated[1] = 10000, k.errs, 20
 		if got := len(d.check()) == 0; got != k.ok {
@@ -285,7 +293,7 @@ func TestCalTable(t *testing.T) {
 		errs int
 		mu   float64
 		ok   bool
-	}{{40, 18, true}, {400, 180, false}, {80, 180, false}, {300, 180, true}} {
+	}{{40, 18, true}, {400, 180, false}, {80, 180, true}, {300, 180, true}} {
 		d := calTable{}
 		d.n[2], d.errs[2], d.stated[2] = 20000, k.errs, k.mu
 		if got := len(d.checkPooled()) == 0; got != k.ok {
