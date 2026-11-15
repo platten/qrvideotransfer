@@ -57,7 +57,7 @@ func TestMain(m *testing.M) {
 		w, _ := currentWorkers()
 		w.env = workerEnv()
 	}
-	os.Exit(measureReport(m.Run())) // TEMPORARY measurement
+	os.Exit(m.Run())
 }
 
 // hostileWorker misbehaves in the way named. It first says the engine is loaded, as a worker does
