@@ -189,3 +189,9 @@ func headerRefs(v *geomLuma, m *geomModel) ([4][2]float32, bool) {
 	}
 	return refs, seen
 }
+
+// headerConfirms reports whether any header decodes for the quad q, as Read decodes it.
+func headerConfirms(f *video.Frame, q Quad) bool {
+	_, ok := SlotReader{}.Read(f, q)
+	return ok
+}

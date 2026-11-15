@@ -514,15 +514,26 @@ For each capture:
    stay independent of what surrounds a finder, match the inner light, dark (3), light pattern and
    require only that the flanks are dark for at least half a module (inverted for the fourth finder).
    Choose four candidates with consistent module size. Track from the previous capture when possible.
-   As built: a pixel is dark when it is below the midrange (mean of minimum and maximum) of a window
-   about a twentieth of the downscaled width across; a local mean failed beside the dark surround of
-   the screen. A row hit is confirmed along its column and, loosely, both diagonals (every line through
-   concentric squares crosses them in the same ratios), and each candidate's ring is verified at full
-   resolution, where its centre is refined from the ring's edges along seven rows and seven columns.
-   Random data cells produce finder-like hits with as many row hits as a real finder, so the four are
-   chosen as a convex quad in clockwise order on the image, with module sizes within a factor of 3
-   (25 degrees of tilt gives about 2) and left and right sides of 126 modules within a factor of
-   1/0.65.
+   As built: a pixel is dark when it is below lo + 0.7 (hi - lo), lo and hi being the minimum and
+   maximum of a window about a twentieth of the downscaled width across; a local mean failed beside
+   the dark surround of the screen. The threshold sits at about half the light in linear terms, not
+   at the code-value midrange (about a fifth of it): blur acts on linear light, and at the midrange
+   it widened the light rings and erased the thin outer dark ring at 4 to 5 pixels per module. For
+   the same reason the flanks need only a quarter module, not half. A row hit is confirmed along its
+   column and, loosely, both diagonals (every line through concentric squares crosses them in the
+   same ratios), and each candidate's ring is verified at full resolution, where its centre is
+   refined from the edges of ring 2, found midway between the extremes of rings 2 and 3, along seven
+   rows and seven columns. The four are chosen as a convex quad in clockwise order on the image, with
+   module sizes within a factor of 3 (25 degrees of tilt gives about 2) and left and right sides of
+   126 modules within a factor of 1/0.65. Data cells mimic finders at the finder's own scale (on a
+   grid of 135 rows or fewer a module is at most one cell; on a 240 x 135 grid 1 to 4% of captures
+   gave a wrong quad), so the six best quads are tried in turn and a quad is reported only when its
+   header decodes (step 2). A capture whose four copies all fail is therefore not located; on the
+   simulator's presets that never happened (step 2's 1,000 of 1,000).
+   **Measured limit:** under the handheld preset's blur (1.5 camera pixels), 200 poses per size on a
+   240 x 135 grid, the finders were found in 200 of 200 poses at 4.0 camera pixels per untilted
+   module (3.4 at the smallest after tilt) and above, 199 at 3.6, 187 at 3.2 and 16 at 2.8. Detection
+   is asserted down to 4.0 pixels per module (`TestDetectModuleLimit`).
    **Departure from "at most 1280 pixels wide", accepted:** when no quad is found in a downscaled
    capture, the scan is repeated once one step finer (1920 pixels wide for 4K). At 25 degrees of tilt
    a far finder can measure under 3 pixels per module at 1280 pixels wide. On 1,000 simulated 4K poses
@@ -549,7 +560,8 @@ For each capture:
    from the corner. The model, k1 included, is refitted to the corners, and a corner more than 0.35 cell
    from its neighbours' median displacement is rejected. The mesh's nodes, every 4 cells, are the model
    plus the corners' residuals interpolated over the anchor lattice; cell (x, y) covers
-   [x, x+1) x [y, y+1) of the mesh's coordinates.
+   [x, x+1) x [y, y+1) of the mesh's coordinates. The fit fails unless at least one anchor, and at
+   least a quarter of those the model places inside the capture, are located.
 4. **Sample.** Take the mean of the central 60% of each cell's footprint directly from the camera planes.
    The image is never warped whole. As built: a cell is saturated when any of its brightness samples is
    at the bottom or top of the code range; a cell outside the capture is saturated with zero values.
@@ -1508,3 +1520,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Stream G, CI budget: section 17 says a newer push to a pull request cancels its older `ci` and `codeql` runs, that runs on main, tags and schedules are never cancelled, and that the workflow policy test enforces this |
 | 2026-11-15 | M2 Geometry: section 10, steps 1 to 4, records what was built: the midrange binarisation, diagonal and full-resolution checks and quad rules of the detector, its one finer rescan when the 1280-pixel scan finds no quad (measured: 3 of 1,000 poses at 25 degrees of tilt), and that it assumes a capture that is not mirrored; radial distortion with k1 chosen by slot contrast for the header, the finder references, and which pairs are tried; the order, refinement, outlier rule and node spacing of the mesh and its cell coordinates; and what the sampler calls saturated |
 | 2026-11-15 | M2 Geometry, designer ruling on PR #30: section 6 and section 10's distortion table no longer claim that mirroring is handled; a decoder assumes the capture is not mirrored (FORMAT.md section 4.1), and mirrored recordings are left to M5. Section 10 step 1 records the accepted departure from "at most 1280 pixels wide" (one rescan one step finer when no quad is found) with its evidence: 997 of 1,000 simulated 4K poses at up to 25 degrees of tilt found by the 1280-pixel scan alone, 1,000 with the rescan |
+| 2026-11-15 | M2 Geometry, review of PR #30: section 10 step 1 gives the detector's threshold at about half the light in linear terms and flanks of a quarter module (blur in linear light thinned the outer dark ring, and finders of 4 to 6 pixels per module were missed), says that a quad is reported only when its header decodes (data cells gave wrong quads on a 240 x 135 grid), and records the measured limit: found in every pose at 4.0 camera pixels per untilted module under the handheld blur. Step 3 states when the fit fails (no anchor, or under a quarter of those inside the capture, located) |

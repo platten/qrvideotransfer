@@ -6,10 +6,6 @@ import (
 	"github.com/platten/qrvideotransfer/internal/video"
 )
 
-// geomMaxSide bounds a capture's sides; the video engine never produces more than 8K, and this
-// keeps every size product far from overflow.
-const geomMaxSide = 1 << 15
-
 // geomLuma is a validated view of a capture's planes. Image coordinates have pixel centres at
 // half-integers: pixel (i, j) covers [i, i+1) x [j, j+1).
 type geomLuma struct {
@@ -21,11 +17,16 @@ type geomLuma struct {
 	top    uint16  // largest code value
 }
 
-// geomView validates f and returns a view of it. A frame is usable when its sides are in range, its
-// bit depth is 8 to 16, its brightness plane is complete, and its colour planes are either both
-// complete or ignored.
+// geomView validates f and returns a view of it. A frame is usable when its sides are within the
+// video engine's capture limits (video.MaxCaptureLongSide and video.MaxCaptureShortSide, in either
+// orientation), its bit depth is 8 to 16, its brightness plane is complete, and its colour planes
+// are either both complete or ignored.
 func geomView(f *video.Frame) (geomLuma, bool) {
-	if f == nil || f.W < 1 || f.H < 1 || f.W > geomMaxSide || f.H > geomMaxSide || f.Bits < 8 || f.Bits > 16 || len(f.Y) < f.W*f.H {
+	if f == nil || f.W < 1 || f.H < 1 || f.Bits < 8 || f.Bits > 16 {
+		return geomLuma{}, false
+	}
+	long, short := max(f.W, f.H), min(f.W, f.H)
+	if long > video.MaxCaptureLongSide || short > video.MaxCaptureShortSide || len(f.Y) < f.W*f.H {
 		return geomLuma{}, false
 	}
 	v := geomLuma{w: f.W, h: f.H, y: f.Y, scale: 1 / float32(int(1)<<(f.Bits-8)), top: uint16(int(1)<<f.Bits - 1)}

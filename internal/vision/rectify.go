@@ -2,6 +2,7 @@ package vision
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 
@@ -103,6 +104,20 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 			}
 		}
 		rectifyReject(&model, cells, obs)
+	}
+	// At least a quarter of the anchors whose saddle the model puts inside the capture, and at least
+	// one, must be located; otherwise the finders were not a code's or the capture is unusable.
+	inside, found := 0, 0
+	for i, c := range cells {
+		if v.inside(model.at(c)) {
+			inside++
+			if obs[i].Found {
+				found++
+			}
+		}
+	}
+	if found == 0 || 4*found < inside {
+		return nil, nil, fmt.Errorf("vision: %d of %d anchors inside the capture located, under a quarter", found, inside)
 	}
 	mesh := rectifyMesh(&model, l, cells, obs)
 	for i := range obs {

@@ -2,14 +2,20 @@ package vision
 
 import "math"
 
+// meshMaxSide bounds a mesh's nodes per row and per column before they are multiplied: far more
+// than a 2047-cell grid needs at any step, and small enough that the product cannot overflow.
+const meshMaxSide = 1 << 16
+
 // At maps cell coordinates (x, y) to image coordinates. Cell (gx, gy) covers [gx, gx+1) x
 // [gy, gy+1), so its centre is (gx+0.5, gy+0.5). Between nodes the mesh is bilinear; beyond the
 // outermost nodes it extends the outermost lattice square linearly. A malformed mesh (fewer than
-// 2 x 2 nodes, a node count other than Cols*Rows, a step that is not positive) or a non-finite
+// 2 x 2 nodes, more than 65,536 per row or column, a node count other than Cols*Rows, a step that
+// is not positive) or a non-finite
 // position gives NaN.
 func (m *Mesh) At(x, y float64) Point {
 	nan := Point{math.NaN(), math.NaN()}
-	if m == nil || m.Cols < 2 || m.Rows < 2 || len(m.Nodes) != m.Cols*m.Rows || !(m.StepX > 0) || !(m.StepY > 0) {
+	if m == nil || m.Cols < 2 || m.Rows < 2 || m.Cols > meshMaxSide || m.Rows > meshMaxSide ||
+		len(m.Nodes) != m.Cols*m.Rows || !(m.StepX > 0) || !(m.StepY > 0) {
 		return nan
 	}
 	u, v := (x-m.X0)/m.StepX, (y-m.Y0)/m.StepY

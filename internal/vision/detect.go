@@ -15,7 +15,15 @@ const (
 	detectNormal   = 24   // most normal finders considered for the quad
 	detectInverted = 12   // most inverted finders considered for the quad
 	detectMinSides = 20.0 // shortest distance between finder centres, in modules
+	detectQuads    = 6    // best quads confirmed by their header
 	detectContrast = 24   // smallest local brightness range, 8-bit code values, for a dark pixel
+	// The dark/light threshold lies at detectDarkNum/detectDarkDen of the way from the local
+	// minimum to the maximum in code values: about half the light, in linear terms, for a tone curve
+	// near gamma 1/2.2. Blur acts on linear light, so a threshold at the code-value midrange (a
+	// fifth of the light) widens light rings and thins the dark ones; at 4-5 pixels per module and
+	// the presets' blur it erased the finders' outer dark ring.
+	detectDarkNum = 7
+	detectDarkDen = 10
 )
 
 // FinderDetector is the Detector of docs/DESIGN.md section 10, step 1. The zero value is ready to
@@ -50,9 +58,11 @@ func (c *detectCluster) mod() float64 { return c.module / float64(c.hits) }
 // Detect finds the four finders of a code in f. It scans brightness downscaled to at most 1280
 // pixels wide for the finder signature along rows, confirms each hit along its column, groups the
 // hits, chooses the four groups (three normal, one inverted) that form a plausible quad, and
-// refines each centre at full resolution. Given the previous capture's quad it first scans only
-// around its finders, and falls back to the whole capture. When the whole capture yields no quad
-// and it was downscaled, it scans once more one step finer.
+// refines each centre at full resolution. A quad is reported only when its header decodes: data
+// cells can mimic a finder at the finder's own scale, and a wrong quad is worse than none. Given
+// the previous capture's quad it first scans only around its finders, and falls back to the whole
+// capture. When the whole capture yields no quad and it was downscaled, it scans once more one
+// step finer.
 func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
 	v, ok := geomView(f)
 	if !ok {
@@ -70,13 +80,13 @@ func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
 			x, y := int(c.X/float64(s)), int(c.Y/float64(s))
 			d.scan(x-r, y-r, x+r, y+r)
 		}
-		if q, ok := d.choose(&v, s); ok {
+		if q, ok := d.choose(f, &v, s); ok {
 			return q, true
 		}
 	}
 	d.clusters = d.clusters[:0]
 	d.scan(0, 0, d.sw, d.sh)
-	if q, ok := d.choose(&v, s); ok || s == 1 {
+	if q, ok := d.choose(f, &v, s); ok || s == 1 {
 		return q, ok
 	}
 	// A far finder at 25 degrees of tilt can measure under 3 pixels per module after downscaling;
@@ -85,13 +95,13 @@ func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
 	d.downscale(&v, s)
 	d.clusters = d.clusters[:0]
 	d.scan(0, 0, d.sw, d.sh)
-	return d.choose(&v, s)
+	return d.choose(f, &v, s)
 }
 
-// downscale box-filters the brightness by s into d.small and marks the pixels darker than the
-// midrange (the mean of the minimum and the maximum) of a square window around them, whose side is
-// about a twentieth of the downscaled width. Where the window's range is under detectContrast the
-// pixel counts as light.
+// downscale box-filters the brightness by s into d.small and marks the pixels darker than
+// lo + detectDarkShare (hi - lo), where lo and hi are the minimum and maximum of a square window
+// around them whose side is about a twentieth of the downscaled width. Where the window's range is
+// under detectContrast the pixel counts as light.
 func (d *FinderDetector) downscale(v *geomLuma, s int) {
 	sw, sh := v.w/s, v.h/s
 	d.sw, d.sh = sw, sh
@@ -118,7 +128,7 @@ func (d *FinderDetector) downscale(v *geomLuma, s int) {
 	minRange := int(float32(detectContrast) / v.scale)
 	for i, p := range d.small {
 		lo, hi := int(d.lo[i]), int(d.hi[i])
-		d.dark[i] = hi-lo >= minRange && 2*int(p) < lo+hi
+		d.dark[i] = hi-lo >= minRange && detectDarkDen*(int(p)-lo) < detectDarkNum*(hi-lo)
 	}
 }
 
@@ -160,17 +170,18 @@ func (d *FinderDetector) slide(dst, src []uint16, r int, isMax bool) {
 }
 
 // detectPattern checks five consecutive run lengths for the finder signature: inner runs b, c, d in
-// the ratio 1:3:1 and flanks a and e of at least about half a module. It returns the module size.
-// A loose check, for the diagonals, widens the tolerances by a quarter and accepts flanks of a
-// quarter module.
+// the ratio 1:3:1 and flanks a and e of at least a quarter module (DESIGN.md asks for half; blur
+// in linear light thins the outer dark ring, see detectDarkNum). It returns the module size. A
+// loose check, for the diagonals, widens the tolerances by a quarter and accepts flanks of 0.15
+// module.
 func detectPattern(a, b, c, d, e int, loose bool) (float64, bool) {
 	m := float64(b+c+d) / 5
 	if m < 0.8 {
 		return 0, false
 	}
-	tol, flank := 1.0, 0.4
+	tol, flank := 1.0, 0.25
 	if loose {
-		tol, flank = 1.25, 0.25
+		tol, flank = 1.25, 0.15
 	}
 	fb, fc, fd := float64(b), float64(c), float64(d)
 	ok := math.Abs(fb-m) <= 0.6*tol*m && math.Abs(fd-m) <= 0.6*tol*m && math.Abs(fc-3*m) <= 1.2*tol*m &&
@@ -287,7 +298,7 @@ func (d *FinderDetector) add(p gpt, m float64, inv bool) {
 }
 
 // choose picks the best quad among the clusters and refines it at full resolution.
-func (d *FinderDetector) choose(v *geomLuma, s int) (Quad, bool) {
+func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int) (Quad, bool) {
 	var normal, inverted []*detectCluster
 	for i := range d.clusters {
 		c := &d.clusters[i]
@@ -305,7 +316,11 @@ func (d *FinderDetector) choose(v *geomLuma, s int) (Quad, bool) {
 	slices.SortStableFunc(inverted, byHits)
 	normal = detectVerify(v, s, normal, detectNormal)
 	inverted = detectVerify(v, s, inverted, detectInverted)
-	best, bestScore := [4]*detectCluster{}, 0.0
+	type scored struct {
+		q     [4]*detectCluster
+		score float64
+	}
+	var top []scored // the best detectQuads quads, best first
 	for _, br := range inverted {
 		for _, tl := range normal {
 			if !detectSizes(tl, br) {
@@ -320,22 +335,42 @@ func (d *FinderDetector) choose(v *geomLuma, s int) (Quad, bool) {
 						continue
 					}
 					q := [4]*detectCluster{tl, tr, bl, br}
-					if sc, ok := detectScore(q); ok && sc > bestScore {
-						best, bestScore = q, sc
+					sc, ok := detectScore(q)
+					if !ok || (len(top) == detectQuads && sc <= top[len(top)-1].score) {
+						continue
 					}
+					i, _ := slices.BinarySearchFunc(top, sc, func(a scored, t float64) int {
+						if a.score >= t {
+							return -1
+						}
+						return 1
+					})
+					top = slices.Insert(top, i, scored{q, sc})
+					top = top[:min(len(top), detectQuads)]
 				}
 			}
 		}
 	}
-	if best[0] == nil {
+	if len(top) == 0 {
 		return Quad{}, false
 	}
-	var q Quad
-	for k, c := range best {
-		q.Centres[k] = Point(c.at)
-		q.Module += c.chord / 4
+	quad := func(best [4]*detectCluster) Quad {
+		var q Quad
+		for k, c := range best {
+			q.Centres[k] = Point(c.at)
+			q.Module += c.chord / 4
+		}
+		return q
 	}
-	return q, true
+	// Data cells can mimic a finder at the finder's own scale (on a grid of 135 rows or fewer a finder
+	// module is at most one cell), so the best quads are confirmed by their header, best first. A
+	// quad whose header does not decode is not reported: a wrong quad would feed wrong cells on.
+	for _, t := range top {
+		if q := quad(t.q); headerConfirms(f, q) {
+			return q, true
+		}
+	}
+	return Quad{}, false
 }
 
 // detectVerify refines the candidates at full resolution, most hits first, and keeps up to n that
@@ -398,18 +433,25 @@ func detectRefine(v *geomLuma, c gpt, m float64, inv bool) (gpt, float64, bool) 
 	mod := m
 	for range 3 {
 		centre := v.patch(c, gpt{0.6 * m, 0}, gpt{0, 0.6 * m}, 4)
-		ring := centre
+		// The extremes of ring 2 (the centre's opposite) and ring 3 (the centre's colour), each one
+		// module wide and so weakened alike by blur, over 16 directions.
+		ring, outer := centre, float32(math.NaN())
 		for k := range 16 {
 			sn, cs := math.Sincos(float64(k) * math.Pi / 8)
 			r := v.bilinear(c.X+2.2*m*cs, c.Y+2.2*m*sn)
 			if (r > ring) != inv {
 				ring = r
 			}
+			o := v.bilinear(c.X+3*m*cs, c.Y+3*m*sn)
+			if math.IsNaN(float64(outer)) || (o < outer) != inv {
+				outer = o
+			}
 		}
-		if math.Abs(float64(ring-centre)) < 8 {
+		if math.Abs(float64(ring-centre)) < 8 || math.Abs(float64(ring-outer)) < 4 {
 			return c, 0, false
 		}
-		t := (centre + ring) / 2
+		// Midway between the two rings' extremes: the thin rings' edges then sit where they are.
+		t := (outer + ring) / 2
 		var axis [2]struct {
 			at, mod float64
 			n       int
@@ -421,7 +463,7 @@ func detectRefine(v *geomLuma, c gpt, m float64, inv bool) (gpt, float64, bool) 
 				i0, o0, ok0 := detectEdges(v, p, u.mul(-1), t, !inv, int(4*m)+2)
 				i1, o1, ok1 := detectEdges(v, p, u, t, !inv, int(4*m)+2)
 				// The ring's inner and outer edges are 3 and 5 modules apart along any line through it.
-				if r := (i0 + i1) / (o0 + o1); !ok0 || !ok1 || r < 0.45 || r > 0.78 {
+				if r := (i0 + i1) / (o0 + o1); !ok0 || !ok1 || r < 0.4 || r > 0.85 {
 					continue
 				}
 				mid := (i1 - i0 + o1 - o0) / 4 // along u, relative to p
@@ -430,7 +472,7 @@ func detectRefine(v *geomLuma, c gpt, m float64, inv bool) (gpt, float64, bool) 
 				axis[a].n++
 			}
 		}
-		if axis[0].n < 5 || axis[1].n < 5 {
+		if axis[0].n < 4 || axis[1].n < 4 {
 			return c, 0, false
 		}
 		c = gpt{axis[0].at / float64(axis[0].n), axis[1].at / float64(axis[1].n)}
