@@ -1,9 +1,7 @@
 package vision
 
 import (
-	"runtime"
 	"testing"
-	"time"
 
 	"github.com/platten/qrvideotransfer/internal/frame"
 )
@@ -71,37 +69,14 @@ func TestFitFinderOff(t *testing.T) {
 
 // TestDetectHostileGrid4K: the worst case inside the 1.5-pixel gate at 4K. A real 480 x 270 code at
 // 8 pixels per cell whose four header copies claim 2047 x 1393, alternating with 2046 x 1393, so
-// that a layout is built and the anchors are searched on every call. It is never located, and each
-// Detect stays within 32 MB of allocation and, loosely for slow CI runners, 20 s.
+// that a layout is built and the anchors are searched on every call. It is never located; each
+// Detect allocates at most 32 MB and takes at most 6 times as long as locating the real code in the
+// same process.
 func TestDetectHostileGrid4K(t *testing.T) {
 	c := geomNewCode(t, 480, 270, 8, 2, 1, 37)
 	a := geomFakeCopies(t, c, 2047, 1393, 0, 1, 2, 3)
 	b := geomFakeCopies(t, c, 2046, 1393, 0, 1, 2, 3)
-	f := geomPlain(c, 0)
-	var d FinderDetector
-	var before, after runtime.MemStats
-	const n = 4
-	runtime.ReadMemStats(&before)
-	start := time.Now()
-	for i := range n {
-		f.Y = a
-		if i%2 == 1 {
-			f.Y = b
-		}
-		if _, ok := d.Detect(f, nil); ok {
-			t.Fatalf("call %d: located a code whose header claims a 2047-cell grid", i)
-		}
-	}
-	el := time.Since(start) / n
-	runtime.ReadMemStats(&after)
-	alloc := (after.TotalAlloc - before.TotalAlloc) / n
-	t.Logf("per Detect: %v, %.1f MB allocated", el, float64(alloc)/(1<<20))
-	if alloc > 32<<20 {
-		t.Errorf("%.1f MB allocated per Detect, want at most 32", float64(alloc)/(1<<20))
-	}
-	if el > 20*time.Second && !geomRace {
-		t.Errorf("%v per Detect, want at most 20 s", el)
-	}
+	geomCostRatio(t, "4K header at the gate", geomPlain(c, 0), geomPlain(c, 0), [][]uint16{a, b}, 6, 32<<20)
 }
 
 // TestHeaderConflictingGrid: when copies 0 and 1 decode a header with the same frame index but
