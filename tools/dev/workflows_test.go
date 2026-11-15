@@ -40,6 +40,15 @@ func TestWorkflowProblemsFixtures(t *testing.T) {
 			"line 9: cancel-in-progress must be false or ${{ github.event_name == 'pull_request' }}",
 			"line 15: cancel-in-progress must be false or ${{ github.event_name == 'pull_request' }}",
 		}},
+		{"cancel-flow.yml", []string{
+			"line 6: cancel-in-progress must be false or",
+			"line 12: cancel-in-progress must be false or",
+			"line 19: cancel-in-progress must be false or",
+		}},
+		{"cancel-group.yml", []string{
+			"line 9: the concurrency group of a pull-request cancel must contain github.event.pull_request.number and github.sha",
+			"line 14: the concurrency group of a pull-request cancel must contain github.event.pull_request.number and github.sha",
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
@@ -69,6 +78,12 @@ jobs:
     concurrency:
       group: a
       cancel-in-progress: false # a comment
+  b:
+    concurrency: {group: "b-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}", cancel-in-progress: ${{ github.event_name == 'pull_request' }}}
+  c:
+    concurrency:
+      group: c
+      'cancel-in-progress': false
 `
 	if got := workflowProblems("x.yml", []byte(wf), true); len(got) != 0 {
 		t.Fatalf("allowed cancel-in-progress forms gave problems: %v", got)
@@ -181,5 +196,37 @@ func TestCheckWorkflowDirFixtures(t *testing.T) {
 	}
 	if _, _, err := checkWorkflowDir(filepath.Join(dir, "absent")); err == nil {
 		t.Fatal("a missing directory gave no error")
+	}
+}
+
+// TestCIResultNeedsEveryJob checks that the aggregate `ci result` job of ci.yml waits for every
+// other job, so that no job can fail without failing the required check, and that every job the
+// documents-only skip may skip is gated on the changes job.
+func TestCIResultNeedsEveryJob(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs, needs, gated := ciJobs(b)
+	if !slices.Contains(jobs, "result") || !slices.Contains(jobs, "changes") {
+		t.Fatalf("ci.yml jobs %v lack result or changes", jobs)
+	}
+	for _, j := range jobs {
+		if j != "result" && !slices.Contains(needs["result"], j) {
+			t.Errorf("job %s is not in the needs of ci result", j)
+		}
+		if j != "result" && j != "changes" && j != "repo-checks" && !gated[j] {
+			t.Errorf("job %s is not gated on the changes job's code output", j)
+		}
+	}
+}
+
+func TestCIJobsParse(t *testing.T) {
+	wf := "on: push\njobs:\n  changes:\n    runs-on: x\n  check:\n    needs: changes\n    if: needs.changes.outputs.code == 'true'\n" +
+		"  result:\n    needs: [changes, check]\n    if: always()\n"
+	jobs, needs, gated := ciJobs([]byte(wf))
+	if !slices.Equal(jobs, []string{"changes", "check", "result"}) || !slices.Equal(needs["result"], []string{"changes", "check"}) ||
+		!slices.Equal(needs["check"], []string{"changes"}) || !gated["check"] || gated["result"] {
+		t.Fatalf("ciJobs = %v, %v, %v", jobs, needs, gated)
 	}
 }
