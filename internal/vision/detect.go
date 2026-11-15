@@ -51,7 +51,8 @@ func (c *detectCluster) mod() float64 { return c.module / float64(c.hits) }
 // pixels wide for the finder signature along rows, confirms each hit along its column, groups the
 // hits, chooses the four groups (three normal, one inverted) that form a plausible quad, and
 // refines each centre at full resolution. Given the previous capture's quad it first scans only
-// around its finders, and falls back to the whole capture.
+// around its finders, and falls back to the whole capture. When the whole capture yields no quad
+// and it was downscaled, it scans once more one step finer.
 func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
 	v, ok := geomView(f)
 	if !ok {
@@ -73,6 +74,15 @@ func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
 			return q, true
 		}
 	}
+	d.clusters = d.clusters[:0]
+	d.scan(0, 0, d.sw, d.sh)
+	if q, ok := d.choose(&v, s); ok || s == 1 {
+		return q, ok
+	}
+	// A far finder at 25 degrees of tilt can measure under 3 pixels per module after downscaling;
+	// one finer scan catches it.
+	s--
+	d.downscale(&v, s)
 	d.clusters = d.clusters[:0]
 	d.scan(0, 0, d.sw, d.sh)
 	return d.choose(&v, s)
@@ -338,25 +348,26 @@ func detectVerify(v *geomLuma, s int, cs []*detectCluster, n int) []*detectClust
 		}
 		p, m, ok := detectRefine(v, c.centre().mul(float64(s)), c.mod()*float64(s), c.inv)
 		if ok {
-			c.at, c.chord, c.fm = p, m, c.mod()*float64(s)
+			// The shortest chord underestimates a foreshortened module and the row and column
+			// chords overestimate a rotated one (by up to sqrt 2); their geometric mean errs less.
+			c.at, c.chord, c.fm = p, m, math.Sqrt(c.mod()*float64(s)*m)
 			out = append(out, c)
 		}
 	}
 	return out
 }
 
-// detectSizes reports whether two candidates' module sizes agree within a factor of 2.5: at 25
-// degrees of tilt the near finders' modules measure up to twice the far ones'.
+// detectSizes reports whether two candidates' module sizes agree within a factor of 3: at 25
+// degrees of tilt the near finders' modules measure about twice the far ones'.
 func detectSizes(a, b *detectCluster) bool {
-	ma, mb := a.mod(), b.mod()
-	return ma <= 2.5*mb && mb <= 2.5*ma
+	return a.fm <= 3*b.fm && b.fm <= 3*a.fm
 }
 
 // detectScore scores four candidates (top-left, top-right, bottom-left, bottom-right) as a quad:
 // it must be convex, in clockwise order on the image (top-left, top-right, bottom-right,
 // bottom-left), nearly a parallelogram, with sides of at least detectMinSides modules, and its
 // left and right sides must each measure 126 modules (FORMAT.md section 4: Dy = 126 Uy) within a
-// factor of 4/3, measured in the mean module of their ends. The score is the total number of hits.
+// factor of 1/0.65, measured in the mean module of their ends. The score is the total number of hits.
 func detectScore(q [4]*detectCluster) (float64, bool) {
 	tl, tr, bl, br := q[0].at, q[1].at, q[2].at, q[3].at
 	m := (q[0].fm + q[1].fm + q[2].fm + q[3].fm) / 4
@@ -370,7 +381,7 @@ func detectScore(q [4]*detectCluster) (float64, bool) {
 	for _, s := range [2][2]int{{0, 2}, {1, 3}} {
 		a, b := q[s[0]], q[s[1]]
 		n := a.at.sub(b.at).norm() / ((a.fm + b.fm) / 2)
-		if n < 126*0.75 || n > 126/0.75 {
+		if n < 126*0.65 || n > 126/0.65 {
 			return 0, false
 		}
 	}

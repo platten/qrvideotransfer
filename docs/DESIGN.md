@@ -520,8 +520,11 @@ For each capture:
    concentric squares crosses them in the same ratios), and each candidate's ring is verified at full
    resolution, where its centre is refined from the ring's edges along seven rows and seven columns.
    Random data cells produce finder-like hits with as many row hits as a real finder, so the four are
-   chosen as a convex quad in clockwise order on the image, with module sizes within a factor of 2.5
-   (25 degrees of tilt gives nearly 2) and left and right sides of 126 modules within a factor of 4/3.
+   chosen as a convex quad in clockwise order on the image, with module sizes within a factor of 3
+   (25 degrees of tilt gives about 2) and left and right sides of 126 modules within a factor of
+   1/0.65. At 25 degrees a far finder can measure under 3 pixels per module at 1280 pixels wide (3 of
+   1,000 simulated 4K poses lost it), so when no quad is found in a downscaled capture the scan is
+   repeated once one step finer (1920 pixels wide for 4K).
    Clockwise order assumes a capture that is not mirrored; a mirrored capture swaps the top-right and
    bottom-left finders and its header does not decode.
 2. **Read the header.** Fit a homography to the four finder centres and sample the header slots at their
@@ -1493,4 +1496,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 12's worker progress message carries the input's bytes and reads and the time from readiness to the first read, for the breakdown a time-bound error carries (protocol version 2) |
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 17 says the test, race and coverage tasks run `internal/video` on its own after the other packages, and why (the cap and the watchdog are properties of one process on a machine other test binaries are not oversubscribing), with the cost on macos-26-intel (+5 min 32 s over the coverage and race steps, 6 min 42 s left under the race step's timeout) |
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
-| 2026-11-15 | M2 Geometry: section 10, steps 1 to 4, records what was built: the midrange binarisation, diagonal and full-resolution checks and quad rules of the detector, and that it assumes a capture that is not mirrored; radial distortion with k1 chosen by slot contrast for the header, the finder references, and which pairs are tried; the order, refinement, outlier rule and node spacing of the mesh and its cell coordinates; and what the sampler calls saturated |
+| 2026-11-15 | M2 Geometry: section 10, steps 1 to 4, records what was built: the midrange binarisation, diagonal and full-resolution checks and quad rules of the detector, its one finer rescan when the 1280-pixel scan finds no quad (measured: 3 of 1,000 poses at 25 degrees of tilt), and that it assumes a capture that is not mirrored; radial distortion with k1 chosen by slot contrast for the header, the finder references, and which pairs are tried; the order, refinement, outlier rule and node spacing of the mesh and its cell coordinates; and what the sampler calls saturated |
