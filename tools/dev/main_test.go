@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -51,6 +53,42 @@ func TestVulncheckRuns(t *testing.T) {
 	}
 	if toolNamed("govulncheck").pkg != "golang.org/x/vuln/cmd/govulncheck@v1.9.0" {
 		t.Error("govulncheck is not pinned to v1.9.0")
+	}
+}
+
+// TestIsolatedRuns: the packages run in two go test invocations, every package but internal/video
+// first and internal/video on its own after them, with the same arguments.
+func TestIsolatedRuns(t *testing.T) {
+	pkgs := []string{module, module + "/internal/fec", module + "/internal/video", module + "/internal/payload"}
+	got := isolatedRuns([]string{"test", "-race", "./..."}, pkgs)
+	want := [][]string{
+		{"test", "-race", module, module + "/internal/fec", module + "/internal/payload"},
+		{"test", "-race", "./internal/video/..."},
+	}
+	if len(got) != 2 || !slices.Equal(got[0], want[0]) || !slices.Equal(got[1], want[1]) {
+		t.Errorf("isolatedRuns = %q, want %q", got, want)
+	}
+	// Arguments that do not end in ./... are run as they are.
+	if got := isolatedRuns([]string{"test", "./internal/fec"}, pkgs); len(got) != 1 || got[0][1] != "./internal/fec" {
+		t.Errorf("isolatedRuns of one package = %q", got)
+	}
+}
+
+// TestMergeProfiles: two coverage profiles become one, with a single mode line.
+func TestMergeProfiles(t *testing.T) {
+	dir := t.TempDir()
+	a, b, out := filepath.Join(dir, "a"), filepath.Join(dir, "b"), filepath.Join(dir, "out")
+	_ = os.WriteFile(a, []byte("mode: set\nx.go:1.1,2.2 1 1\n"), 0o600)
+	_ = os.WriteFile(b, []byte("mode: set\ny.go:1.1,2.2 1 0\n"), 0o600)
+	if err := mergeProfiles(out, a, b); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(out)
+	if string(got) != "mode: set\nx.go:1.1,2.2 1 1\ny.go:1.1,2.2 1 0\n" {
+		t.Errorf("merged %q", got)
+	}
+	if err := mergeProfiles(out, filepath.Join(dir, "missing")); err == nil {
+		t.Error("a missing profile was merged")
 	}
 }
 

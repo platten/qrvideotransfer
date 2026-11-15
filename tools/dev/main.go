@@ -367,3 +367,9 @@ func fuzz(args []string) error {
 	fmt.Printf("fuzzed %d targets for %s each\n", n, d)
 	return nil
 }
+
+// isolatedRuns is a stub for the test commit.
+func isolatedRuns(args, _ []string) [][]string { return [][]string{args} }
+
+// mergeProfiles is a stub for the test commit.
+func mergeProfiles(string, ...string) error { return nil }
