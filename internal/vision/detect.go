@@ -40,6 +40,7 @@ type FinderDetector struct {
 	clusters []detectCluster
 	layout   *frame.Layout // of the last decoded header's grid
 	built    bool          // a layout was built during this Detect
+	hidden   int           // the corner the last located quad predicted, or -1 with four in view
 }
 
 var _ Detector = (*FinderDetector)(nil)
@@ -67,7 +68,7 @@ func (c *detectCluster) mod() float64 { return c.module / float64(c.hits) }
 // capture. When the whole capture yields no quad and it was downscaled, it scans once more one
 // step finer.
 func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
-	d.built = false
+	d.built, d.hidden = false, -1
 	v, ok := geomView(f)
 	if !ok {
 		return Quad{}, false

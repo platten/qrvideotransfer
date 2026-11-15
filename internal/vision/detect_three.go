@@ -96,6 +96,7 @@ func (d *FinderDetector) three(f *video.Frame, v *geomLuma, normal, inverted []*
 		}
 		q.Module = t.q[t.missing].chord
 		if q, ok := d.confirmThree(f, v, q, t.missing); ok {
+			d.hidden = t.missing
 			return q, true
 		}
 	}
