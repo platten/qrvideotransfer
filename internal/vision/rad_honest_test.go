@@ -123,9 +123,9 @@ func (c *calTable) String() string {
 
 // calibrate runs the radiometry chain on every capture and records each credited soft bit against
 // the bit its true frame carried. It returns the table and the number of credited cells.
-func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (tab, mixedTab *calTable, cells int) {
+func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (tab, cleanTab, mixedTab *calTable, cells int) {
 	t.Helper()
-	tab, mixedTab = &calTable{}, &calTable{}
+	tab, cleanTab, mixedTab = &calTable{}, &calTable{}, &calTable{}
 	b := s.mod.BitsPerCell()
 	soft := make([]int8, len(s.layout.DataCells())*b)
 	for _, rc := range caps {
@@ -151,13 +151,15 @@ func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (
 					tab.add(soft[i*b+k], symbolBit(s.symbols[fr][i], b, k))
 					if tw < 0.999 {
 						mixedTab.add(soft[i*b+k], symbolBit(s.symbols[fr][i], b, k))
+					} else {
+						cleanTab.add(soft[i*b+k], symbolBit(s.symbols[fr][i], b, k))
 					}
 				}
 			}
 		}
 	}
 	t.Logf("of which credited cells that are not wholly one frame (true weight below 0.999):\n%s", mixedTab)
-	return tab, mixedTab, cells
+	return tab, cleanTab, mixedTab, cells
 }
 
 // TestHonestConfidence is the honest-confidence assertion of DESIGN.md section 15 on `tripod` and
@@ -191,13 +193,13 @@ func TestHonestConfidence(t *testing.T) {
 	for _, mod := range mods {
 		s := newRadSession(t, grid[0], grid[1], pitch, mod, 8, 0x40+uint64(mod), false)
 		for pi, name := range []string{"tripod", "handheld"} {
-			total, totalMixed := &calTable{}, &calTable{}
+			total, totalClean, totalMixed := &calTable{}, &calTable{}, &calTable{}
 			for vi, v := range variants {
 				t.Run(fmt.Sprintf("%s/%s/%s", s.mod.Name(), name, v.name), func(t *testing.T) {
 					c := preset(t, name, cw, ch)
 					v.edit(&c)
 					caps := s.shoot(t, c, time.Second/30, ncap, uint64(1000*pi+10*vi)+uint64(mod))
-					tab, mixed, cells := s.calibrate(t, caps, false)
+					tab, clean, mixed, cells := s.calibrate(t, caps, false)
 					if cells == 0 {
 						t.Fatal("no cell credited")
 					}
@@ -207,6 +209,7 @@ func TestHonestConfidence(t *testing.T) {
 					}
 					total.merge(tab)
 					totalMixed.merge(mixed)
+					totalClean.merge(clean)
 				})
 			}
 			// Pooled over the variants, the buckets are larger and the test stricter.
@@ -214,8 +217,13 @@ func TestHonestConfidence(t *testing.T) {
 			for _, e := range total.checkPooled() {
 				t.Errorf("%s %s pooled: %s", s.mod.Name(), name, e)
 			}
-			// The credited cells that hold some of another frame are where the variance widening
-			// of SoftBits acts; they must be honest on their own too.
+			// Clean cells and the credited cells that hold some of another frame (where the
+			// variance widening of SoftBits acts) must each be honest on their own, so that errors
+			// in opposite directions cannot cancel in the pooled table.
+			t.Logf("%s %s, all variants, credited cells wholly one frame:\n%s", s.mod.Name(), name, totalClean)
+			for _, e := range totalClean.checkPooled() {
+				t.Errorf("%s %s pooled, clean cells: %s", s.mod.Name(), name, e)
+			}
 			t.Logf("%s %s, all variants, credited cells not wholly one frame:\n%s", s.mod.Name(), name, totalMixed)
 			for _, e := range totalMixed.checkPooled() {
 				t.Errorf("%s %s pooled, partly mixed cells: %s", s.mod.Name(), name, e)
