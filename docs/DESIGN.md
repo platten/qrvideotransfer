@@ -175,7 +175,7 @@ At 1080p (480 x 270 cells):
 | Element | Purpose | Share |
 | --- | --- | --- |
 | Mid-grey border, 2 cells | Separates the code from the bezel and player controls without biasing exposure | 2.3% |
-| Four finders, 14 x 14 cells plus separator | Concentric squares giving a 1:1:3:1:1 signature at any scale or angle. The bottom-right one is inverted to fix rotation and mirroring | 0.8% |
+| Four finders, 14 x 14 cells plus separator | Concentric squares giving a 1:1:3:1:1 signature at any scale or angle. The bottom-right one is inverted to fix rotation; a decoder assumes the capture is not mirrored | 0.8% |
 | Four header copies, 59 x 4 slots of 2 x 2 cells | Frame identity. Four copies because a capture can show two code frames at once | 2.9% |
 | Four palette strips, 8 patches | A reference patch for every level | 0.4% |
 | 131 anchors every 32 x 30 cells | A checker corner for sub-pixel geometry and a four-quadrant phase marker | 3.2% |
@@ -522,11 +522,15 @@ For each capture:
    Random data cells produce finder-like hits with as many row hits as a real finder, so the four are
    chosen as a convex quad in clockwise order on the image, with module sizes within a factor of 3
    (25 degrees of tilt gives about 2) and left and right sides of 126 modules within a factor of
-   1/0.65. At 25 degrees a far finder can measure under 3 pixels per module at 1280 pixels wide (3 of
-   1,000 simulated 4K poses lost it), so when no quad is found in a downscaled capture the scan is
-   repeated once one step finer (1920 pixels wide for 4K).
-   Clockwise order assumes a capture that is not mirrored; a mirrored capture swaps the top-right and
-   bottom-left finders and its header does not decode.
+   1/0.65.
+   **Departure from "at most 1280 pixels wide", accepted:** when no quad is found in a downscaled
+   capture, the scan is repeated once one step finer (1920 pixels wide for 4K). At 25 degrees of tilt
+   a far finder can measure under 3 pixels per module at 1280 pixels wide. On 1,000 simulated 4K poses
+   of the handheld preset tilted up to 25 degrees (seeds 10000 to 10999), the 1280-pixel scan alone
+   found 997 quads; with the rescan, 1,000. Tripod and handheld found 1,000 of 1,000 either way.
+   Clockwise order assumes a capture that is not mirrored (section 4.1 of FORMAT.md); a mirrored
+   capture swaps the top-right and bottom-left finders and its header does not decode. Mirrored
+   recordings are left to M5.
 2. **Read the header.** Fit a homography to the four finder centres and sample the header slots at their
    fixed fractions, using the adjacent finder's black and white as references. Soft Viterbi decoding per
    copy, then per pair, then all four.
@@ -563,7 +567,7 @@ For each capture:
 
 | Distortion | Handled by |
 | --- | --- |
-| Perspective, rotation, mirroring | Finders and homography |
+| Perspective, rotation | Finders and homography (the capture is assumed not to be mirrored) |
 | Lens distortion, shake, stabilisation warping | Anchor mesh, refitted for every capture |
 | Moire, backlight flicker | Footprint averaging, scrambling, stripe cancellation |
 | Exposure, white balance, tone mapping, vignetting | Per-tile level calibration |
@@ -1499,3 +1503,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
 | 2026-11-15 | M2 open risks: section 12's worker progress message also carries the time from readiness to the worker's linear memory being reserved and to its input being opened; commit 0f2f4fc added these two fields in M1 stream D and raised the protocol to version 3, which the code ships (`protocolVersion`), and no row recorded it (review of PR #26, L1; the row above for version 2 is correct for commit cec1dc3) |
 | 2026-11-15 | M2 Geometry: section 10, steps 1 to 4, records what was built: the midrange binarisation, diagonal and full-resolution checks and quad rules of the detector, its one finer rescan when the 1280-pixel scan finds no quad (measured: 3 of 1,000 poses at 25 degrees of tilt), and that it assumes a capture that is not mirrored; radial distortion with k1 chosen by slot contrast for the header, the finder references, and which pairs are tried; the order, refinement, outlier rule and node spacing of the mesh and its cell coordinates; and what the sampler calls saturated |
+| 2026-11-15 | M2 Geometry, designer ruling on PR #30: section 6 and section 10's distortion table no longer claim that mirroring is handled; a decoder assumes the capture is not mirrored (FORMAT.md section 4.1), and mirrored recordings are left to M5. Section 10 step 1 records the accepted departure from "at most 1280 pixels wide" (one rescan one step finer when no quad is found) with its evidence: 997 of 1,000 simulated 4K poses at up to 25 degrees of tilt found by the 1280-pixel scan alone, 1,000 with the rescan |
