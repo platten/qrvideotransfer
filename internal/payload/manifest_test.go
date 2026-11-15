@@ -95,9 +95,9 @@ func TestManifestRoundTrip(t *testing.T) {
 	want := `{"version":1,"entries":[{"path":"docs","type":"dir","mode":493,"mtime":"2026-11-13T10:00:00Z"},` +
 		`{"path":"docs/a.txt","type":"file","size":1234,"mode":420,"mtime":"2026-11-13T10:00:00Z","sha256":"2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"},` +
 		`{"path":"e<&>\"q","type":"file","size":0,"mode":384,"mtime":"2026-11-13T11:00:00Z","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}]}`
-	b := MarshalManifest(es)
-	if string(b) != want {
-		t.Fatalf("MarshalManifest =\n%s\nwant\n%s", b, want)
+	b, err := MarshalManifest(es)
+	if err != nil || string(b) != want {
+		t.Fatalf("MarshalManifest = %v\n%s\nwant\n%s", err, b, want)
 	}
 	got, err := ParseManifest(b)
 	if err != nil {
@@ -115,7 +115,7 @@ func TestManifestRoundTrip(t *testing.T) {
 			t.Fatalf("entry %d = %+v, want %+v", i, got[i], es[i])
 		}
 	}
-	if !bytes.Equal(MarshalManifest(got), b) {
+	if !bytes.Equal(marshal(got), b) {
 		t.Fatal("re-marshalled manifest differs")
 	}
 	if es, err := ParseManifest([]byte(`{"entries":[],"version":1}`)); err != nil || len(es) != 0 {
@@ -221,7 +221,7 @@ func TestManifestByteLimit(t *testing.T) {
 }
 
 func FuzzManifest(f *testing.F) {
-	f.Add(MarshalManifest([]Entry{entry("a", true), {Path: "a/b", Size: 3, Mode: 0o644, MTime: testTime}}))
+	f.Add(marshal([]Entry{entry("a", true), {Path: "a/b", Size: 3, Mode: 0o644, MTime: testTime}}))
 	f.Add([]byte(`{"version":1,"entries":[]}`))
 	f.Add([]byte(`{"version":1,"entries":[{"path":"A","type":"dir","mode":1,"mtime":"2026-11-13T10:00:00+01:00"}]}`))
 	f.Fuzz(func(t *testing.T, b []byte) {
@@ -240,9 +240,16 @@ func FuzzManifest(f *testing.F) {
 		if ValidateManifest(es, DefaultMaxSize) != nil {
 			return
 		}
-		again, err := ParseManifest(MarshalManifest(es))
+		m, err := MarshalManifest(es)
+		if err != nil {
+			t.Fatalf("MarshalManifest refused what ParseManifest and ValidateManifest accept: %v", err)
+		}
+		again, err := ParseManifest(m)
 		if err != nil || len(again) != len(es) {
 			t.Fatalf("re-parse: %v", err)
+		}
+		if m2, err := MarshalManifest(again); err != nil || !bytes.Equal(m2, m) {
+			t.Fatalf("re-marshal: %v\n%s\n%s", err, m2, m)
 		}
 	})
 }

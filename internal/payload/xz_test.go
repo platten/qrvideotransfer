@@ -356,7 +356,7 @@ func chunkShort(t *testing.T, good []byte) []byte {
 func xzDesync(t *testing.T) []byte {
 	t.Helper()
 	es := []tarEntry{fileHdr("a", "content")}
-	a := archive(t, MarshalManifest(manifestFor(es...)), es...)
+	a := archive(t, marshal(manifestFor(es...)), es...)
 	good := xzOf(t, a, 0)
 	hs := (int(good[12]) + 1) * 4
 	h1 := good[12 : 12+hs]
@@ -396,7 +396,7 @@ func xzDesync(t *testing.T) []byte {
 // library allocated when it parsed the smuggled block header.
 func TestXZDesync(t *testing.T) {
 	es := []tarEntry{fileHdr("a", "content")}
-	a := archive(t, MarshalManifest(manifestFor(es...)), es...)
+	a := archive(t, marshal(manifestFor(es...)), es...)
 	h := Header{Method: MethodXZ, ArchiveLen: int64(len(a))}
 	var err error
 	stream := rawWithHeader(h, xzDesync(t))

@@ -211,3 +211,12 @@ func expectEmpty(tb testing.TB, dir string) {
 }
 
 func isWindows() bool { return runtime.GOOS == "windows" }
+
+// marshal returns MarshalManifest(es) and panics on an error, which no test manifest should give.
+func marshal(es []Entry) []byte {
+	b, err := MarshalManifest(es)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}

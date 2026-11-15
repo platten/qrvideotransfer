@@ -29,7 +29,7 @@ func (e Entry) perm() uint32 { return e.Mode & 0o777 }
 
 // MarshalManifest encodes entries as the manifest an encoder writes: keys in the order of FORMAT.md
 // section 12, no whitespace, mode limited to the low nine bits, mtime in whole seconds UTC.
-func MarshalManifest(entries []Entry) []byte {
+func MarshalManifest(entries []Entry) ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteString(`{"version":1,"entries":[`)
 	for i, e := range entries {
@@ -57,7 +57,13 @@ func MarshalManifest(entries []Entry) []byte {
 		b.WriteByte('}')
 	}
 	b.WriteString(`]}`)
-	return b.Bytes()
+	return b.Bytes(), nil
+}
+
+// clampMTime returns t in whole seconds UTC, clamped to the range FORMAT.md section 12 allows, and
+// whether clamping changed it.
+func clampMTime(t time.Time) (time.Time, bool) {
+	return t.UTC().Truncate(time.Second), false // stub
 }
 
 // writeString writes s as a JSON string without HTML escaping.
