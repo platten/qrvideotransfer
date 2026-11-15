@@ -333,7 +333,8 @@ func fuzzTags(release string) string {
 	return release + ",unsandboxedhevc"
 }
 
-// fuzz runs every Fuzz target of the module, one at a time, built with fuzzTags.
+// fuzz runs every Fuzz target of the module, one at a time, built with fuzzTags. A target that fails
+// does not stop the others; the task fails at the end, listing every failure.
 func fuzz(args []string) error {
 	fs := newFlags("fuzz")
 	d := fs.Duration("time", 10*time.Second, "fuzzing time per target")
@@ -347,28 +348,53 @@ func fuzz(args []string) error {
 	if err != nil {
 		return fmt.Errorf("listing fuzz targets: %w", err)
 	}
-	var names []string
-	n := 0
-	for line := range strings.Lines(string(out)) {
+	ts := fuzzTargets(string(out))
+	err = fuzzAll(ts, func(t fuzzTarget) error {
+		return run([]string{"CGO_ENABLED=0"}, "go", goTest(tags, "-run", "^$", "-fuzz", "^"+t.name+"$", "-fuzztime", d.String(), t.pkg)...)
+	})
+	fmt.Printf("fuzzed %d targets for %s each\n", len(ts), d)
+	return err
+}
+
+// fuzzTarget is one Fuzz function and its package.
+type fuzzTarget struct{ pkg, name string }
+
+// fuzzTargets parses the output of `go test -list ^Fuzz ./...`: each package's Fuzz names, then its
+// "ok" line. Packages under spikes/ are left out.
+func fuzzTargets(list string) []fuzzTarget {
+	var (
+		ts    []fuzzTarget
+		names []string
+	)
+	for line := range strings.Lines(list) {
 		f := strings.Fields(line)
 		switch {
 		case len(f) == 1 && strings.HasPrefix(f[0], "Fuzz"):
 			names = append(names, f[0])
 		case len(f) >= 2 && f[0] == "ok":
-			for _, name := range names {
-				if strings.HasPrefix(f[1], "github.com/platten/qrvideotransfer/spikes/") {
-					continue
-				}
-				n++
-				env := []string{"CGO_ENABLED=0"}
-				if err := run(env, "go", goTest(tags, "-run", "^$", "-fuzz", "^"+name+"$", "-fuzztime", d.String(), f[1])...); err != nil {
-					return err
+			if !strings.HasPrefix(f[1], module+"/spikes/") {
+				for _, name := range names {
+					ts = append(ts, fuzzTarget{f[1], name})
 				}
 			}
 			names = nil
 		}
 	}
-	fmt.Printf("fuzzed %d targets for %s each\n", n, d)
+	return ts
+}
+
+// fuzzAll calls fuzzOne for every target in turn, whatever the earlier ones returned, and returns
+// an error listing every target that failed, so that one finding does not hide another.
+func fuzzAll(ts []fuzzTarget, fuzzOne func(fuzzTarget) error) error {
+	var failed []string
+	for _, t := range ts {
+		if err := fuzzOne(t); err != nil {
+			failed = append(failed, fmt.Sprintf("\n\t%s %s: %v", t.pkg, t.name, err))
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d fuzz targets failed:%s", len(failed), len(ts), strings.Join(failed, ""))
+	}
 	return nil
 }
 

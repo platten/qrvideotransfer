@@ -497,7 +497,7 @@ func TestLimits(t *testing.T) {
 		expectEmpty(t, out)
 	})
 	t.Run("unpacked size default", func(t *testing.T) {
-		m := MarshalManifest([]Entry{{Path: "big", Size: DefaultMaxSize + 1, Mode: 0o644, MTime: testTime}})
+		m := marshal([]Entry{{Path: "big", Size: DefaultMaxSize + 1, Mode: 0o644, MTime: testTime}})
 		out := t.TempDir()
 		_, err := unpack(rawStream(archive(t, m)), UnpackOptions{OutputDir: out})
 		var l *LimitError
@@ -508,7 +508,7 @@ func TestLimits(t *testing.T) {
 	})
 	t.Run("unpacked size", func(t *testing.T) {
 		es := []tarEntry{fileHdr("a", "12345"), fileHdr("b", "123456")}
-		a := archive(t, MarshalManifest(manifestFor(es...)), es...)
+		a := archive(t, marshal(manifestFor(es...)), es...)
 		out := t.TempDir()
 		_, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out, MaxSize: 10})
 		if !isLimit("unpacked size")(err) {
@@ -529,7 +529,7 @@ func TestLimits(t *testing.T) {
 	})
 	t.Run("decompresses past its length", func(t *testing.T) {
 		es := []tarEntry{fileHdr("a", "content")}
-		a := archive(t, MarshalManifest(manifestFor(es...)), es...)
+		a := archive(t, marshal(manifestFor(es...)), es...)
 		for _, comp := range []Compression{CompressNone, CompressZstd, CompressXZ} {
 			body := compressForTest(t, comp, a)
 			h := Header{Method: methodOf(comp), ArchiveLen: int64(len(a)) - 1}
@@ -564,7 +564,7 @@ func compressForTest(t *testing.T, c Compression, a []byte) []byte {
 
 func TestCorruptCompressedBody(t *testing.T) {
 	es := []tarEntry{fileHdr("a", strings.Repeat("content ", 1000))}
-	a := archive(t, MarshalManifest(manifestFor(es...)), es...)
+	a := archive(t, marshal(manifestFor(es...)), es...)
 	for _, comp := range []Compression{CompressZstd, CompressXZ} {
 		body := compressForTest(t, comp, a)
 		body[len(body)/2] ^= 0xff
@@ -616,7 +616,7 @@ func TestArchiveRejects(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			a := archive(t, MarshalManifest(c.manifest), c.tar...)
+			a := archive(t, marshal(c.manifest), c.tar...)
 			out := t.TempDir()
 			_, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out})
 			if !isUnsafe(err) {
@@ -630,7 +630,7 @@ func TestArchiveRejects(t *testing.T) {
 		"no manifest length": {0, 0},
 		"manifest past end":  {0, 0, 1, 0, '{'},
 		"bad manifest":       archive(t, []byte(`{"version":1}`)),
-		"bad tar":            append(archive(t, MarshalManifest(manifestFor(f)))[:4+len(MarshalManifest(manifestFor(f)))], bytes.Repeat([]byte{1}, 1024)...),
+		"bad tar":            append(archive(t, marshal(manifestFor(f)))[:4+len(marshal(manifestFor(f)))], bytes.Repeat([]byte{1}, 1024)...),
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := t.TempDir()
@@ -645,7 +645,7 @@ func TestArchiveRejects(t *testing.T) {
 
 func TestTarDirNameWithoutSlash(t *testing.T) {
 	d := tarEntry{tar.Header{Typeflag: tar.TypeDir, Name: "d", Mode: 0o755, ModTime: testTime}, ""}
-	a := archive(t, MarshalManifest(manifestFor(dirHdr("d"))), d)
+	a := archive(t, marshal(manifestFor(dirHdr("d"))), d)
 	out := t.TempDir()
 	if _, err := unpackArchive(context.Background(), bytes.NewReader(a), int64(len(a)), UnpackOptions{OutputDir: out}); err != nil {
 		t.Fatal(err)

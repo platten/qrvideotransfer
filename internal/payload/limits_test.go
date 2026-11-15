@@ -24,7 +24,7 @@ func flatManifest(n, width int) []Entry {
 // manifestOnly returns archive bytes holding the manifest of es and an empty tar: a decoder that
 // accepts the manifest stops at the first missing tar entry, before extracting anything.
 func manifestOnly(es []Entry) []byte {
-	m := MarshalManifest(es)
+	m := marshal(es)
 	var b bytes.Buffer
 	_ = binary.Write(&b, binary.BigEndian, uint32(len(m)))
 	b.Write(m)
@@ -86,7 +86,7 @@ func TestDefaultEntryLimit(t *testing.T) {
 	if err := run(a, UnpackOptions{OutputDir: out, MaxEntries: 3 * DefaultMaxEntries}); !isUnsafe(err) {
 		t.Fatalf("raised: %v", err)
 	}
-	m := MarshalManifest(flatManifest(11, 0))
+	m := marshal(flatManifest(11, 0))
 	_, err := parseManifest(m, limits{10, MaxManifestBytes})
 	if l := limitErr(err); l == nil || l.Limit != "manifest entries" || l.Max != 10 || l.Flag != "--max-entries" {
 		t.Fatalf("11 entries over a limit of 10: %v", err)
@@ -173,19 +173,19 @@ func TestReceiverWarning(t *testing.T) {
 // exactManifest returns manifest entries whose manifest is exactly size bytes.
 func exactManifest(t *testing.T, size int) []Entry {
 	t.Helper()
-	empty := len(MarshalManifest(nil))
+	empty := len(marshal(nil))
 	one := func(name string) int {
-		return len(MarshalManifest([]Entry{{Path: name, Mode: 0o644, MTime: testTime}})) - empty
+		return len(marshal([]Entry{{Path: name, Mode: 0o644, MTime: testTime}})) - empty
 	}
 	per := one(fmt.Sprintf("f%07d", 0)+strings.Repeat("x", 92)) + 1 // with its comma
 	es := flatManifest((size-empty-200)/per, 100)
-	r := size - len(MarshalManifest(es)) - 1 // the last entry's bytes, without its comma
+	r := size - len(marshal(es)) - 1 // the last entry's bytes, without its comma
 	if r-one("g") > 254 {
 		es = append(es, flatManifest(len(es)+1, 100)[len(es)])
 		r -= per
 	}
 	es = append(es, Entry{Path: "g" + strings.Repeat("y", r-one("g")), Mode: 0o644, MTime: testTime})
-	if n := len(MarshalManifest(es)); n != size {
+	if n := len(marshal(es)); n != size {
 		t.Fatalf("manifest of %d bytes, want %d", n, size)
 	}
 	return es

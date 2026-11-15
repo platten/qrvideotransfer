@@ -27,7 +27,7 @@ import (
 // stays linear at any depth, and no decoder accepts such a manifest.
 func extractDeep(tb testing.TB, files, folders int, overwrites ...bool) {
 	tes := deepManifest(files, folders)
-	a := archive(tb, MarshalManifest(manifestFor(tes...)), tes...)
+	a := archive(tb, marshal(manifestFor(tes...)), tes...)
 	out := tb.TempDir()
 	for _, overwrite := range append([]bool{false}, overwrites...) {
 		if folders < maxComponents {
@@ -85,7 +85,7 @@ func BenchmarkExtractDeep(b *testing.B) {
 	for _, c := range []struct{ files, depth int }{{50, 15}, {50, 63}, {500, 15}, {500, 63}} {
 		b.Run(fmt.Sprintf("files=%d/components=%d", c.files, c.depth+1), func(b *testing.B) {
 			tes := deepManifest(c.files, c.depth)
-			a := archive(b, MarshalManifest(manifestFor(tes...)), tes...)
+			a := archive(b, marshal(manifestFor(tes...)), tes...)
 			b.StopTimer() // only the extraction is timed
 			for range b.N {
 				out := b.TempDir()
@@ -112,15 +112,15 @@ func worstCase(wide bool, lim limits) []Entry {
 			p += "/"
 		}
 	}
-	size := len(MarshalManifest(es))
-	empty := len(MarshalManifest(nil))
+	size := len(marshal(es))
+	empty := len(marshal(nil))
 	for n := int64(0); int64(len(es)) < lim.entries; n++ {
 		name := strconv.FormatInt(n, 36)
 		if pathRule(name) != "" {
 			continue
 		}
 		e := Entry{Path: p + name, Mode: 0o644, MTime: testTime, SHA256: sha256.Sum256(nil)}
-		k := len(MarshalManifest([]Entry{e})) - empty + 1 // with its comma
+		k := len(marshal([]Entry{e})) - empty + 1 // with its comma
 		if int64(size+k) > lim.bytes {
 			break
 		}
@@ -134,7 +134,7 @@ func archiveFile(tb testing.TB, entries []Entry) (*os.File, int64) {
 	f, err := os.Create(filepath.Join(tb.TempDir(), "archive"))
 	must(tb, err)
 	tb.Cleanup(func() { _ = f.Close() })
-	m := MarshalManifest(entries)
+	m := marshal(entries)
 	w := bufio.NewWriter(f)
 	must(tb, binary.Write(w, binary.BigEndian, uint32(len(m))))
 	_, err = w.Write(m)
