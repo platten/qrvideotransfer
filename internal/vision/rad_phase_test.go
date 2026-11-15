@@ -110,13 +110,12 @@ func boundaryAngle(s *radSession, rc *radCapture) (float64, bool) {
 	return a, true
 }
 
-// maxPhaseErr is the largest phase weight error allowed at an inner cell. DESIGN.md section 15
-// asked for 0.05, which is not met: the long version measured up to 0.082 (handheld, panel scanning
-// left to right, screen rolled 60 degrees) and above 0.05 in 9 of its 24 cases, chiefly where the
-// panel and the camera scan in opposite directions and a boundary's blend spans only about three
-// lattice steps. DESIGN.md records it in section 15 and its change log; the bound here guards
-// against regressions until the estimator is improved.
-const maxPhaseErr = 0.09
+// maxPhaseErr is the largest phase weight error allowed at an inner cell (DESIGN.md section 15).
+// It is not met: the long version measured up to 0.082, above 0.05 in 9 of its 24 cases, chiefly
+// where the panel and the camera scan in opposite directions or a blend lies beyond the anchors;
+// DESIGN.md records it in section 15 and its change log. The assertion is left failing, as an exit
+// test that could not be met.
+const maxPhaseErr = 0.05
 
 // TestPhaseWeights asserts DESIGN.md section 15 for frame mixing on `tripod` and `handheld` with
 // their 4K cameras filming a 480 x 270 grid (8 frames shown at 30 fps, camera 60 fps, fixed seeds),
