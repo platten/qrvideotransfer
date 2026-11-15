@@ -58,12 +58,15 @@ func probe(ctx context.Context, r runner, path string) (probeInfo, error) {
 	}
 	out := &capped{max: maxProbeOutput}
 	check := probeLimits(st.Size(), probeTime)
+	var pm *meter            // TEMPORARY measurement
 	if observeProbe != nil { // TEMPORARY measurement
 		inner := check
 		check = func(m *meter, active time.Duration) error { observeProbe(r, path, m, active); return inner(m, active) }
+		pm = &meter{}
+		defer observeProbe(r, path, pm, -1) // -1: the probe has ended
 	}
 	err = run(ctx, r, job{prog: "ffprobe", args: func(in, _ string) []string { return probeArgs(in) },
-		input: path, stdout: out, progress: progReads, check: check})
+		input: path, stdout: out, progress: progReads, check: check, meter: pm})
 	if errors.Is(err, ErrEngine) {
 		return probeInfo{}, fmt.Errorf("%w: %w", ErrInvalidVideo, err)
 	}

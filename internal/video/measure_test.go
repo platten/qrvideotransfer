@@ -31,10 +31,43 @@ func init() {
 			k := runnerKind(r) + " " + filepath.Base(path)
 			measured.Lock()
 			defer measured.Unlock()
+			if active < 0 { // the probe has ended: its phases
+				notePhases(k, m)
+				return
+			}
 			measured.probes[k] = max(measured.probes[k], active)
 			if active > measured.slowest {
 				measured.slowest, measured.detail = active, k+": "+m.breakdown(time.Now())
 			}
+		}
+	}
+}
+
+// phaseMax is the largest time seen for each phase of a probe, and the probe it was seen in.
+var phaseMax = map[string]struct {
+	d time.Duration
+	k string
+}{}
+
+// phaseNames are the phases, in order, as pairs of meter times.
+var phaseNames = []string{"start to ready", "ready to memory reserved", "memory reserved to input opened", "input opened to first read"}
+
+// notePhases records an ended probe's phases.
+func notePhases(k string, m *meter) {
+	ts := []int64{m.start.Load(), m.readyAt.Load(), m.memAt.Load(), m.openAt.Load(), m.firstIn.Load()}
+	for i, name := range phaseNames {
+		a, b := ts[i], ts[i+1]
+		if i == 2 && a == 0 { // in process: no reservation time; from readiness
+			a = ts[1]
+		}
+		if a == 0 || b == 0 {
+			continue
+		}
+		if d := time.Duration(b - a); d > phaseMax[name].d {
+			phaseMax[name] = struct {
+				d time.Duration
+				k string
+			}{d, k}
 		}
 	}
 }
@@ -99,5 +132,8 @@ func measureReport(code int) int {
 		fmt.Printf("MEASURE probe active %v: %s\n", measured.probes[k], k)
 	}
 	fmt.Printf("MEASURE slowest: %s\n", measured.detail)
+	for _, name := range phaseNames {
+		fmt.Printf("MEASURE phase max %s: %v (%s)\n", name, phaseMax[name].d, phaseMax[name].k)
+	}
 	return code
 }
