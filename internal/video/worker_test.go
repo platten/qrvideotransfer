@@ -147,6 +147,12 @@ func hostileWorker(mode string) int {
 		binary.BigEndian.PutUint64(b[32:], uint64(24*time.Hour))
 		_ = writeMsg(os.Stdout, msgProgress, b)
 		time.Sleep(time.Hour)
+	case "env": // fails if it sees QRVT_TEST_LEAK, a variable not on workerEnv's keep-list
+		rc := 0
+		if _, ok := os.LookupEnv("QRVT_TEST_LEAK"); ok {
+			rc = 1
+		}
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(rc, "QRVT_TEST_LEAK reached the worker"))
 	case "readyhang": // says it is ready, then hangs
 		_ = writeMsg(os.Stdout, msgReady, nil)
 		time.Sleep(time.Hour)
@@ -525,6 +531,22 @@ func TestWorkerStatusKeptWithoutReady(t *testing.T) {
 	_ = run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
 	if err := WorkerStatus(); err != nil {
 		t.Errorf("a worker reached ready: %v", err)
+	}
+}
+
+// TestWorkerEnvEmpty: a worker gets only the variables on workerEnv's keep-list, never the rest of
+// qrvt's environment (DESIGN.md section 12), also when none of the kept ones is set (an empty list,
+// not nil, which exec.Cmd would take for "inherit everything"). Not parallel: it sets a variable.
+func TestWorkerEnvEmpty(t *testing.T) {
+	t.Setenv("QRVT_TEST_LEAK", "1")
+	if workerEnv() == nil {
+		t.Error("workerEnv() is nil: the worker would inherit the whole environment")
+	}
+	p, _ := testWorkers(t, "env")
+	p.env = workerEnv()
+	err := run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+	if err != nil {
+		t.Errorf("worker environment: %v", err)
 	}
 }
 
