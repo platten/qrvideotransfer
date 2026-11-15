@@ -848,9 +848,11 @@ Costs a user should expect:
   while it spins the worker's own timers and goroutines cannot be trusted. The parent's kill is the
   control. Loading and compiling the engine, which on a first run
   of a slow machine takes longer than 30 s, is not a stall, nor is reserving the instance's 512 MiB:
-  the worker sends a ready message once the engine is loaded and reports the reservation in its next
-  progress message (within 200 ms; the parent never takes the reported time as later than the
-  message's arrival), both before any guest code runs; the watchdog counts from the reservation, and
+  the worker sends a ready message once the engine is loaded and reports the reservation in a
+  progress message sent by the goroutine that made it, both before any guest code runs (a periodic
+  report could be held back for good: once the guest spins, a garbage collection the reservation
+  started stops every other goroutine of the worker), and the parent never takes the reported time
+  as later than the message's arrival; the watchdog counts from the reservation, and
   the phase from the worker's start to it is bounded by `video.EngineLoadLimit`, 10 minutes, after
   which the worker is killed.
   Compiling in qrvt's own process is not a stall either and has no limit but the context. Measured on
@@ -1484,3 +1486,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 open risks: section 12's worker progress message also carries the time from readiness to the worker's linear memory being reserved and to its input being opened; commit 0f2f4fc added these two fields in M1 stream D and raised the protocol to version 3, which the code ships (`protocolVersion`), and no row recorded it (review of PR #26, L1; the row above for version 2 is correct for commit cec1dc3) |
 | 2026-11-15 | Stream G, CI budget: section 17 says a newer push to a pull request cancels its older `ci` and `codeql` runs, that runs on main, tags and schedules are never cancelled, and that the workflow policy test enforces this |
 | 2026-11-15 | Reservation stall fix: section 12 starts the stall clock when an instance's 512 MiB of linear memory has been reserved, on the worker and in-process paths; `EngineLoadLimit` now bounds the phase until the reservation (from a worker's start, or from an in-process instance's turn, after which the instance is cancelled); the worker reports the reservation in its progress message, clamped to the message's arrival. Prompted by two false stalls on macos-26-intel (CI run 43693218308) |
+| 2026-11-15 | Reservation stall fix, round 2: section 12 says the worker reports its reservation from the goroutine that made it, before any guest code runs, not in its periodic progress report, which a spinning guest can hold back for good by blocking the garbage collection the reservation starts (CI run 43704037510) |
