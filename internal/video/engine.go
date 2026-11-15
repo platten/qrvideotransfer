@@ -160,10 +160,6 @@ func EngineInstances() int { return cap(slots) }
 // exec implements runner. The instance sees the input file read-only through inputFS at /in, the
 // output directory at /out, and nothing else; it has no network.
 func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
-	if observeExec != nil { // TEMPORARY measurement
-		observeExec(j, false, 1)
-		defer observeExec(j, false, -1)
-	}
 	m.waiting.Add(1)
 	tokens := slots // the token goes back where it came from, even if a test swaps the channel
 	select {

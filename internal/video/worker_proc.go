@@ -52,10 +52,6 @@ func workerEnv() []string {
 
 // exec implements runner. The watchdog's cancellation kills the worker, then waits for it.
 func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string) (int, error) {
-	if observeExec != nil { // TEMPORARY measurement
-		observeExec(j, true, 1)
-		defer observeExec(j, true, -1)
-	}
 	// Until the worker has started and loaded the engine (a first compilation takes seconds to
 	// minutes, and starting a process on a loaded machine can take seconds), it is not stalled;
 	// loadLimit bounds that phase instead. Nor is it stalled while it waits for a worker slot. The
