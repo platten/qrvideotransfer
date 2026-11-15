@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,6 +25,50 @@ func TestFuzzTags(t *testing.T) {
 	}
 	if got := fuzzTags(""); got != "unsandboxedhevc" {
 		t.Errorf("fuzzTags without = %q", got)
+	}
+}
+
+func TestFuzzTargets(t *testing.T) {
+	list := "FuzzA\nFuzzB\nok  \t" + module + "/internal/a\t0.01s\n" +
+		"ok  \t" + module + "/internal/none\t0.01s\n" +
+		"FuzzSpike\nok  \t" + module + "/spikes/s\t0.01s\n" +
+		"FuzzC\nok  \t" + module + "/internal/c\t0.01s\n"
+	got := fuzzTargets(list)
+	want := []fuzzTarget{{module + "/internal/a", "FuzzA"}, {module + "/internal/a", "FuzzB"}, {module + "/internal/c", "FuzzC"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("fuzzTargets = %v, want %v", got, want)
+	}
+}
+
+// TestFuzzAllRunsEveryTarget: one target's finding does not hide another's; every target runs and
+// the error names each failure.
+func TestFuzzAllRunsEveryTarget(t *testing.T) {
+	ts := []fuzzTarget{{"p/a", "FuzzA"}, {"p/b", "FuzzB"}, {"p/c", "FuzzC"}, {"p/d", "FuzzD"}}
+	var ran []string
+	err := fuzzAll(ts, func(ft fuzzTarget) error {
+		ran = append(ran, ft.name)
+		if ft.name == "FuzzA" || ft.name == "FuzzC" {
+			return errors.New("exit status 1")
+		}
+		return nil
+	})
+	if !slices.Equal(ran, []string{"FuzzA", "FuzzB", "FuzzC", "FuzzD"}) {
+		t.Fatalf("ran %v, want every target", ran)
+	}
+	if err == nil {
+		t.Fatal("fuzzAll = nil, want the failures")
+	}
+	msg := err.Error()
+	for _, s := range []string{"2 of 4", "p/a FuzzA: exit status 1", "p/c FuzzC: exit status 1"} {
+		if !strings.Contains(msg, s) {
+			t.Errorf("error %q lacks %q", msg, s)
+		}
+	}
+	if strings.Contains(msg, "FuzzB") || strings.Contains(msg, "FuzzD") {
+		t.Errorf("error %q names a target that passed", msg)
+	}
+	if err := fuzzAll(ts, func(fuzzTarget) error { return nil }); err != nil {
+		t.Fatalf("all pass: %v", err)
 	}
 }
 
