@@ -128,23 +128,22 @@ A decode that reaches a limit stops with an error that names the limit and, wher
 that raises it. Two limits have a flag in version 1: the unpacked size (`--max-size`) and the manifest
 (`--max-entries`, up to 1,000,000 entries and 64 MiB). An error from a limit on time
 (`EngineStallTimeout`, `EngineProbeTime`, `EngineLoadLimit`) also says where the instance's time
-went: wall time, start to ready, in a worker ready to memory reserved and ready to input opened,
-ready to first read, the input's reads and bytes, time since the last progress, after the watchdog's
-cancellation how long the instance took to stop (for an in-process instance in three parts: until
-the guest reached a check, the module's close, and the return from the run call), and the worker
-processes and in-process instances running. It is sanitised like other engine text. On the normal
-path it costs, per instance, one memory-allocator wrapper and one close notifier (three small
-allocations, 112 bytes, about 40 ns to set up) and seven timestamps (the run's start, readiness, the
-memory reserved, the input opened, the module beginning to close, its memory freed and the run
-call's return; each a `time.Now`, 0.6-1.3 µs for all seven under load, S1 section 14.2); per read of
-the input, two atomic additions (about 8 ns, a timestamp and a compare-and-swap added on the first);
-and, from each worker, a progress message (48-byte payload) every 200 ms while its counts change,
-about 0.4 µs for the worker to build and send, so at most about 2.5 µs a second (the parent's
-handling was not timed separately); before, only probes sent progress messages. Measured on the S1
-development machine (spike S1 section 14.2); decoding `hevc8.mp4` in process took a median 579 ms
-with the allocator wrapper and close notifier and 605 ms without them, 15 runs each, within
-run-to-run noise. A worker's figures in it are the worker's word (its progress message), clamped by
-the parent.
+went: wall time, start to ready, ready to memory reserved and ready to input opened, ready to first
+read, the input's reads and bytes, time since the last progress, after the watchdog's cancellation
+how long the instance took to stop (for an in-process instance in three parts: until the guest
+reached a check, the module's close, and the return from the run call), and the worker processes and
+in-process instances running. It is sanitised like other engine text. On the normal path it costs,
+per instance, one memory-allocator wrapper and one close notifier (three small allocations, 112
+bytes, about 40 ns to set up) and seven timestamps (the run's start, readiness, the memory reserved,
+the input opened, the module beginning to close, its memory freed and the run call's return; each a
+`time.Now`, 0.6-1.3 µs for all seven under load, S1 section 14.2); per read of the input, two atomic
+additions (about 8 ns, a timestamp and a compare-and-swap added on the first); and, from each
+worker, a progress message (48-byte payload) every 200 ms while its counts change, about 0.4 µs for
+the worker to build and send, so at most about 2.5 µs a second (the parent's handling was not timed
+separately); before, only probes sent progress messages. Measured on the S1 development machine
+(spike S1 section 14.2); decoding `hevc8.mp4` in process took a median 579 ms with the allocator
+wrapper and close notifier and 605 ms without them, 15 runs each, within run-to-run noise. A
+worker's figures in it are the worker's word (its progress message), clamped by the parent.
 
 ## 6. Sender authenticity
 
@@ -474,4 +473,5 @@ instruction and states which versions receive fixes.
 | 2026-11-15 | Reservation stall fix: section 5 starts the stall clock when the instance's 512 MiB of linear memory has been reserved, on the worker and in-process paths, and moves the reservation into the phase `EngineLoadLimit` bounds (from a worker's start or an in-process instance's turn until the reservation; a worker that has not reported it is killed, an in-process instance cancelled), with the evidence (two false stalls on macos-26-intel, CI run 43693218308, reproduced locally), the clamp on a worker's reported time, the memory-less-module caveat and the new tests |
 | 2026-11-15 | Reservation stall fix, round 2: section 5 says a worker reports its reservation from the goroutine that made it, before any guest code runs, since a spinning guest can block the garbage collection the reservation starts and with it every other goroutine of the worker (CI run 43704037510) |
 | 2026-11-15 | Reservation stall fix, review: T1 says `EngineLoadLimit` bounds a worker until it reports the engine loaded and the instance's memory reserved, not only the engine loaded |
-| 2026-11-15 | M2 open risks, review of PR #27: section 5 lists everything the time-bound breakdown reports (a worker's ready to memory reserved and ready to input opened, and the stop after the watchdog's cancellation, in three parts for an in-process instance), and marks the seven timestamps' 0.6-1.3 µs as measured under load (S1 section 14.2) |
+| 2026-11-15 | M2 open risks, review of PR #27: section 5 lists everything the time-bound breakdown reports (ready to memory reserved and ready to input opened, for worker and in-process instances alike, and the stop after the watchdog's cancellation, in three parts for an in-process instance), and marks the seven timestamps' 0.6-1.3 µs as measured under load (S1 section 14.2) |
+| 2026-11-15 | M2 open risks, review of PR #32: section 5 no longer limits ready to memory reserved and ready to input opened to a worker (every instance reports both), and the PR #27 row above says so too |
