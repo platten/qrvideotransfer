@@ -15,9 +15,9 @@ import (
 // geomStats are the geometry assertions' counts over a set of poses.
 type geomStats struct {
 	poses       int
-	found       int     // quads located with every centre within a module of the truth
-	imprecise   int     // of those, quads with a centre more than half a module off (a hidden finder's)
-	wrong       int     // quads located elsewhere
+	found       int     // quads located, exact or imprecise (geomJudge)
+	imprecise   int     // of those, imprecise ones
+	wrong       int     // quads judged wrong
 	header      int     // captures whose header was read, with no wrong header
 	wrongHeader int     // captures for which a wrong header was returned
 	meshFailed  int     // captures whose mesh fit failed
@@ -72,20 +72,6 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 			t.Logf("pose %d: no quad", i)
 		}
 		if ok {
-			want, mod := geomFinderTruth(c, p.tr)
-			worst := 0.0
-			for k := range 4 {
-				worst = max(worst, geomDist(q.Centres[k], want[k])/mod[k])
-			}
-			if worst <= 1 {
-				r.found++
-				if worst > 0.5 {
-					r.imprecise++
-				}
-			} else {
-				r.wrong++
-				t.Logf("pose %d: quad %v, want %v", i, q.Centres, want)
-			}
 			shown := geomShown(c, p.tr)
 			bad := len(hs) == 0
 			for _, h := range hs {
@@ -98,10 +84,12 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 			if !bad {
 				r.header++
 			}
+			rms := math.Inf(1)
 			if fitErr != nil {
 				r.meshFailed++
 			} else {
-				rms, m := channel.CentreError(p.tr, func(gx, gy int) (float64, float64, bool) {
+				var m int
+				rms, m = channel.CentreError(p.tr, func(gx, gy int) (float64, float64, bool) {
 					if !geomMeasured(gx, gy) {
 						return 0, 0, false
 					}
@@ -115,6 +103,16 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 					}
 				}
 				r.anchorTotal = len(anchors)
+			}
+			switch geomJudge(c, p.tr, q, d.hidden, !bad, fitErr == nil, rms) {
+			case geomExact:
+				r.found++
+			case geomImprecise:
+				r.found++
+				r.imprecise++
+			default:
+				r.wrong++
+				t.Logf("pose %d: wrong quad %v (hidden %d)", i, q.Centres, d.hidden)
 			}
 		}
 		mu.Lock()
@@ -135,7 +133,7 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 	if filmErr != nil {
 		t.Fatal(filmErr)
 	}
-	t.Logf("%s, %d poses: finders %d (%.2f%%, %d with a centre over half a module off), wrong %d; header %d (%.2f%%), wrong %d; mesh failed %d; "+
+	t.Logf("%s, %d poses: finders %d (%.2f%%, %d imprecise), wrong %d; header %d (%.2f%%), wrong %d; mesh failed %d; "+
 		"centre error %.4f cell RMS over %d cells, worst capture %.4f; anchors %d of %d; vision %.1f ms per capture",
 		cfg.Name, n, s.found, 100*float64(s.found)/float64(n), s.imprecise, s.wrong, s.header, 100*float64(s.header)/float64(n), s.wrongHeader,
 		s.meshFailed, s.rms(), s.cells, s.worst, s.anchors, s.anchorTotal, float64(s.elapsed.Microseconds())/1000/float64(n))
@@ -162,13 +160,17 @@ func geomShown(c *geomCode, tr *channel.Truth) []int {
 }
 
 // geomCheck asserts the geometry rows of DESIGN.md section 15 on s: finders in at least minFound of
-// the poses, never a wrong quad, the header in at least minHeader of them (when minHeader > 0),
-// never a wrong header, and a centre error of at most 0.15 cell RMS.
+// the poses, never a wrong quad, at most geomMaxImprecise of the located quads imprecise, the
+// header in at least minHeader of them (when minHeader > 0), never a wrong header, and a centre
+// error of at most 0.15 cell RMS.
 func geomCheck(t *testing.T, s geomStats, minFound, minHeader float64) {
 	t.Helper()
 	n := float64(s.poses)
 	if float64(s.found) < minFound*n || s.wrong > 0 {
 		t.Errorf("finders found in %d of %d poses (%d wrong), want at least %.1f%% and none wrong", s.found, s.poses, s.wrong, 100*minFound)
+	}
+	if float64(s.imprecise) > geomMaxImprecise*float64(max(1, s.found)) {
+		t.Errorf("%d of %d located quads imprecise, want at most %.0f%%", s.imprecise, s.found, 100*geomMaxImprecise)
 	}
 	if minHeader > 0 && float64(s.header) < minHeader*n {
 		t.Errorf("header read in %d of %d captures, want at least %.1f%%", s.header, s.poses, 100*minHeader)

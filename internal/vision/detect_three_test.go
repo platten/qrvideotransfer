@@ -144,8 +144,67 @@ func TestGlareOnFinder(t *testing.T) {
 		}
 		rms := math.Sqrt(s.sumSq / float64(max(1, s.cells)))
 		t.Logf("%s: found %d of %d, wrong %d, header %d, wrong %d, RMS outside %.4f", gc.name, s.found, s.poses, s.wrong, s.header, s.wrongHeader, rms)
-		if s.found != n || s.header != n || s.wrong != 0 || s.wrongHeader != 0 || !(rms <= 0.15) {
+		if s.found != n || s.header != n || s.wrong != 0 || s.wrongHeader != 0 || !(rms <= 0.15) ||
+			float64(s.imprecise) > geomMaxImprecise*float64(n) {
 			t.Errorf("finder %d under glare: found %d of %d, header %d, wrong %d and %d, RMS %.4f", k, s.found, n, s.header, s.wrong, s.wrongHeader, rms)
 		}
+	}
+}
+
+// TestGeomJudge: the line between exact, imprecise and wrong quads. A visible finder more than half
+// a module off makes the quad wrong; only the hidden finder may be up to one module off, and only
+// when the header reads, the mesh fits and the centre error is at most 0.15 cell.
+func TestGeomJudge(t *testing.T) {
+	c := geomNewCode(t, 212, 120, 4, 2, 1, 33)
+	p, err := geomPose(c, geomConfig(t, "ideal", 1280, 720), 1, 0, 24000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, mod := geomFinderTruth(c, p.tr)
+	moved := func(k int, by float64) Quad {
+		var q Quad
+		for j := range 4 {
+			q.Centres[j] = want[j]
+		}
+		q.Centres[k].X += by * mod[k]
+		return q
+	}
+	for _, tc := range []struct {
+		name         string
+		q            Quad
+		hidden       int
+		header, mesh bool
+		rms          float64
+		want         geomVerdict
+	}{
+		{"exact", moved(0, 0.4), -1, true, true, 0.05, geomExact},
+		{"visible 0.6 off", moved(1, 0.6), -1, true, true, 0.05, geomWrong},
+		{"visible 0.6 off, another hidden", moved(1, 0.6), 2, true, true, 0.05, geomWrong},
+		{"hidden 0.4 off", moved(2, 0.4), 2, true, true, 0.05, geomExact},
+		{"hidden 0.6 off", moved(2, 0.6), 2, true, true, 0.05, geomImprecise},
+		{"hidden 0.6 off, no header", moved(2, 0.6), 2, false, true, 0.05, geomWrong},
+		{"hidden 0.6 off, no mesh", moved(2, 0.6), 2, true, false, 0.05, geomWrong},
+		{"hidden 0.6 off, error 0.2", moved(2, 0.6), 2, true, true, 0.2, geomWrong},
+		{"hidden 1.1 off", moved(3, 1.1), 3, true, true, 0.05, geomWrong},
+	} {
+		if got := geomJudge(c, p.tr, tc.q, tc.hidden, tc.header, tc.mesh, tc.rms); got != tc.want {
+			t.Errorf("%s: verdict %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestDetectHidden: the detector reports which finder it predicted: none with four in view, the
+// covered one with three.
+func TestDetectHidden(t *testing.T) {
+	c := geomNewCode(t, 320, 180, 8, 2, 1, 34)
+	want := geomPlainQuad(c)
+	var d FinderDetector
+	if _, ok := d.Detect(geomPlain(c, 0), nil); !ok || d.hidden != -1 {
+		t.Errorf("four finders: located %v, hidden %d", ok, d.hidden)
+	}
+	f := geomPlain(c, 0)
+	geomPaintDisc(f, want.Centres[2].X, want.Centres[2].Y, 12*float64(c.pitch), 235)
+	if _, ok := d.Detect(f, nil); !ok || d.hidden != 2 {
+		t.Errorf("finder 2 covered: located %v, hidden %d", ok, d.hidden)
 	}
 }

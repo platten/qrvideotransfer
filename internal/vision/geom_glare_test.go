@@ -54,10 +54,10 @@ func geomGlare(f *video.Frame, tr *channel.Truth, discs []geomDisc) *video.Frame
 
 // geomGlareStats are the counts of the glare study for one case.
 type geomGlareStats struct {
-	poses, found, wrong, header, wrongHeader, meshFailed int
-	sumSq                                                float64
-	cells                                                int
-	inside, insideSaturated, insideWhite                 int // data cells under a patch
+	poses, found, imprecise, wrong, header, wrongHeader, meshFailed int
+	sumSq                                                           float64
+	cells                                                           int
+	inside, insideSaturated, insideWhite                            int // data cells under a patch
 }
 
 // geomGlareCase is one placement of glare patches, given the code and a pose number.
@@ -121,32 +121,16 @@ func geomGlareMeasure(c *geomCode, f *video.Frame, tr *channel.Truth, discs []ge
 	if !ok {
 		return
 	}
-	want, mod := geomFinderTruth(c, tr)
-	for k := range 4 {
-		if geomDist(q.Centres[k], want[k]) > mod[k] {
-			s.wrong++
-			return
-		}
-	}
-	s.found++
 	hs, _ := SlotReader{}.Read(f, q)
 	shown := geomShown(c, tr)
-	bad := len(hs) == 0
+	bad, wrongHeader := len(hs) == 0, false
 	for _, h := range hs {
 		if int(h.FrameIndex) >= len(c.headers) || h != c.headers[h.FrameIndex] || !slices.Contains(shown, int(h.FrameIndex)) {
-			bad = true
-			s.wrongHeader++
+			bad, wrongHeader = true, true
 			break
 		}
 	}
-	if !bad {
-		s.header++
-	}
 	m, _, err := MeshFitter{}.Fit(f, q, c.layout)
-	if err != nil {
-		s.meshFailed++
-		return
-	}
 	p := float64(c.pitch)
 	under := func(gx, gy int, k float64) bool {
 		u, v := (float64(gx)+0.5)*p, (float64(gy)+0.5)*p
@@ -157,13 +141,33 @@ func geomGlareMeasure(c *geomCode, f *video.Frame, tr *channel.Truth, discs []ge
 		}
 		return false
 	}
-	rms, n := channel.CentreError(tr, func(gx, gy int) (float64, float64, bool) {
-		if !geomMeasured(gx, gy) || under(gx, gy, 1.5) {
-			return 0, 0, false
-		}
-		pt := m.At(float64(gx)+0.5, float64(gy)+0.5)
-		return pt.X, pt.Y, true
-	})
+	rms, n := math.Inf(1), 0
+	if err == nil {
+		rms, n = channel.CentreError(tr, func(gx, gy int) (float64, float64, bool) {
+			if !geomMeasured(gx, gy) || under(gx, gy, 1.5) {
+				return 0, 0, false
+			}
+			pt := m.At(float64(gx)+0.5, float64(gy)+0.5)
+			return pt.X, pt.Y, true
+		})
+	}
+	switch geomJudge(c, tr, q, d.hidden, !bad, err == nil, rms) {
+	case geomWrong:
+		s.wrong++
+		return
+	case geomImprecise:
+		s.imprecise++
+	}
+	s.found++
+	if wrongHeader {
+		s.wrongHeader++
+	} else if !bad {
+		s.header++
+	}
+	if err != nil {
+		s.meshFailed++
+		return
+	}
 	s.sumSq += rms * rms * float64(n)
 	s.cells += n
 	var in []frame.Cell
@@ -218,6 +222,7 @@ func TestGlareStudy(t *testing.T) {
 			st := &stats[k]
 			st.poses += s.poses
 			st.found += s.found
+			st.imprecise += s.imprecise
 			st.wrong += s.wrong
 			st.header += s.header
 			st.wrongHeader += s.wrongHeader
@@ -235,11 +240,14 @@ func TestGlareStudy(t *testing.T) {
 	}
 	for k, gc := range cases {
 		s := stats[k]
-		t.Logf("GLARE %-24s found %3d/%d wrong %d | header %3d wrong %d | mesh failed %d | centre RMS outside %.4f cell over %d | under patch %d cells: %.1f%% saturated, %.1f%% near-white unflagged",
-			gc.name, s.found, s.poses, s.wrong, s.header, s.wrongHeader, s.meshFailed, math.Sqrt(s.sumSq/float64(max(1, s.cells))), s.cells,
+		t.Logf("GLARE %-24s found %3d/%d (%d imprecise) wrong %d | header %3d wrong %d | mesh failed %d | centre RMS outside %.4f cell over %d | under patch %d cells: %.1f%% saturated, %.1f%% near-white unflagged",
+			gc.name, s.found, s.poses, s.imprecise, s.wrong, s.header, s.wrongHeader, s.meshFailed, math.Sqrt(s.sumSq/float64(max(1, s.cells))), s.cells,
 			s.inside, 100*float64(s.insideSaturated)/float64(max(1, s.inside)), 100*float64(s.insideWhite)/float64(max(1, s.inside)))
 		if s.wrong != 0 || s.wrongHeader != 0 {
 			t.Errorf("%s: %d wrong quads, %d wrong headers", gc.name, s.wrong, s.wrongHeader)
+		}
+		if float64(s.imprecise) > geomMaxImprecise*float64(max(1, s.found)) {
+			t.Errorf("%s: %d of %d located quads imprecise, want at most %.0f%%", gc.name, s.imprecise, s.found, 100*geomMaxImprecise)
 		}
 		if k < 4 && (s.found < 198 || s.header < 198) {
 			t.Errorf("%s: located %d and read %d of %d, want at least 198 (99%%)", gc.name, s.found, s.header, s.poses)

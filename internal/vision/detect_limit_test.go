@@ -11,9 +11,9 @@ import (
 	"github.com/platten/qrvideotransfer/internal/channel"
 )
 
-// geomDetectRate films n poses of the code with cfg and counts the quads found with every centre
-// within a module of the truth, the wrong quads, and the smallest true finder module seen,
-// in camera pixels.
+// geomDetectRate films n poses of the code with cfg and counts the quads located (exact or
+// imprecise, as geomJudge judges them, the header's frame and the mesh's centre error checked only
+// when it matters), the wrong ones, and the smallest true finder module seen, in camera pixels.
 func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64) (found, wrong int, minMod float64) {
 	t.Helper()
 	var mu sync.Mutex
@@ -29,12 +29,25 @@ func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed u
 		}
 		var d FinderDetector
 		q, ok := d.Detect(p.f, nil)
-		want, mod := geomFinderTruth(c, p.tr)
-		good := ok
-		for k := range 4 {
-			if ok && geomDist(q.Centres[k], want[k]) > mod[k] {
-				good = false
+		_, mod := geomFinderTruth(c, p.tr)
+		good := false
+		if ok {
+			// Judge first as if the capture were usable; check that only for an imprecise quad.
+			v := geomJudge(c, p.tr, q, d.hidden, true, true, 0)
+			if v == geomImprecise {
+				hs, hok := SlotReader{}.Read(p.f, q)
+				m, _, err := MeshFitter{}.Fit(p.f, q, c.layout)
+				rms := math.Inf(1)
+				if err == nil {
+					rms, _ = channel.CentreError(p.tr, func(gx, gy int) (float64, float64, bool) {
+						pt := m.At(float64(gx)+0.5, float64(gy)+0.5)
+						return pt.X, pt.Y, geomMeasured(gx, gy)
+					})
+				}
+				hok = hok && int(hs[0].FrameIndex) < len(c.headers) && hs[0] == c.headers[hs[0].FrameIndex]
+				v = geomJudge(c, p.tr, q, d.hidden, hok, err == nil, rms)
 			}
+			good = v != geomWrong
 		}
 		mu.Lock()
 		defer mu.Unlock()
