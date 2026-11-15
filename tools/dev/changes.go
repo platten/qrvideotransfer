@@ -47,7 +47,16 @@ func codeChanged(event string, changes []fileChange) bool {
 	return false
 }
 
-func codeFor(event, baseRef, defaultBranch string, changes []fileChange) bool { return false }
+// codeFor is codeChanged for a pull request into baseRef. A stacked pull request, one whose base
+// is not the repository's default branch, always runs everything: if it were later retargeted to
+// the default branch, the green ci result from its old base would otherwise stand for code that
+// was never tested. Only a pull request into the default branch can skip.
+func codeFor(event, baseRef, defaultBranch string, changes []fileChange) bool {
+	if event == "pull_request" && (baseRef == "" || baseRef != defaultBranch) {
+		return true
+	}
+	return codeChanged(event, changes)
+}
 
 // allowListed reports whether a path is on docsOnlyAllowList and is not code by its type: Go
 // source, module files, test data and .gitattributes are code wherever they sit.
@@ -90,12 +99,15 @@ func changes(args []string) error {
 	event := fs.String("event", "", "the GitHub event name (github.event_name)")
 	base := fs.String("base", "", "the pull request's base commit")
 	head := fs.String("head", "", "the pull request's head commit")
+	baseRef := fs.String("base-ref", "", "the pull request's base branch")
+	defaultBranch := fs.String("default-branch", "", "the repository's default branch")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
 	var files []fileChange
 	if *event == "pull_request" {
-		if *base == "" || *head == "" {
-			return errors.New("a pull request needs -base and -head")
+		if *base == "" || *head == "" || *baseRef == "" || *defaultBranch == "" {
+			return errors.New("a pull request needs -base, -head, -base-ref and -default-branch")
 		}
+		fmt.Printf("base branch: %s (default branch: %s)\n", *baseRef, *defaultBranch)
 		mb, err := exec.Command("git", "merge-base", *base, *head).Output()
 		if err != nil {
 			return fmt.Errorf("git merge-base %s %s: %w", *base, *head, err)
@@ -112,7 +124,7 @@ func changes(args []string) error {
 			fmt.Printf("changed: %s %s (allow-listed: %v)\n", f.status, f.path, allowListed(f.path))
 		}
 	}
-	code := codeChanged(*event, files)
+	code := codeFor(*event, *baseRef, *defaultBranch, files)
 	fmt.Printf("code=%v\n", code)
 	if p := os.Getenv("GITHUB_OUTPUT"); p != "" {
 		f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)

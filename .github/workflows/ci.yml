@@ -6,9 +6,9 @@ name: ci
 on:
   push:
     branches: [main]
-  # edited: a pull request whose base branch changes is classified again against the new base (a
-  # docs-only change on a stacked branch may bring code once retargeted to main). Editing the title
-  # or body also starts a run, which cancels the older run of the same pull request.
+  # edited: a pull request whose base branch changes is classified again against the new base.
+  # Editing the title or body also starts a run, which cancels the older run of the same pull
+  # request. A stacked pull request (base not the default branch) never skips (tools/dev changes).
   pull_request:
     types: [opened, synchronize, reopened, edited]
 
@@ -48,11 +48,15 @@ jobs:
       - name: Classify the changed files
         id: classify
         timeout-minutes: 5
-        run: go run ./tools/dev changes -event "$EVENT" -base "$BASE" -head "$HEAD"
+        run: >-
+          go run ./tools/dev changes -event "$EVENT" -base "$BASE" -head "$HEAD"
+          -base-ref "$BASE_REF" -default-branch "$DEFAULT_BRANCH"
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
   check:
     name: check (${{ matrix.os }})

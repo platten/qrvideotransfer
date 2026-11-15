@@ -1348,8 +1348,11 @@ by GoReleaser).
   and any other changed file runs everything: code, tests, fixtures, golden files, build and release
   configuration, LICENSE, NOTICE, README, `docs/DESIGN.md` (whose preset tables `internal/channel`'s
   tests read), and any Go file, `go.mod`, `go.sum`, `.gitattributes` or `testdata/` path wherever it
-  sits. The `pull_request` trigger includes `edited`, so a pull request moved to another base branch
-  is classified again (editing a title or body also starts a run, which cancels the older one). A
+  sits. Only a pull request into the default branch can skip: a stacked one, whose base is another
+  branch, runs everything, because a later retarget to main would otherwise leave its green result
+  standing for code never tested. The `pull_request` trigger also includes `edited`, so a pull
+  request moved to another base branch is classified again (editing a title or body also starts a
+  run, which cancels the older one). A
   test keeps the allow-list honest by failing if a Go string literal or `//go:embed` pattern reaches
   a listed file or the spike directory, if any Go file sits under `docs/`, or if a workflow, script
   or the GoReleaser configuration names a listed path. An aggregate `ci result` job waits for every
@@ -1507,4 +1510,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Reservation stall fix: section 12 starts the stall clock when an instance's 512 MiB of linear memory has been reserved, on the worker and in-process paths; `EngineLoadLimit` now bounds the phase until the reservation (from a worker's start, or from an in-process instance's turn, after which the instance is cancelled); the worker reports the reservation in its progress message, clamped to the message's arrival. Prompted by two false stalls on macos-26-intel (CI run 43693218308) |
 | 2026-11-15 | Reservation stall fix, round 2: section 12 says the worker reports its reservation from the goroutine that made it, before any guest code runs, not in its periodic progress report, which a spinning guest can hold back for good by blocking the garbage collection the reservation starts (CI run 43704037510) |
 | 2026-11-15 | Stream G: section 17 adds the documents-only skip (allow-list, `changes` job, aggregate `ci result` check), scopes the never-cancelled sentence to the ci and codeql runs on main and codeql's schedule, and states the stricter `cancel-in-progress` policy (flow style, quoted keys, group with the pull request number and SHA) |
-| 2026-11-15 | Stream G, review of PR #35: section 17 narrows the documents-only allow-list to the Markdown files directly in `docs/spikes/`, makes Go files, module files, `.gitattributes`, `testdata/` paths and every deletion count as code, reclassifies a pull request on `edited` (retargeting), adds `//go:embed` to the allow-list guard, and has `ci result` require a `code` output of exactly `true` or `false` |
+| 2026-11-15 | Stream G, review of PR #35: section 17 narrows the documents-only allow-list to the Markdown files directly in `docs/spikes/`, makes Go files, module files, `.gitattributes`, `testdata/` paths and every deletion count as code, runs everything for a stacked pull request (base not the default branch), reclassifies a pull request on `edited` (retargeting), adds `//go:embed` to the allow-list guard, and has `ci result` require a `code` output of exactly `true` or `false` |
