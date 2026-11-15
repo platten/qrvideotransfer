@@ -162,7 +162,8 @@ func hostileWorker(mode string) int {
 
 // runFakeParent starts a spinning worker with no watchdog, prints its process id, and waits to be
 // killed. With the argument "nojob" it does not put the worker in a Job Object (Windows), so that
-// the worker's exit on its pipe closing is tested alone.
+// the worker's exit on its pipe closing is tested alone; with "spinbig" the worker's guest reserves
+// 512 MiB before it spins, which blocks that exit (docs/spikes/S1.md section 14.4).
 func runFakeParent() int {
 	w, err := currentWorkers()
 	if w == nil {
@@ -172,7 +173,11 @@ func runFakeParent() int {
 	p := *w
 	p.noJob = len(os.Args) > 2 && os.Args[2] == "nojob"
 	p.started = func(pid int) { fmt.Println(pid) }
-	_, _ = p.exec(context.Background(), &job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil },
+	module := "spin"
+	if len(os.Args) > 2 && os.Args[2] == "spinbig" {
+		module = "spinbig"
+	}
+	_, _ = p.exec(context.Background(), &job{prog: "ffmpeg", module: module, args: func(string, string) []string { return nil },
 		stdout: io.Discard, stderr: io.Discard}, &meter{}, "")
 	time.Sleep(time.Hour)
 	return 0
