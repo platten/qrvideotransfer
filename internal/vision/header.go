@@ -24,7 +24,9 @@ var _ HeaderReader = SlotReader{}
 
 // Read reads the four header copies of the code whose finders are q. It decodes each copy alone,
 // then the sums of pairs of copies that did not decode, then, if nothing decoded, the sum of all
-// four, and returns one header per distinct frame index, in the order found.
+// four, and returns each distinct header once, in the order found: normally one per frame index,
+// but two copies decoding the same index with different fields (a false CRC pass, or crafted
+// content) are both returned, so that a conflicting header cannot hide the true one.
 func (SlotReader) Read(f *video.Frame, q Quad) ([]frame.Header, bool) {
 	soft, ok := copySoft(f, q)
 	if !ok {
@@ -41,7 +43,7 @@ func (SlotReader) Read(f *video.Frame, q Quad) ([]frame.Header, bool) {
 			sum[s] = int8(max(-127, min(127, t)))
 		}
 		h, ok := frame.DecodeHeader(sum[:])
-		if ok && !slices.ContainsFunc(out, func(o frame.Header) bool { return o.FrameIndex == h.FrameIndex }) {
+		if ok && !slices.Contains(out, h) {
 			out = append(out, h)
 		}
 		return ok

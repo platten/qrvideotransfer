@@ -179,8 +179,8 @@ func (d *FinderDetector) confirmThree(f *video.Frame, v *geomLuma, q Quad, k int
 		}
 	}
 	for range 2 {
-		st, ok := d.locate(f, v, q, found)
-		if !ok || !st.enough() {
+		st, ok := firstEnough(d.locate(f, v, q, found))
+		if !ok {
 			return Quad{}, false
 		}
 		p, _, ok := st.predict(k, found, v.w, v.h)
@@ -189,8 +189,8 @@ func (d *FinderDetector) confirmThree(f *video.Frame, v *geomLuma, q Quad, k int
 		}
 		q.Centres[k] = Point(p)
 	}
-	st, ok := d.locate(f, v, q, found)
-	if !ok || !st.enough() || !st.agrees(found, v.w, v.h) {
+	st, ok := firstEnough(d.locate(f, v, q, found))
+	if !ok || !st.agrees(found, v.w, v.h) {
 		return Quad{}, false
 	}
 	mid := st.src[0].add(st.src[3]).mul(0.5)

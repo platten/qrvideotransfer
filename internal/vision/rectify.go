@@ -22,6 +22,9 @@ const (
 	rectifyOutlier   = 0.35 // largest deviation of a corner from its neighbours' displacement, cells
 	rectifyLatticeX  = 32   // anchor pitch, cells (FORMAT.md section 5.2)
 	rectifyLatticeY  = 30
+	// rectifyAnchorsOnly is the number of located anchors from which the global model is fitted to
+	// the anchors alone, without the finders.
+	rectifyAnchorsOnly = 8
 )
 
 // MeshFitter is the Rectifier of docs/DESIGN.md section 10, step 3. The zero value is ready to use
@@ -87,16 +90,20 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 		obs[i].Anchor = a
 		cells[i] = gpt{float64(a.X + 2), float64(a.Y + 2)}
 	}
-	rectifyLocate(&v, &model, src, cells, obs, contrast*rectifyMinSaddle)
+	rectifyLocate(&v, &model, src, cells, obs, contrast*rectifyMinSaddle, 0)
 
-	// Refit with the corners, reject outliers, refit.
+	// Refit with the corners, reject outliers, refit. Once rectifyAnchorsOnly anchors are located
+	// the finders leave the refit: a finder off by a fraction of a module would otherwise pull the
+	// mesh's corner with the weight of an anchor, and it cannot be rejected as one.
 	for range 2 {
 		var s, d []gpt
-		s, d = append(s, src...), append(d, dst...)
 		for i := range obs {
 			if obs[i].Found {
 				s, d = append(s, cells[i]), append(d, gpt(obs[i].Corner))
 			}
+		}
+		if len(s) < rectifyAnchorsOnly {
+			s, d = append(s, src...), append(d, dst...)
 		}
 		if len(s) >= 8 {
 			if m, _, ok := geomFitModelK1(s, d, v.w, v.h); ok {
@@ -129,8 +136,10 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 	return mesh, obs, nil
 }
 
-// rectifyLocate locates the anchors' saddles, nearest the finders first.
-func rectifyLocate(v *geomLuma, model *geomModel, finders, cells []gpt, obs []AnchorObs, minContrast float32) {
+// rectifyLocate locates the anchors' saddles, nearest the finders first. With giveUp > 0 it stops
+// once giveUp anchors have been tried and fewer than eight located: the quad is then not a code's,
+// and the rest of a large hostile grid is not searched.
+func rectifyLocate(v *geomLuma, model *geomModel, finders, cells []gpt, obs []AnchorObs, minContrast float32, giveUp int) {
 	order := make([]int, len(cells))
 	near := make([]float64, len(cells))
 	for i, c := range cells {
@@ -150,7 +159,10 @@ func rectifyLocate(v *geomLuma, model *geomModel, finders, cells []gpt, obs []An
 		return 0
 	})
 	var located []int
-	for _, i := range order {
+	for tried, i := range order {
+		if giveUp > 0 && tried >= giveUp && len(located) < 8 {
+			return
+		}
 		c := cells[i]
 		pred := model.at(c)
 		// Displacement of the located anchors within two lattice steps, weighted by inverse distance.
