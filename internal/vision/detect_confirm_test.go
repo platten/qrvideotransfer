@@ -117,7 +117,7 @@ func geomFakeGrid(t *testing.T, c *geomCode, gridX, gridY int) []uint16 {
 	t.Helper()
 	f := geomPlain(c, 0)
 	h := c.headers[0]
-	h.GridX, h.GridY = uint16(gridX), uint16(gridY) //nolint:gosec // within the grid limits
+	h.GridX, h.GridY = uint16(gridX), uint16(gridY)
 	if err := h.Validate(); err != nil {
 		t.Fatal(err)
 	}
