@@ -48,6 +48,25 @@ func TestConfirmsDecoy(t *testing.T) {
 	}
 }
 
+// TestConfirmsOneLayout: within one Detect at most one layout is built; a second grid is refused.
+func TestConfirmsOneLayout(t *testing.T) {
+	c := geomNewCode(t, 212, 120, 4, 2, 1, 27)
+	f := geomPlain(c, 0)
+	v, _ := geomView(f)
+	other, err := frame.NewLayout(240, 135)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := FinderDetector{layout: other, built: true}
+	if d.confirms(f, &v, geomPlainQuad(c)) {
+		t.Error("a second layout was built in one Detect")
+	}
+	d.built = false
+	if !d.confirms(f, &v, geomPlainQuad(c)) || d.layout.GridX() != 212 {
+		t.Error("true quad not confirmed with a fresh layout")
+	}
+}
+
 // TestConfirmsHarshPose: pose 2 of 200 from seed 9000 on the harsh preset at 4K (480 x 270 grid,
 // code seed 19), whose header decodes and whose mesh fits but where both anchors next to one
 // finder are unreadable, is confirmed and located.

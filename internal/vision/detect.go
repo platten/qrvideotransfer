@@ -38,7 +38,8 @@ type FinderDetector struct {
 	dark     []bool // small below its local midrange
 	sw, sh   int
 	clusters []detectCluster
-	layout   *frame.Layout // of the last confirmed header's grid
+	layout   *frame.Layout // of the last decoded header's grid
+	built    bool          // a layout was built during this Detect
 }
 
 var _ Detector = (*FinderDetector)(nil)
@@ -66,6 +67,7 @@ func (c *detectCluster) mod() float64 { return c.module / float64(c.hits) }
 // capture. When the whole capture yields no quad and it was downscaled, it scans once more one
 // step finer.
 func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
+	d.built = false
 	v, ok := geomView(f)
 	if !ok {
 		return Quad{}, false
@@ -511,77 +513,4 @@ func detectEdges(v *geomLuma, p, u gpt, t float32, dark bool, n int) (inner, out
 		prev = val
 	}
 	return 0, 0, false
-}
-
-// confirms reports whether quad q is a code's: its header decodes, and with the header's grid, of
-// the two anchors nearest each finder at least one is located where the finders predict it (or
-// both lie outside the capture). One copy can decode with one finder wrong, since a copy is placed
-// mostly by the finders nearest it; the anchors check every finder.
-func (d *FinderDetector) confirms(f *video.Frame, v *geomLuma, q Quad) bool {
-	hs, ok := SlotReader{}.Read(f, q)
-	if !ok {
-		return false
-	}
-	gx, gy := int(hs[0].GridX), int(hs[0].GridY)
-	if d.layout == nil || d.layout.GridX() != gx || d.layout.GridY() != gy {
-		l, err := frame.NewLayout(gx, gy)
-		if err != nil {
-			return false
-		}
-		d.layout = l
-	}
-	hm, ok := headerModel(v, q)
-	if !ok {
-		return false
-	}
-	c0 := 4.5 * float64(gy) / 135
-	src := []gpt{{c0, c0}, {float64(gx) - c0, c0}, {c0, float64(gy) - c0}, {float64(gx) - c0, float64(gy) - c0}}
-	dst := make([]gpt, 4)
-	for k, c := range q.Centres {
-		dst[k] = gpt(c)
-	}
-	model, _, ok := geomFitModel(src, dst, hm.lens)
-	refs, ok2 := headerRefs(v, &hm)
-	if !ok || !ok2 {
-		return false
-	}
-	contrast := float32(0)
-	for _, r := range refs {
-		contrast = max(contrast, r[1]-r[0])
-	}
-	anchors := d.layout.Anchors()
-	for _, fc := range src {
-		near := [2]int{-1, -1}
-		dist := [2]float64{math.Inf(1), math.Inf(1)}
-		for i, a := range anchors {
-			dd := gpt{float64(a.X + 2), float64(a.Y + 2)}.sub(fc).norm()
-			switch {
-			case dd < dist[0]:
-				near[1], dist[1], near[0], dist[0] = near[0], dist[0], i, dd
-			case dd < dist[1]:
-				near[1], dist[1] = i, dd
-			}
-		}
-		seen, located := 0, 0
-		for _, i := range near {
-			if i < 0 {
-				continue
-			}
-			c := gpt{float64(anchors[i].X + 2), float64(anchors[i].Y + 2)}
-			pred := model.at(c)
-			if !v.inside(pred) {
-				continue
-			}
-			seen++
-			ex := model.at(c.add(gpt{0.5, 0})).sub(model.at(c.sub(gpt{0.5, 0})))
-			ey := model.at(c.add(gpt{0, 0.5})).sub(model.at(c.sub(gpt{0, 0.5})))
-			if _, ok := rectifySaddle(v, pred, ex, ey, rectifyMinSaddle*contrast); ok {
-				located++
-			}
-		}
-		if seen > 0 && located == 0 {
-			return false
-		}
-	}
-	return true
 }

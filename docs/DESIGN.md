@@ -221,9 +221,11 @@ a valid mid-grey. Mixed cells must be discarded reliably.
 Rules for version 1:
 
 1. **Identity.** A capture is usable if at least one header copy passes its CRC with a matching session.
-   If two copies give different frame indices, both are kept. If none decodes, the index may be inferred
-   as the last index plus 0 to 3, chosen by the phase markers, only when fewer than four frame periods
-   have passed. Otherwise the capture is skipped.
+   If two copies give different frame indices, both are kept. If none decodes, the capture is skipped:
+   in M2 the detector does not return a quad without a decoded header (section 10, step 1). Inferring
+   the index as the last index plus 0 to 3, chosen by the phase markers, when fewer than four frame
+   periods have passed, is deferred to M5, where a tracked quad could carry the header from a
+   neighbouring capture.
 2. **Phase field.** At each anchor, the four quadrant intensities are linearised using the anchor's own
    black and white and the palette's gamma, then solved for non-negative weights summing to one, one per
    value of frame index mod 4. Interpolating across the lattice gives per-cell weights. This handles
@@ -528,11 +530,17 @@ For each capture:
    126 modules within a factor of 1/0.65. Data cells mimic finders at the finder's own scale (on a
    grid of 135 rows or fewer a module is at most one cell; on a 240 x 135 grid 1 to 4% of captures
    gave a wrong quad), so the six best quads are tried in turn and a quad is reported only when its
-   header decodes (step 2) and, with the header's grid, at least one of the two anchors nearest each
-   finder is located where the quad predicts it: one copy can decode with one finder wrong (it
-   happened once in 200 poses), since a copy is placed mostly by the finders nearest it. A capture
-   whose four copies all fail is therefore not located; on the simulator's presets that never
-   happened (step 2's 1,000 of 1,000). A finder covered by glare is not located either (below).
+   header decodes (step 2) and the anchors agree with every finder. The decoded grid must imply at
+   least 1.5 camera pixels per cell between the finders, which bounds the layout built for it by the
+   image's size, and at most one layout is built per capture. With that grid the anchors are located
+   as in step 3; at least eight, and a quarter of those inside the capture, must be found, and each
+   finder in turn must lie within one cell of where a model fitted to the located anchors and the
+   other three finders puts it. One copy can decode with one finder wrong (it happened once in 200
+   poses, with a finder 20 cells off), since a copy is placed mostly by the finders nearest it. An
+   earlier rule, requiring one of the two anchors next to each finder, rejected 17 of 200 real harsh
+   captures whose anchors there were unreadable. A capture whose four copies all fail is not located
+   (section 7, rule 1); on the simulator's presets that never happened (step 2's 1,000 of 1,000). A
+   finder covered by glare is not located either (below).
    **Measured limit** (`TestDetectModuleSweep`): a 240 x 135 grid, whose finder module is one cell,
    filmed at 1920 x 1080 with each preset's own blur, 200 poses per size (seeds 7000 to 7199). Finders
    found, a quad counting only when confirmed, by untilted camera pixels per cell:
@@ -540,12 +548,12 @@ For each capture:
    | Preset (blur) | 2.8 | 3.2 | 3.6 | 4.0 | 4.4 | 4.8 | 6.0 | 7.2 |
    | --- | --- | --- | --- | --- | --- | --- | --- | --- |
    | tripod (1.0) | 200 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
-   | handheld (1.5) | 13 | 185 | 199 | 200 | 200 | 200 | 200 | 200 |
-   | budget-android (1.5) | 9 | 179 | 198 | 200 | 200 | 200 | 200 | 200 |
-   | iphone-hdr (1.5, 10-bit HLG) | 0 | 64 | 112 | 182 | 199 | 200 | 200 | 200 |
-   | harsh (2.0, tilt 25, glare 2%) | 0 | 0 | 4 | 21 | 63 | 97 | 160 | 159 |
+   | handheld (1.5) | 16 | 187 | 199 | 200 | 200 | 200 | 200 | 200 |
+   | budget-android (1.5) | 9 | 183 | 198 | 200 | 200 | 200 | 200 | 200 |
+   | iphone-hdr (1.5, 10-bit HLG) | 0 | 85 | 127 | 183 | 200 | 200 | 200 | 200 |
+   | harsh (2.0, tilt 25, glare 2%) | 0 | 0 | 4 | 22 | 68 | 103 | 167 | 163 |
 
-   No quad was wrong from 3.6 pixels up; below, up to 2 of 200 had a centre more than half a module
+   No quad was wrong from 3.6 pixels up; below, up to 3 of 200 had a centre more than half a module
    off. The cell-centre error at 4.0 pixels per cell was 0.044 (tripod), 0.084 (handheld), 0.075
    (budget-android) and 0.117 (iphone-hdr) cell RMS. Detection is reliable (at least 199 of 200, none
    wrong) from 3.6 camera pixels per finder module under the handheld blur and 4.4 under the HLG
@@ -584,6 +592,11 @@ For each capture:
 4. **Sample.** Take the mean of the central 60% of each cell's footprint directly from the camera planes.
    The image is never warped whole. As built: a cell is saturated when any of its brightness samples is
    at the bottom or top of the code range; a cell outside the capture is saturated with zero values.
+   **Known gap:** in limited-range video a sensor-clipped glare patch lands near the nominal white (235
+   at 8 bits), not the top of the code range, so most glared cells come back as near-white values,
+   not saturated (the glare study: under 1% flagged), contrary to the table below ("saturated cells
+   become unknown"). It closes in the follow-up to PR #30, which flags a cell when a stated share of
+   its footprint is at or near the clipping level.
 5. **Calibrate levels.** Per tile of about 32 x 30 cells, keep a centre and variance for each level.
    Start from the palette and the anchors' black and white, refine with two or three rounds of
    expectation-maximisation on the data cells (scrambling makes levels equally likely, and their order
@@ -1544,3 +1557,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 Geometry, designer ruling on PR #30: section 6 and section 10's distortion table no longer claim that mirroring is handled; a decoder assumes the capture is not mirrored (FORMAT.md section 4.1), and mirrored recordings are left to M5. Section 10 step 1 records the accepted departure from "at most 1280 pixels wide" (one rescan one step finer when no quad is found) with its evidence: 997 of 1,000 simulated 4K poses at up to 25 degrees of tilt found by the 1280-pixel scan alone, 1,000 with the rescan |
 | 2026-11-15 | M2 Geometry, review of PR #30: section 10 step 1 gives the detector's threshold at about half the light in linear terms and flanks of a quarter module (blur in linear light thinned the outer dark ring, and finders of 4 to 6 pixels per module were missed), says that a quad is reported only when its header decodes (data cells gave wrong quads on a 240 x 135 grid), and records the measured limit: found in every pose at 4.0 camera pixels per untilted module under the handheld blur. Step 3 states when the fit fails (no anchor, or under a quarter of those inside the capture, located) |
 | 2026-11-15 | M2 Geometry, review of PR #30, measured limits: section 10 step 1 adds the anchor check on a confirmed quad (one copy decoded with one finder wrong) and the table of finders found against camera pixels per cell for each preset, with the limit (3.6 handheld, 4.4 HLG, not reached for harsh at 1080p); section 11 condition 2 says what the geometry needs against the planning point of 5 |
+| 2026-11-15 | M2 Geometry, review round 2 of PR #30: section 7 rule 1 defers the inference of an undecoded frame index to M5 (a tracked quad could carry the header from a neighbouring capture); in M2 a capture whose four copies all fail is skipped. Section 10 step 1 replaces the confirmation rule (one of the two anchors next to each finder, which rejected 17 of 200 real harsh captures) with a leave-one-out check of each finder against the located anchors, bounds the decoded grid by the image (1.5 pixels per cell, one layout per capture); step 4 records that limited-range glare escapes the saturation flag until the follow-up PR. The table of finders found is re-measured with the new rule |
