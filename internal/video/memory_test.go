@@ -22,5 +22,8 @@ func TestTimedAlloc(t *testing.T) {
 	if mem.Reallocate(257) != nil {
 		t.Error("more than the maximum was allocated")
 	}
+	if mem.Reallocate(32); m.memPeak.Load() != 128 {
+		t.Errorf("peak %d, want 128", m.memPeak.Load())
+	}
 	mem.Free()
 }
