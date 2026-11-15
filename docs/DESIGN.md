@@ -528,12 +528,31 @@ For each capture:
    126 modules within a factor of 1/0.65. Data cells mimic finders at the finder's own scale (on a
    grid of 135 rows or fewer a module is at most one cell; on a 240 x 135 grid 1 to 4% of captures
    gave a wrong quad), so the six best quads are tried in turn and a quad is reported only when its
-   header decodes (step 2). A capture whose four copies all fail is therefore not located; on the
-   simulator's presets that never happened (step 2's 1,000 of 1,000).
-   **Measured limit:** under the handheld preset's blur (1.5 camera pixels), 200 poses per size on a
-   240 x 135 grid, the finders were found in 200 of 200 poses at 4.0 camera pixels per untilted
-   module (3.4 at the smallest after tilt) and above, 199 at 3.6, 187 at 3.2 and 16 at 2.8. Detection
-   is asserted down to 4.0 pixels per module (`TestDetectModuleLimit`).
+   header decodes (step 2) and, with the header's grid, at least one of the two anchors nearest each
+   finder is located where the quad predicts it: one copy can decode with one finder wrong (it
+   happened once in 200 poses), since a copy is placed mostly by the finders nearest it. A capture
+   whose four copies all fail is therefore not located; on the simulator's presets that never
+   happened (step 2's 1,000 of 1,000). A finder covered by glare is not located either (below).
+   **Measured limit** (`TestDetectModuleSweep`): a 240 x 135 grid, whose finder module is one cell,
+   filmed at 1920 x 1080 with each preset's own blur, 200 poses per size (seeds 7000 to 7199). Finders
+   found, a quad counting only when confirmed, by untilted camera pixels per cell:
+
+   | Preset (blur) | 2.8 | 3.2 | 3.6 | 4.0 | 4.4 | 4.8 | 6.0 | 7.2 |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | tripod (1.0) | 200 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
+   | handheld (1.5) | 13 | 185 | 199 | 200 | 200 | 200 | 200 | 200 |
+   | budget-android (1.5) | 9 | 179 | 198 | 200 | 200 | 200 | 200 | 200 |
+   | iphone-hdr (1.5, 10-bit HLG) | 0 | 64 | 112 | 182 | 199 | 200 | 200 | 200 |
+   | harsh (2.0, tilt 25, glare 2%) | 0 | 0 | 4 | 21 | 63 | 97 | 160 | 159 |
+
+   No quad was wrong from 3.6 pixels up; below, up to 2 of 200 had a centre more than half a module
+   off. The cell-centre error at 4.0 pixels per cell was 0.044 (tripod), 0.084 (handheld), 0.075
+   (budget-android) and 0.117 (iphone-hdr) cell RMS. Detection is reliable (at least 199 of 200, none
+   wrong) from 3.6 camera pixels per finder module under the handheld blur and 4.4 under the HLG
+   preset; harsh does not reach it at 1080p (a finder under its glare patch, or out of frame at 25
+   degrees and fill 0.75 or more). Always-on tests assert every pose at 4.0 (handheld) and 4.8
+   (iphone-hdr) (`TestDetectModuleLimit`). On grids of 270 rows or more a finder module is two cells
+   or more, so there the limit on cells comes from the anchors and the sampling, not the finders.
    **Departure from "at most 1280 pixels wide", accepted:** when no quad is found in a downscaled
    capture, the scan is repeated once one step finer (1920 pixels wide for 4K). At 25 degrees of tilt
    a far finder can measure under 3 pixels per module at 1280 pixels wide. On 1,000 simulated 4K poses
@@ -611,7 +630,10 @@ Whether a setting works depends on the camera. All of these must hold (simulated
 
 1. Camera frame rate at least twice the display rate.
 2. Camera pixels per cell `s = fill x camera width / GridX` at least the mode's minimum, with fill 0.80
-   handheld and 0.90 on a tripod.
+   handheld and 0.90 on a tripod. Geometry alone (finders, header, mesh; section 10 step 1, measured
+   on the simulator with a finder module of one cell) is reliable from about 3.6 camera pixels per
+   cell under the handheld blur and 4.4 under the 10-bit HLG preset, so the planning point of 5
+   leaves a margin of about 1.4 and 1.1 times; at 5 the cell-centre error is about 0.05 cell RMS.
 3. Recorder bits per cell per code frame `q = 0.9 x bitrate / (rate x cells)` at least 9 for `fast`,
    5.5 for `normal`, 2.5 for `robust` with HEVC; 1.4 times those with H.264.
 4. The display video's bitrate, `8.4 x cells x rate`, stays playable: 33 Mbit/s for 1080p30,
@@ -1521,3 +1543,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 Geometry: section 10, steps 1 to 4, records what was built: the midrange binarisation, diagonal and full-resolution checks and quad rules of the detector, its one finer rescan when the 1280-pixel scan finds no quad (measured: 3 of 1,000 poses at 25 degrees of tilt), and that it assumes a capture that is not mirrored; radial distortion with k1 chosen by slot contrast for the header, the finder references, and which pairs are tried; the order, refinement, outlier rule and node spacing of the mesh and its cell coordinates; and what the sampler calls saturated |
 | 2026-11-15 | M2 Geometry, designer ruling on PR #30: section 6 and section 10's distortion table no longer claim that mirroring is handled; a decoder assumes the capture is not mirrored (FORMAT.md section 4.1), and mirrored recordings are left to M5. Section 10 step 1 records the accepted departure from "at most 1280 pixels wide" (one rescan one step finer when no quad is found) with its evidence: 997 of 1,000 simulated 4K poses at up to 25 degrees of tilt found by the 1280-pixel scan alone, 1,000 with the rescan |
 | 2026-11-15 | M2 Geometry, review of PR #30: section 10 step 1 gives the detector's threshold at about half the light in linear terms and flanks of a quarter module (blur in linear light thinned the outer dark ring, and finders of 4 to 6 pixels per module were missed), says that a quad is reported only when its header decodes (data cells gave wrong quads on a 240 x 135 grid), and records the measured limit: found in every pose at 4.0 camera pixels per untilted module under the handheld blur. Step 3 states when the fit fails (no anchor, or under a quarter of those inside the capture, located) |
+| 2026-11-15 | M2 Geometry, review of PR #30, measured limits: section 10 step 1 adds the anchor check on a confirmed quad (one copy decoded with one finder wrong) and the table of finders found against camera pixels per cell for each preset, with the limit (3.6 handheld, 4.4 HLG, not reached for harsh at 1080p); section 11 condition 2 says what the geometry needs against the planning point of 5 |
