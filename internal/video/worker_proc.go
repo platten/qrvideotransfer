@@ -29,6 +29,8 @@ type procRunner struct {
 	started func(pid int)
 	// noJob leaves the worker out of a Job Object on Windows (tests).
 	noJob bool
+	// exited is a stub for the test commit.
+	exited func(*os.ProcessState)
 }
 
 // errWorkerStart marks a worker that could not be started; the job then runs in process.
