@@ -35,6 +35,8 @@ func TestMeshInvalid(t *testing.T) {
 		{Cols: 1, Rows: 4, StepX: 1, StepY: 1, Nodes: make([]Point, 4)},
 		{Cols: 2, Rows: 2, StepX: 1, StepY: 1, Nodes: make([]Point, 3)},
 		{Cols: 2, Rows: 2, StepX: 0, StepY: 1, Nodes: make([]Point, 4)},
+		{Cols: 1 << 33, Rows: 1 << 31, StepX: 1, StepY: 1}, // Cols*Rows wraps to 0
+		{Cols: -2, Rows: -2, StepX: 1, StepY: 1, Nodes: make([]Point, 4)},
 		nil,
 	} {
 		if p := m.At(1, 1); !math.IsNaN(p.X) || !math.IsNaN(p.Y) {

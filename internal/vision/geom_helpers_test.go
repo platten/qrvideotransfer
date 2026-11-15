@@ -62,9 +62,9 @@ func geomNewCode(t testing.TB, gridX, gridY, pitch int, mod uint8, n int, seed u
 	return c
 }
 
-// geomConfig returns the preset, resized to w x h camera pixels unless w is 0. Unlike
-// channel.Config.Resize it also scales the blur and the shake, which are in camera pixels, with the
-// width, so that a small capture looks like the preset's 4K capture downscaled.
+// geomConfig returns the preset, resized to w x h camera pixels unless w is 0. Blur and shake keep
+// their values in camera pixels, as channel.Config.Resize leaves them, so a small capture is harder
+// than the preset's 4K capture: its cells are fewer pixels under the same blur.
 func geomConfig(t testing.TB, preset string, w, h int) channel.Config {
 	t.Helper()
 	cfg, err := channel.Preset(preset)
@@ -72,10 +72,7 @@ func geomConfig(t testing.TB, preset string, w, h int) channel.Config {
 		t.Fatal(err)
 	}
 	if w != 0 {
-		k := float64(w) / float64(cfg.Geometry.Width)
 		cfg = cfg.Resize(w, h)
-		cfg.Optics.Blur *= k
-		cfg.Geometry.Shake *= k
 	}
 	return cfg
 }

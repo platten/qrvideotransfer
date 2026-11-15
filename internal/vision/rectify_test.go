@@ -156,3 +156,25 @@ func TestFitErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestFitTooFewAnchors: when fewer than a quarter of the anchors inside the capture are located
+// (here none, then a fifth), Fit reports an error and no mesh; with a third located it fits.
+func TestFitTooFewAnchors(t *testing.T) {
+	c := geomNewCode(t, 320, 180, 8, 2, 1, 24)
+	anchors := c.layout.Anchors()
+	for _, tc := range []struct {
+		keep  int // keep every keep-th anchor, grey out the rest; 0 keeps none
+		fails bool
+	}{{0, true}, {5, true}, {3, false}} {
+		f := geomPlain(c, 0)
+		for i, a := range anchors {
+			if tc.keep == 0 || i%tc.keep != 0 {
+				geomPaintCells(c, f, a.X, a.Y, a.X+8, a.Y+4, func(int, int) uint16 { return 126 })
+			}
+		}
+		m, _, err := MeshFitter{}.Fit(f, geomPlainQuad(c), c.layout)
+		if fails := err != nil; fails != tc.fails || (m == nil) != tc.fails {
+			t.Errorf("keeping every %d: error %v, mesh %v", tc.keep, err, m != nil)
+		}
+	}
+}

@@ -29,25 +29,32 @@ func TestDetectPlain(t *testing.T) {
 	}
 }
 
-// TestDetectRotated: with the screen rolled by 90, 180 and 270 degrees and mirrored-free, the inverted
-// finder still names the corners.
+// TestDetectRotated: with the screen rolled by 90, 180, 270 and 33 degrees (not mirrored), the
+// inverted finder still names the corners. Two configurations: the original one, the ideal preset
+// at 1280 x 720 with the screen filling half the width (2.7 camera pixels per finder module), and a
+// square 1280 x 1280 capture filled to 0.8 (4.3 pixels per module).
 func TestDetectRotated(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 4, 2, 1, 2)
-	for _, roll := range []float64{90, 180, 270, 33} {
-		cfg := geomConfig(t, "ideal", 1280, 1280) // square, so the rolled screen fits
-		cfg.Geometry.Roll = roll
-		cfg.Geometry.Fill = 0.8
-		fs, ts := geomFilm(t, c, cfg, 0, 1, 5)
-		var d FinderDetector
-		q, ok := d.Detect(fs[0], nil)
-		if !ok {
-			t.Errorf("roll %v: not found", roll)
-			continue
-		}
-		want, mod := geomFinderTruth(c, ts[0])
-		for k := range 4 {
-			if e := geomDist(q.Centres[k], want[k]); e > mod[k]/2 {
-				t.Errorf("roll %v: centre %d at %v, want %v", roll, k, q.Centres[k], want[k])
+	for _, size := range []struct {
+		w, h int
+		fill float64
+	}{{1280, 720, 0.5}, {1280, 1280, 0.8}} {
+		for _, roll := range []float64{90, 180, 270, 33} {
+			cfg := geomConfig(t, "ideal", size.w, size.h)
+			cfg.Geometry.Roll = roll
+			cfg.Geometry.Fill = size.fill
+			fs, ts := geomFilm(t, c, cfg, 0, 1, 5)
+			var d FinderDetector
+			q, ok := d.Detect(fs[0], nil)
+			if !ok {
+				t.Errorf("%dx%d fill %v roll %v: not found", size.w, size.h, size.fill, roll)
+				continue
+			}
+			want, mod := geomFinderTruth(c, ts[0])
+			for k := range 4 {
+				if e := geomDist(q.Centres[k], want[k]); e > mod[k]/2 {
+					t.Errorf("%dx%d fill %v roll %v: centre %d at %v, want %v", size.w, size.h, size.fill, roll, k, q.Centres[k], want[k])
+				}
 			}
 		}
 	}
@@ -159,6 +166,20 @@ func TestDetectFiner(t *testing.T) {
 	for k := range 4 {
 		if geomDist(q.Centres[k], want[k]) > mod[k]/2 {
 			t.Errorf("centre %d at %v, want %v", k, q.Centres[k], want[k])
+		}
+	}
+}
+
+// TestViewLimits: a capture is accepted up to the video engine's capture limits (8K UHD in either
+// orientation) and refused beyond them.
+func TestViewLimits(t *testing.T) {
+	for _, tc := range []struct {
+		w, h int
+		ok   bool
+	}{{7680, 16, true}, {16, 7680, true}, {7682, 16, false}, {16, 7682, false}, {4322, 4322, false}} {
+		f := &video.Frame{W: tc.w, H: tc.h, Bits: 8, Y: make([]uint16, tc.w*tc.h)}
+		if _, ok := geomView(f); ok != tc.ok {
+			t.Errorf("%d x %d: accepted %v, want %v", tc.w, tc.h, ok, tc.ok)
 		}
 	}
 }
