@@ -221,17 +221,19 @@ func TestCIResultNeedsEveryJob(t *testing.T) {
 	}
 }
 
-// TestCIRetargetAndCodeOutput checks two properties of ci.yml from the review of PR #35: a pull
-// request whose base branch changes (an edited event) is classified again (M2), and ci result
-// fails unless the changes job's code output is exactly true or false (L3).
-func TestCIRetargetAndCodeOutput(t *testing.T) {
+// TestCIStackedAndCodeOutput checks properties of ci.yml from the review of PR #35: the changes job
+// receives the base branch and the default branch, so that a stacked pull request never skips
+// (M2); ci result fails unless the changes job's code output is exactly true or false (L3); and
+// the pull_request trigger keeps its default types, without edited, because editing a title or body
+// must not cost a full run (the base-branch rule closes the retarget hole by itself).
+func TestCIStackedAndCodeOutput(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(b)
 	for _, want := range []string{
-		"  pull_request:\n    types: [opened, synchronize, reopened, edited]\n", //nolint:misspell // a GitHub event type
+		"  pull_request:\n\n",
 		`if [ "$CODE" != true ] && [ "$CODE" != false ]; then`,
 		`-base-ref "$BASE_REF" -default-branch "$DEFAULT_BRANCH"`,
 		"BASE_REF: ${{ github.event.pull_request.base.ref }}",
@@ -240,6 +242,11 @@ func TestCIRetargetAndCodeOutput(t *testing.T) {
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("ci.yml lacks %q", want)
+		}
+	}
+	for _, l := range lines(b) {
+		if strings.Contains(stripComment(l), "edited") {
+			t.Errorf("ci.yml triggers on edited: %q", l)
 		}
 	}
 }
