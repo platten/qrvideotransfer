@@ -175,7 +175,7 @@ At 1080p (480 x 270 cells):
 | Element | Purpose | Share |
 | --- | --- | --- |
 | Mid-grey border, 2 cells | Separates the code from the bezel and player controls without biasing exposure | 2.3% |
-| Four finders, 14 x 14 cells plus separator | Concentric squares giving a 1:1:3:1:1 signature at any scale or angle. The bottom-right one is inverted to fix rotation and mirroring | 0.8% |
+| Four finders, 14 x 14 cells plus separator | Concentric squares giving a 1:1:3:1:1 signature at any scale or angle. The bottom-right one is inverted to fix rotation; a decoder assumes the capture is not mirrored | 0.8% |
 | Four header copies, 59 x 4 slots of 2 x 2 cells | Frame identity. Four copies because a capture can show two code frames at once | 2.9% |
 | Four palette strips, 8 patches | A reference patch for every level | 0.4% |
 | 131 anchors every 32 x 30 cells | A checker corner for sub-pixel geometry and a four-quadrant phase marker | 3.2% |
@@ -221,9 +221,11 @@ a valid mid-grey. Mixed cells must be discarded reliably.
 Rules for version 1:
 
 1. **Identity.** A capture is usable if at least one header copy passes its CRC with a matching session.
-   If two copies give different frame indices, both are kept. If none decodes, the index may be inferred
-   as the last index plus 0 to 3, chosen by the phase markers, only when fewer than four frame periods
-   have passed. Otherwise the capture is skipped.
+   If two copies give different frame indices, both are kept. If none decodes, the capture is skipped:
+   in M2 the detector does not return a quad without a decoded header (section 10, step 1). Inferring
+   the index as the last index plus 0 to 3, chosen by the phase markers, when fewer than four frame
+   periods have passed, is deferred to M5, where a tracked quad could carry the header from a
+   neighbouring capture.
 2. **Phase field.** At each anchor, the four quadrant intensities are linearised using the anchor's own
    black and white and the palette's gamma, then solved for non-negative weights summing to one, one per
    value of frame index mod 4. Interpolating across the lattice gives per-cell weights. This handles
@@ -514,13 +516,87 @@ For each capture:
    stay independent of what surrounds a finder, match the inner light, dark (3), light pattern and
    require only that the flanks are dark for at least half a module (inverted for the fourth finder).
    Choose four candidates with consistent module size. Track from the previous capture when possible.
+   As built: a pixel is dark when it is below lo + 0.7 (hi - lo), lo and hi being the minimum and
+   maximum of a window about a twentieth of the downscaled width across; a local mean failed beside
+   the dark surround of the screen. The threshold sits at about half the light in linear terms, not
+   at the code-value midrange (about a fifth of it): blur acts on linear light, and at the midrange
+   it widened the light rings and erased the thin outer dark ring at 4 to 5 pixels per module. For
+   the same reason the flanks need only a quarter module, not half. A row hit is confirmed along its
+   column and, loosely, both diagonals (every line through concentric squares crosses them in the
+   same ratios), and each candidate's ring is verified at full resolution, where its centre is
+   refined from the edges of ring 2, found midway between the extremes of rings 2 and 3, along seven
+   rows and seven columns. The four are chosen as a convex quad in clockwise order on the image, with
+   module sizes within a factor of 3 (25 degrees of tilt gives about 2) and left and right sides of
+   126 modules within a factor of 1/0.65. Data cells mimic finders at the finder's own scale (on a
+   grid of 135 rows or fewer a module is at most one cell; on a 240 x 135 grid 1 to 4% of captures
+   gave a wrong quad), so the six best quads are tried in turn and a quad is reported only when its
+   header decodes (step 2) and the anchors agree with every finder. The decoded grid must imply at
+   least 1.5 camera pixels per cell between the finders, which bounds the layout built for it by the
+   image's size, and at most one layout is built per capture. With that grid the anchors are located
+   as in step 3; at least eight, and a quarter of those inside the capture, must be found, and each
+   finder in turn must lie within one cell of where a model fitted to the located anchors and the
+   other three finders puts it. One copy can decode with one finder wrong (it happened once in 200
+   poses, with a finder 20 cells off), since a copy is placed mostly by the finders nearest it. An
+   earlier rule, requiring one of the two anchors next to each finder, rejected 17 of 200 real harsh
+   captures whose anchors there were unreadable. A capture whose four copies all fail is not located
+   (section 7, rule 1); on the simulator's presets that never happened (step 2's 1,000 of 1,000). A
+   finder covered by glare is not located either (below).
+   **Measured limit** (`TestDetectModuleSweep`): a 240 x 135 grid, whose finder module is one cell,
+   filmed at 1920 x 1080 with each preset's own blur, 200 poses per size (seeds 7000 to 7199). Finders
+   found, a quad counting only when confirmed, by untilted camera pixels per cell:
+
+   | Preset (blur) | 2.8 | 3.2 | 3.6 | 4.0 | 4.4 | 4.8 | 6.0 | 7.2 |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | tripod (1.0) | 200 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
+   | handheld (1.5) | 16 | 187 | 199 | 200 | 200 | 200 | 200 | 200 |
+   | budget-android (1.5) | 9 | 183 | 198 | 200 | 200 | 200 | 200 | 200 |
+   | iphone-hdr (1.5, 10-bit HLG) | 0 | 85 | 127 | 183 | 200 | 200 | 200 | 200 |
+   | harsh (2.0, tilt 25, glare 2%) | 0 | 0 | 4 | 22 | 68 | 103 | 167 | 163 |
+
+   No quad was wrong from 3.6 pixels up; below, up to 3 of 200 had a centre more than half a module
+   off. The cell-centre error at 4.0 pixels per cell was 0.044 (tripod), 0.084 (handheld), 0.075
+   (budget-android) and 0.117 (iphone-hdr) cell RMS. Detection is reliable (at least 199 of 200, none
+   wrong) from 3.6 camera pixels per finder module under the handheld blur and 4.4 under the HLG
+   preset; harsh does not reach it at 1080p (a finder under its glare patch, or out of frame at 25
+   degrees and fill 0.75 or more). Always-on tests assert every pose at 4.0 (handheld) and 4.8
+   (iphone-hdr) (`TestDetectModuleLimit`). On grids of 270 rows or more a finder module is two cells
+   or more, so there the limit on cells comes from the anchors and the sampling, not the finders.
+   **Departure from "at most 1280 pixels wide", accepted:** when no quad is found in a downscaled
+   capture, the scan is repeated once one step finer (1920 pixels wide for 4K). At 25 degrees of tilt
+   a far finder can measure under 3 pixels per module at 1280 pixels wide. On 1,000 simulated 4K poses
+   of the handheld preset tilted up to 25 degrees (seeds 10000 to 10999), the 1280-pixel scan alone
+   found 997 quads; with the rescan, 1,000. Tripod and handheld found 1,000 of 1,000 either way.
+   Clockwise order assumes a capture that is not mirrored (section 4.1 of FORMAT.md); a mirrored
+   capture swaps the top-right and bottom-left finders and its header does not decode. Mirrored
+   recordings are left to M5.
 2. **Read the header.** Fit a homography to the four finder centres and sample the header slots at their
    fixed fractions, using the adjacent finder's black and white as references. Soft Viterbi decoding per
    copy, then per pair, then all four.
+   As built: barrel distortion bows the frame edges between the finders by more than half a slot
+   (about 16 pixels against slots of 13 at 4K with k1 = 0.04), so the homography is fitted after
+   radial distortion about the capture's centre, with k1 chosen from 13 values in [0, 0.12] by the
+   slots' total contrast. A finder's black and white come from its centre column (ring 0 and 1 dark,
+   ring 2 light; inverted for the fourth finder), where a module is 1/126 of the finder rectangle
+   whatever the grid. Pairs are tried among the copies that did not decode alone, and all four only
+   when nothing decoded.
 3. **Fit the mesh.** Locate every anchor's checker corner to sub-pixel accuracy, reject outliers, and
    interpolate. This absorbs lens distortion, rolling-shutter shear and stabilisation warping.
+   As built: anchors are visited from the finders outwards; each saddle is predicted by the model of
+   step 2 plus the displacement of the anchors already located nearby, found by the strongest saddle
+   response within 1.5 cells and refined where the image gradient is perpendicular to the direction
+   from the corner. The model, k1 included, is refitted to the corners, and a corner more than 0.35 cell
+   from its neighbours' median displacement is rejected. The mesh's nodes, every 4 cells, are the model
+   plus the corners' residuals interpolated over the anchor lattice; cell (x, y) covers
+   [x, x+1) x [y, y+1) of the mesh's coordinates. The fit fails unless at least one anchor, and at
+   least a quarter of those the model places inside the capture, are located.
 4. **Sample.** Take the mean of the central 60% of each cell's footprint directly from the camera planes.
-   The image is never warped whole.
+   The image is never warped whole. As built: a cell is saturated when any of its brightness samples is
+   at the bottom or top of the code range; a cell outside the capture is saturated with zero values.
+   **Known gap:** in limited-range video a sensor-clipped glare patch lands near the nominal white (235
+   at 8 bits), not the top of the code range, so most glared cells come back as near-white values,
+   not saturated (the glare study: under 1% flagged), contrary to the table below ("saturated cells
+   become unknown"). It closes in the follow-up to PR #30, which flags a cell when a stated share of
+   its footprint is at or near the clipping level.
 5. **Calibrate levels.** Per tile of about 32 x 30 cells, keep a centre and variance for each level.
    Start from the palette and the anchors' black and white, refine with two or three rounds of
    expectation-maximisation on the data cells (scrambling makes levels equally likely, and their order
@@ -535,7 +611,7 @@ For each capture:
 
 | Distortion | Handled by |
 | --- | --- |
-| Perspective, rotation, mirroring | Finders and homography |
+| Perspective, rotation | Finders and homography (the capture is assumed not to be mirrored) |
 | Lens distortion, shake, stabilisation warping | Anchor mesh, refitted for every capture |
 | Moire, backlight flicker | Footprint averaging, scrambling, stripe cancellation |
 | Exposure, white balance, tone mapping, vignetting | Per-tile level calibration |
@@ -567,7 +643,10 @@ Whether a setting works depends on the camera. All of these must hold (simulated
 
 1. Camera frame rate at least twice the display rate.
 2. Camera pixels per cell `s = fill x camera width / GridX` at least the mode's minimum, with fill 0.80
-   handheld and 0.90 on a tripod.
+   handheld and 0.90 on a tripod. Geometry alone (finders, header, mesh; section 10 step 1, measured
+   on the simulator with a finder module of one cell) is reliable from about 3.6 camera pixels per
+   cell under the handheld blur and 4.4 under the 10-bit HLG preset, so the planning point of 5
+   leaves a margin of about 1.4 and 1.1 times; at 5 the cell-centre error is about 0.05 cell RMS.
 3. Recorder bits per cell per code frame `q = 0.9 x bitrate / (rate x cells)` at least 9 for `fast`,
    5.5 for `normal`, 2.5 for `robust` with HEVC; 1.4 times those with H.264.
 4. The display video's bitrate, `8.4 x cells x rate`, stays playable: 33 Mbit/s for 1080p30,
@@ -1490,3 +1569,8 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Reservation stall fix: section 12 starts the stall clock when an instance's 512 MiB of linear memory has been reserved, on the worker and in-process paths; `EngineLoadLimit` now bounds the phase until the reservation (from a worker's start, or from an in-process instance's turn, after which the instance is cancelled); the worker reports the reservation in its progress message, clamped to the message's arrival. Prompted by two false stalls on macos-26-intel (CI run 43693218308) |
 | 2026-11-15 | Reservation stall fix, round 2: section 12 says the worker reports its reservation from the goroutine that made it, before any guest code runs, not in its periodic progress report, which a spinning guest can hold back for good by blocking the garbage collection the reservation starts (CI run 43704037510) |
 | 2026-11-15 | Worker parent-death signal, review of PR #37: section 12 says that on Linux the worker is started with SIGKILL as its parent-death signal, from a thread held until it has been waited for |
+| 2026-11-15 | M2 Geometry: section 10, steps 1 to 4, records what was built: the midrange binarisation, diagonal and full-resolution checks and quad rules of the detector, its one finer rescan when the 1280-pixel scan finds no quad (measured: 3 of 1,000 poses at 25 degrees of tilt), and that it assumes a capture that is not mirrored; radial distortion with k1 chosen by slot contrast for the header, the finder references, and which pairs are tried; the order, refinement, outlier rule and node spacing of the mesh and its cell coordinates; and what the sampler calls saturated |
+| 2026-11-15 | M2 Geometry, designer ruling on PR #30: section 6 and section 10's distortion table no longer claim that mirroring is handled; a decoder assumes the capture is not mirrored (FORMAT.md section 4.1), and mirrored recordings are left to M5. Section 10 step 1 records the accepted departure from "at most 1280 pixels wide" (one rescan one step finer when no quad is found) with its evidence: 997 of 1,000 simulated 4K poses at up to 25 degrees of tilt found by the 1280-pixel scan alone, 1,000 with the rescan |
+| 2026-11-15 | M2 Geometry, review of PR #30: section 10 step 1 gives the detector's threshold at about half the light in linear terms and flanks of a quarter module (blur in linear light thinned the outer dark ring, and finders of 4 to 6 pixels per module were missed), says that a quad is reported only when its header decodes (data cells gave wrong quads on a 240 x 135 grid), and records the measured limit: found in every pose at 4.0 camera pixels per untilted module under the handheld blur. Step 3 states when the fit fails (no anchor, or under a quarter of those inside the capture, located) |
+| 2026-11-15 | M2 Geometry, review of PR #30, measured limits: section 10 step 1 adds the anchor check on a confirmed quad (one copy decoded with one finder wrong) and the table of finders found against camera pixels per cell for each preset, with the limit (3.6 handheld, 4.4 HLG, not reached for harsh at 1080p); section 11 condition 2 says what the geometry needs against the planning point of 5 |
+| 2026-11-15 | M2 Geometry, review round 2 of PR #30: section 7 rule 1 defers the inference of an undecoded frame index to M5 (a tracked quad could carry the header from a neighbouring capture); in M2 a capture whose four copies all fail is skipped. Section 10 step 1 replaces the confirmation rule (one of the two anchors next to each finder, which rejected 17 of 200 real harsh captures) with a leave-one-out check of each finder against the located anchors, bounds the decoded grid by the image (1.5 pixels per cell, one layout per capture); step 4 records that limited-range glare escapes the saturation flag until the follow-up PR. The table of finders found is re-measured with the new rule |
