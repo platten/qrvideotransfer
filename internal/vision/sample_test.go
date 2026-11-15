@@ -141,15 +141,12 @@ func TestSampleInvalid(t *testing.T) {
 // mesh fall on the right side of the midpoint between the anchors' dark and light levels for at
 // least 99.9% of cells, over 2 poses from seed 4000.
 func TestSampleSimulated(t *testing.T) {
+	raceSkipStatistics(t)
 	c := geomNewCode(t, 480, 270, 4, 1, 1, 34)
 	cfg := geomConfig(t, "tripod", 0, 0)
 	cells := c.layout.DataCells()
 	obs := make([]modem.Obs, len(cells))
-	n := 2
-	if geomRace {
-		n = 1
-	}
-	for _, p := range geomPoses(t, c, cfg, n, 4000) {
+	for _, p := range geomPoses(t, c, cfg, 2, 4000) {
 		var d FinderDetector
 		q, ok := d.Detect(p.f, nil)
 		if !ok {
