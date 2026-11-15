@@ -35,9 +35,10 @@ type procRunner struct {
 var errWorkerStart = errors.New("cannot start an engine worker")
 
 // workerEnv is the environment a worker gets: nothing but what the operating system needs to run a
-// Go program, and, in tests, where coverage goes.
+// Go program, and, in tests, where coverage goes. It is never nil: exec.Cmd takes a nil Env as "inherit
+// the whole environment". On Windows SYSTEMROOT is kept, and exec.Cmd adds it if it is unset.
 func workerEnv() []string {
-	var env []string
+	env := []string{}
 	keep := []string{"GOCOVERDIR"}
 	if runtime.GOOS == "windows" {
 		keep = append(keep, "SYSTEMROOT", "TEMP", "TMP")
