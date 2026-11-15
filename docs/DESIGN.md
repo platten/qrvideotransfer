@@ -846,6 +846,12 @@ Costs a user should expect:
   its turn, the module's first compilation) it is not stalled, unless qrvt is itself waiting on it for
   a frame's timestamp; that wait also ends at the stall limit or at cancellation, and cancelling a
   decode closes its pipe (`context.AfterFunc`), so an instance blocked writing a frame stops too.
+  Nor is an instance stalled until its 512 MiB of linear memory has been reserved, which happens
+  before any guest code runs: the stall clock starts at the reservation, on this path and in a
+  worker, and `video.EngineLoadLimit` bounds the time from the instance's turn to it (the instance is
+  cancelled after 10 minutes). Two reservations took 30 s on macos-26-intel and were stopped as
+  stalls (CI run 43693218308; the cause there was not established, and parallel reservations under a
+  memory limit reproduce it locally).
   Encoding and `Concat` instances are not stopped by the watchdog (below). At most GOMAXPROCS - 1 instances run at once
   (`video.EngineInstances()`, at least one), and an instance waiting for its turn is not stalled. The
   cap was added after a 30 s stall on the 4-vCPU CI runners stopped after 79 s, reasoning that compiled
@@ -892,9 +898,14 @@ Costs a user should expect:
   a spinning guest never returns to Go, and it also blocks Go's stop-the-world garbage collection, so
   while it spins the worker's own timers and goroutines cannot be trusted. The parent's kill is the
   control. Loading and compiling the engine, which on a first run
-  of a slow machine takes longer than 30 s, is not a stall: the worker sends a ready message once the
-  engine is loaded (before any guest code runs), the watchdog counts from then on, and the start and
-  loading phase is bounded by `video.EngineLoadLimit`, 10 minutes, after which the worker is killed.
+  of a slow machine takes longer than 30 s, is not a stall, nor is reserving the instance's 512 MiB:
+  the worker sends a ready message once the engine is loaded and reports the reservation in a
+  progress message sent by the goroutine that made it, both before any guest code runs (a periodic
+  report could be held back for good: once the guest spins, a garbage collection the reservation
+  started stops every other goroutine of the worker), and the parent never takes the reported time
+  as later than the message's arrival; the watchdog counts from the reservation, and
+  the phase from the worker's start to it is bounded by `video.EngineLoadLimit`, 10 minutes, after
+  which the worker is killed.
   Compiling in qrvt's own process is not a stall either and has no limit but the context. Measured on
   one machine (the S1 development machine, spike S1 section 13), not on the CI runners, against the
   engine in process with the option off: 1080p H.264 decoding 9% slower (most of it the 0.42-0.50 s
@@ -1525,6 +1536,8 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
 | 2026-11-15 | M2 open risks: section 12's worker progress message also carries the time from readiness to the worker's linear memory being reserved and to its input being opened; commit 0f2f4fc added these two fields in M1 stream D and raised the protocol to version 3, which the code ships (`protocolVersion`), and no row recorded it (review of PR #26, L1; the row above for version 2 is correct for commit cec1dc3) |
 | 2026-11-15 | Stream G, CI budget: section 17 says a newer push to a pull request cancels its older `ci` and `codeql` runs, that runs on main, tags and schedules are never cancelled, and that the workflow policy test enforces this |
+| 2026-11-15 | Reservation stall fix: section 12 starts the stall clock when an instance's 512 MiB of linear memory has been reserved, on the worker and in-process paths; `EngineLoadLimit` now bounds the phase until the reservation (from a worker's start, or from an in-process instance's turn, after which the instance is cancelled); the worker reports the reservation in its progress message, clamped to the message's arrival. Prompted by two false stalls on macos-26-intel (CI run 43693218308) |
+| 2026-11-15 | Reservation stall fix, round 2: section 12 says the worker reports its reservation from the goroutine that made it, before any guest code runs, not in its periodic progress report, which a spinning guest can hold back for good by blocking the garbage collection the reservation starts (CI run 43704037510) |
 | 2026-11-15 | M2 radiometry and phase: section 7 rule 2 divides an anchor's linearised quadrants by their own total rather than by its white (fringes made clean anchors look mixed), interpolates bilinearly with missing anchors predicted linearly, and gives the measured weight error; section 10 step 5 fits only the cells the phase field counts (blends made clean cells' soft bits up to 18 times underconfident), step 6 gives stripe cancellation as built, step 7 widens a cell's variances by its phase weight and settles the log-variance term (omitted; honest without it) and the 1/12 floor (never binds); section 15 states the Poisson reading of the honesty test and the measured results of the radiometry and phase rows, of which phase weight error at most 0.05 is not met and its test is left failing |
 | 2026-11-15 | Owner's decision of 2026-11-15 on M2's phase field: section 15 replaces "phase weight error at most 0.05" with no wrong credit, a credited cell's true weight at least 0.80, a per-preset yield of clean cells (measured less 0.02) and a regression bound of 0.09 inner and 0.16 in the pockets, and lists the five estimators measured; section 7 rules 2 and 3 and section 10 step 8 record the accepted error, the yield and that per-cell estimation is not built, to be revisited in M5 only if the S2 or G1 recordings show the discarded cells matter |
 | 2026-11-15 | Review of PR #31: section 10 step 7 widens the variances per plane used and averaged (the code had divided by three planes for grey modulations, a third of what the step said), takes 0.02 off the share of another frame for the phase field's reading of clean cells, justifies the size against the partly mixed cells' table, and states the log-variance figures per modulation (Gray4 1.43 nats, RGB8 3.41); section 15 bounds the point estimate of pooled buckets where 100 errors are expected and asserts the partly mixed cells' table, and says which phase-field figures CI exercises |
