@@ -30,7 +30,7 @@ type meter struct {
 	// In a worker, the phases between readiness and the first read: when the instance's linear
 	// memory was reserved and when it opened its input.
 	memAt, openAt atomic.Int64
-	cancelledAt   atomic.Int64 // stub for the test commit
+	cancelledAt   atomic.Int64 // when the watchdog cancelled the instance
 }
 
 // ready records that the instance is ready to run.
@@ -78,6 +78,9 @@ func (m *meter) breakdown(now time.Time) string {
 	s += fmt.Sprintf(", %d reads, %d bytes", m.inCalls.Load(), m.inBytes.Load())
 	if m.progressAt.Load() != 0 {
 		s += ", " + secs(now.Sub(at(&m.progressAt))) + " since last progress"
+	}
+	if m.cancelledAt.Load() != 0 {
+		s += ", stopped " + secs(now.Sub(at(&m.cancelledAt))) + " after its cancellation"
 	}
 	return s + fmt.Sprintf(", %d of %d worker processes running, %d of %d in-process instances running",
 		len(workerSlots), cap(workerSlots), len(slots), cap(slots))
@@ -129,6 +132,7 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 			}
 			if check != nil {
 				if err := check(m, active); err != nil {
+					m.cancelledAt.Store(time.Now().UnixNano())
 					cancel(err)
 					return
 				}
@@ -139,6 +143,7 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 				}
 				last, since = v, now
 			} else if now.Sub(since) >= timeout {
+				m.cancelledAt.Store(time.Now().UnixNano())
 				cancel(stallError(timeout))
 				return
 			}
