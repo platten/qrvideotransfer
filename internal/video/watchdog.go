@@ -30,6 +30,10 @@ type meter struct {
 	// In a worker, the phases between readiness and the first read: when the instance's linear
 	// memory was reserved and when it opened its input.
 	memAt, openAt atomic.Int64
+	// loading is set when the instance starts loading (a worker process's start, an in-process
+	// instance's turn). Until its linear memory is reserved (memAt), it is loading, not stalled:
+	// the reservation precedes any guest code, and EngineLoadLimit bounds it instead.
+	loading atomic.Bool
 	// memPeak is the largest linear memory the instance reached, in bytes (timedAlloc).
 	memPeak     atomic.Int64
 	cancelledAt atomic.Int64 // when the watchdog cancelled the instance
@@ -43,6 +47,9 @@ func (m *meter) ready() { m.readyAt.CompareAndSwap(0, time.Now().UnixNano()) }
 
 // reserved records that the instance's linear memory has been reserved.
 func (m *meter) reserved() { m.memAt.CompareAndSwap(0, time.Now().UnixNano()) }
+
+// reserving reports whether the instance is loading and has not yet reserved its linear memory.
+func (m *meter) reserving() bool { return m.loading.Load() && m.memAt.Load() == 0 }
 
 // opened records that the instance opened its input file.
 func (m *meter) opened() { m.openAt.CompareAndSwap(0, time.Now().UnixNano()) }
@@ -125,7 +132,8 @@ func (m *meter) value() int64 {
 const watchTick = time.Second
 
 // watch cancels the instance with the stall error when m shows no progress for timeout, or with
-// check's error when it returns one, until done is closed.
+// check's error when it returns one, until done is closed. Time spent waiting, or loading until
+// the instance's memory is reserved, is neither a stall nor active time.
 func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) error, cancel context.CancelCauseFunc, done <-chan struct{}) {
 	t := time.NewTicker(watchTick)
 	defer t.Stop()
@@ -136,7 +144,7 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 		case <-done:
 			return
 		case now := <-t.C:
-			waiting := m.waiting.Load() > 0 && m.blocked.Load() == 0
+			waiting := m.waiting.Load() > 0 && m.blocked.Load() == 0 || m.reserving()
 			if !waiting {
 				active += watchTick
 			}

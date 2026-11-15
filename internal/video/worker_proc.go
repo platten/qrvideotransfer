@@ -52,10 +52,11 @@ func workerEnv() []string {
 
 // exec implements runner. The watchdog's cancellation kills the worker, then waits for it.
 func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string) (int, error) {
-	// Until the worker has started and loaded the engine (a first compilation takes seconds to
-	// minutes, and starting a process on a loaded machine can take seconds), it is not stalled;
-	// loadLimit bounds that phase instead. Nor is it stalled while it waits for a worker slot. The
-	// program's input is sent only once it is ready.
+	// Until the worker has started, loaded the engine and reserved the instance's memory (a first
+	// compilation takes seconds to minutes, starting a process on a loaded machine can take seconds,
+	// and so can reserving 512 MiB under memory pressure), it is not stalled; loadLimit bounds that
+	// phase instead. Nor is it stalled while it waits for a worker slot. The program's input is sent
+	// only once it is ready.
 	var once sync.Once
 	ready := make(chan struct{})
 	m.waiting.Add(1)
@@ -116,13 +117,13 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 		case <-finished:
 		}
 	}()
+	m.loading.Store(true)
 	var overdue atomic.Bool
 	loadTimer := time.AfterFunc(loadLimit, func() {
-		select {
-		case <-ready:
-		default:
+		if m.memAt.Load() == 0 { // never became ready, or never reported its reservation
 			overdue.Store(true)
-			_ = cmd.Process.Kill() // never became ready
+			m.cancelledAt.CompareAndSwap(0, time.Now().UnixNano())
+			_ = cmd.Process.Kill()
 		}
 	})
 	defer loadTimer.Stop()
@@ -136,8 +137,7 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 		return 0, ctx.Err()
 	}
 	if overdue.Load() {
-		return 0, &LimitError{Limit: "EngineLoadLimit", Value: loadLimit.Seconds(), Max: loadLimit.Seconds(),
-			Hint: "the engine worker did not finish loading the video engine in that time and was stopped"}
+		return 0, loadError()
 	}
 	if err != nil {
 		return 0, fmt.Errorf("%w; worker log: %s", err, tail.String())
@@ -299,10 +299,13 @@ func workerCount(cpus int, mem uint64) int {
 // ends.
 func WorkerProcesses() int { return cap(workerSlots) }
 
-// EngineLoadLimit bounds the time from starting an engine worker process to its message that the
-// engine is loaded and the program starts (docs/SECURITY.md section 5). The stall watchdog does not
-// cover that phase, because a first compilation on a slow machine takes longer than
-// EngineStallTimeout; a worker that has not sent the message by then is killed.
+// EngineLoadLimit bounds an instance's load phase (docs/SECURITY.md section 5): from starting an
+// engine worker process, or from an in-process instance's turn, until the instance's 512 MiB of
+// linear memory is reserved, which happens before any guest code runs. The stall watchdog does not
+// cover that phase, because a first compilation on a slow machine, or a reservation under memory
+// pressure, takes longer than EngineStallTimeout; its clock starts when the reservation completes.
+// A worker that has not reported the reservation by then is killed; an in-process instance is
+// cancelled.
 const EngineLoadLimit = 10 * time.Minute
 
 // loadLimit is EngineLoadLimit; tests shorten it.
