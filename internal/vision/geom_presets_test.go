@@ -9,6 +9,7 @@ import (
 
 	"github.com/platten/qrvideotransfer/internal/channel"
 	"github.com/platten/qrvideotransfer/internal/frame"
+	"github.com/platten/qrvideotransfer/internal/modem"
 )
 
 // geomStats are the geometry assertions' counts over a set of poses.
@@ -238,4 +239,28 @@ func TestGeometry16x10(t *testing.T) {
 	cfg := geomConfig(t, "handheld", 1920, 1080)
 	cfg.Geometry.Fill = 0.7
 	geomCheck(t, geomSweep(t, c, cfg, 12, 3000), 1, 1)
+}
+
+// BenchmarkGeometry4K times detection, header reading, mesh fitting and sampling of every data
+// cell for one 4K handheld capture of a 480 x 270 grid, on one goroutine.
+func BenchmarkGeometry4K(b *testing.B) {
+	c := geomNewCode(b, 480, 270, 4, 2, 1, 15)
+	p := geomPoses(b, c, geomConfig(b, "handheld", 0, 0), 1, 5000)[0]
+	cells := c.layout.DataCells()
+	obs := make([]modem.Obs, len(cells))
+	var d FinderDetector
+	for b.Loop() {
+		q, ok := d.Detect(p.f, nil)
+		if !ok {
+			b.Fatal("not found")
+		}
+		if _, ok := (SlotReader{}).Read(p.f, q); !ok {
+			b.Fatal("no header")
+		}
+		m, _, err := MeshFitter{}.Fit(p.f, q, c.layout)
+		if err != nil {
+			b.Fatal(err)
+		}
+		FootprintSampler{}.Sample(obs, p.f, m, cells)
+	}
 }

@@ -33,7 +33,7 @@ func TestHeaderPlain(t *testing.T) {
 
 // geomPaintSlot paints slot s of copy cp of a rendered frame of c: light, dark, or mid-grey.
 func geomPaintSlot(c *geomCode, f *video.Frame, cp, s int, v uint16) {
-	r := c.layout.Slot(frame.Corner(cp), s/4, s%4).Pixels(c.pitch) //nolint:gosec // 0..3
+	r := c.layout.Slot(frame.Corner(cp), s/4, s%4).Pixels(c.pitch)
 	r = r.Intersect(image.Rect(0, 0, f.W, f.H))
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
@@ -62,7 +62,9 @@ func TestHeaderSplit(t *testing.T) {
 	if !ok || len(hs) != 2 {
 		t.Fatalf("got %v %v, want two headers", hs, ok)
 	}
-	if !(hs[0] == c.headers[0] && hs[1] == c.headers[1]) && !(hs[0] == c.headers[1] && hs[1] == c.headers[0]) {
+	same := hs[0] == c.headers[0] && hs[1] == c.headers[1]
+	swapped := hs[0] == c.headers[1] && hs[1] == c.headers[0]
+	if !same && !swapped {
 		t.Errorf("got %v, want %v and %v", hs, c.headers[0], c.headers[1])
 	}
 }
@@ -139,7 +141,7 @@ func TestHeaderAllFour(t *testing.T) {
 }
 
 // geomSat clips v to -127..127.
-func geomSat(v int) int8 { return int8(max(-127, min(127, v))) } //nolint:gosec // clipped
+func geomSat(v int) int8 { return int8(max(-127, min(127, v))) }
 
 // TestHeaderNothing: a frame without a code, a quad off the frame, and malformed frames read nothing.
 func TestHeaderNothing(t *testing.T) {

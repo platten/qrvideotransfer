@@ -32,8 +32,9 @@ var _ Sampler = FootprintSampler{}
 // wider than 256 pixels gives a saturated observation with zero values: no information.
 func (FootprintSampler) Sample(dst []modem.Obs, f *video.Frame, m *Mesh, cells []frame.Cell) {
 	n := min(len(dst), len(cells))
+	dst, cells = dst[:n], cells[:n]
 	v, ok := geomView(f)
-	for i := range n {
+	for i := range dst {
 		if !ok {
 			dst[i] = modem.Obs{Saturated: true}
 			continue

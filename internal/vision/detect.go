@@ -99,7 +99,7 @@ func (d *FinderDetector) downscale(v *geomLuma, s int) {
 					sum += int(row[i])
 				}
 			}
-			d.small[y*sw+x] = uint16(sum / (s * s)) //nolint:gosec // mean of uint16
+			d.small[y*sw+x] = uint16(sum / (s * s)) //nolint:gosec // a mean of uint16 samples
 		}
 	}
 	r := max(4, sw/40)

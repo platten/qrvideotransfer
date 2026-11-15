@@ -28,7 +28,7 @@ func geomView(f *video.Frame) (geomLuma, bool) {
 	if f == nil || f.W < 1 || f.H < 1 || f.W > geomMaxSide || f.H > geomMaxSide || f.Bits < 8 || f.Bits > 16 || len(f.Y) < f.W*f.H {
 		return geomLuma{}, false
 	}
-	v := geomLuma{w: f.W, h: f.H, y: f.Y, scale: 1 / float32(int(1)<<(f.Bits-8)), top: uint16(int(1)<<f.Bits - 1)} //nolint:gosec // bits <= 16
+	v := geomLuma{w: f.W, h: f.H, y: f.Y, scale: 1 / float32(int(1)<<(f.Bits-8)), top: uint16(int(1)<<f.Bits - 1)}
 	cw, ch := (f.W+1)/2, (f.H+1)/2
 	if len(f.Cb) >= cw*ch && len(f.Cr) >= cw*ch {
 		v.cb, v.cr, v.cw, v.ch = f.Cb, f.Cr, cw, ch

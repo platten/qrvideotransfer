@@ -38,7 +38,7 @@ func (SlotReader) Read(f *video.Frame, q Quad) ([]frame.Header, bool) {
 			for _, c := range copies {
 				t += int(soft[c][s])
 			}
-			sum[s] = int8(max(-127, min(127, t))) //nolint:gosec // clipped
+			sum[s] = int8(max(-127, min(127, t)))
 		}
 		h, ok := frame.DecodeHeader(sum[:])
 		if ok && !slices.ContainsFunc(out, func(o frame.Header) bool { return o.FrameIndex == h.FrameIndex }) {
@@ -90,7 +90,7 @@ func copySoft(f *video.Frame, q Quad) ([4][frame.HeaderSlots]int8, bool) {
 		}
 		for s, val := range raw[c] {
 			t := (val - black) / (white - black)
-			soft[c][s] = int8(math.Round(float64(max(-127, min(127, headerSoftScale*(1-2*t)))))) //nolint:gosec // clipped
+			soft[c][s] = int8(math.Round(float64(max(-127, min(127, headerSoftScale*(1-2*t))))))
 		}
 	}
 	return soft, true
@@ -173,8 +173,8 @@ func headerRefs(v *geomLuma, m *geomModel) ([4][2]float32, bool) {
 			continue
 		}
 		seen = true
-		ex, ey := headerAxes(m, fc, 0, 0.3*u)
-		ex = gpt{ey.Y, -ey.X} // a square footprint: ey turned by 90 degrees
+		_, ey := headerAxes(m, fc, 0, 0.3*u)
+		ex := gpt{ey.Y, -ey.X} // a square footprint: ey turned by 90 degrees
 		var dark, light float32
 		for _, r := range []float64{-1, 0, 1} {
 			dark += v.patch(m.at(fc.add(gpt{0, r * u})), ex, ey, 3) / 3
@@ -182,7 +182,7 @@ func headerRefs(v *geomLuma, m *geomModel) ([4][2]float32, bool) {
 		for _, r := range []float64{-2, 2} {
 			light += v.patch(m.at(fc.add(gpt{0, r * u})), ex, ey, 3) / 2
 		}
-		if frame.Corner(k) == frame.BottomRight { //nolint:gosec // 0..3
+		if frame.Corner(k) == frame.BottomRight {
 			dark, light = light, dark
 		}
 		refs[k] = [2]float32{dark, light}

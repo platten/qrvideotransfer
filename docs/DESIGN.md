@@ -514,13 +514,38 @@ For each capture:
    stay independent of what surrounds a finder, match the inner light, dark (3), light pattern and
    require only that the flanks are dark for at least half a module (inverted for the fourth finder).
    Choose four candidates with consistent module size. Track from the previous capture when possible.
+   As built: a pixel is dark when it is below the midrange (mean of minimum and maximum) of a window
+   about a twentieth of the downscaled width across; a local mean failed beside the dark surround of
+   the screen. A row hit is confirmed along its column and, loosely, both diagonals (every line through
+   concentric squares crosses them in the same ratios), and each candidate's ring is verified at full
+   resolution, where its centre is refined from the ring's edges along seven rows and seven columns.
+   Random data cells produce finder-like hits with as many row hits as a real finder, so the four are
+   chosen as a convex quad in clockwise order on the image, with module sizes within a factor of 2.5
+   (25 degrees of tilt gives nearly 2) and left and right sides of 126 modules within a factor of 4/3.
+   Clockwise order assumes a capture that is not mirrored; a mirrored capture swaps the top-right and
+   bottom-left finders and its header does not decode.
 2. **Read the header.** Fit a homography to the four finder centres and sample the header slots at their
    fixed fractions, using the adjacent finder's black and white as references. Soft Viterbi decoding per
    copy, then per pair, then all four.
+   As built: barrel distortion bows the frame edges between the finders by more than half a slot
+   (about 16 pixels against slots of 13 at 4K with k1 = 0.04), so the homography is fitted after
+   radial distortion about the capture's centre, with k1 chosen from 13 values in [0, 0.12] by the
+   slots' total contrast. A finder's black and white come from its centre column (ring 0 and 1 dark,
+   ring 2 light; inverted for the fourth finder), where a module is 1/126 of the finder rectangle
+   whatever the grid. Pairs are tried among the copies that did not decode alone, and all four only
+   when nothing decoded.
 3. **Fit the mesh.** Locate every anchor's checker corner to sub-pixel accuracy, reject outliers, and
    interpolate. This absorbs lens distortion, rolling-shutter shear and stabilisation warping.
+   As built: anchors are visited from the finders outwards; each saddle is predicted by the model of
+   step 2 plus the displacement of the anchors already located nearby, found by the strongest saddle
+   response within 1.5 cells and refined where the image gradient is perpendicular to the direction
+   from the corner. The model, k1 included, is refitted to the corners, and a corner more than 0.35 cell
+   from its neighbours' median displacement is rejected. The mesh's nodes, every 4 cells, are the model
+   plus the corners' residuals interpolated over the anchor lattice; cell (x, y) covers
+   [x, x+1) x [y, y+1) of the mesh's coordinates.
 4. **Sample.** Take the mean of the central 60% of each cell's footprint directly from the camera planes.
-   The image is never warped whole.
+   The image is never warped whole. As built: a cell is saturated when any of its brightness samples is
+   at the bottom or top of the code range; a cell outside the capture is saturated with zero values.
 5. **Calibrate levels.** Per tile of about 32 x 30 cells, keep a centre and variance for each level.
    Start from the palette and the anchors' black and white, refine with two or three rounds of
    expectation-maximisation on the data cells (scrambling makes levels equally likely, and their order
@@ -1468,3 +1493,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 12's worker progress message carries the input's bytes and reads and the time from readiness to the first read, for the breakdown a time-bound error carries (protocol version 2) |
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 17 says the test, race and coverage tasks run `internal/video` on its own after the other packages, and why (the cap and the watchdog are properties of one process on a machine other test binaries are not oversubscribing), with the cost on macos-26-intel (+5 min 32 s over the coverage and race steps, 6 min 42 s left under the race step's timeout) |
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
+| 2026-11-15 | M2 Geometry: section 10, steps 1 to 4, records what was built: the midrange binarisation, diagonal and full-resolution checks and quad rules of the detector, and that it assumes a capture that is not mirrored; radial distortion with k1 chosen by slot contrast for the header, the finder references, and which pairs are tried; the order, refinement, outlier rule and node spacing of the mesh and its cell coordinates; and what the sampler calls saturated |

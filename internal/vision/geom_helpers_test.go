@@ -40,10 +40,10 @@ func geomNewCode(t testing.TB, gridX, gridY, pitch int, mod uint8, n int, seed u
 	w, h := r.Size()
 	c := &geomCode{layout: r.Layout(), pitch: pitch, mod: mod}
 	g := prng.SplitMix64{State: seed}
-	total := uint32((n + 3) / 4 * 4) //nolint:gosec // small
+	total := uint32((n + 3) / 4 * 4)
 	for i := range n {
-		hd := frame.Header{Version: frame.Version, Session: uint16(seed), FrameIndex: uint32(i), TotalFrames: total, //nolint:gosec // small
-			GridX: uint16(gridX), GridY: uint16(gridY), Modulation: mod, InnerCode: 2} //nolint:gosec // grid <= 2047
+		hd := frame.Header{Version: frame.Version, Session: uint16(seed), FrameIndex: uint32(i), TotalFrames: total,
+			GridX: uint16(gridX), GridY: uint16(gridY), Modulation: mod, InnerCode: 2}
 		syms := make([]uint8, len(c.layout.DataCells()))
 		for k := range syms {
 			syms[k] = uint8(g.Next() >> 56)
@@ -130,10 +130,10 @@ type geomShot struct {
 // geomPose films pose i of a set of n: one capture of the code with cfg, with seed seed+i and a
 // display time drawn from it. When the capture is dropped it films again with seed+i+n, and so on.
 func geomPose(c *geomCode, cfg channel.Config, n, i int, seed uint64) (geomShot, error) {
-	s := seed + uint64(i) //nolint:gosec // i >= 0
+	s := seed + uint64(i)
 	for {
 		g := prng.SplitMix64{State: s}
-		start := time.Duration(g.Next() % uint64(c.input.Period)) //nolint:gosec // positive
+		start := time.Duration(g.Next() % uint64(c.input.Period))
 		fs, ts, err := geomFilmErr(c, cfg, start, 1, s)
 		if err != nil {
 			return geomShot{}, err
@@ -141,7 +141,7 @@ func geomPose(c *geomCode, cfg channel.Config, n, i int, seed uint64) (geomShot,
 		if len(fs) == 1 {
 			return geomShot{fs[0], ts[0]}, nil
 		}
-		s += uint64(n) //nolint:gosec // n > 0
+		s += uint64(n)
 	}
 }
 
