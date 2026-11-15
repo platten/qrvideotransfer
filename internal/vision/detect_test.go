@@ -34,9 +34,9 @@ func TestDetectPlain(t *testing.T) {
 func TestDetectRotated(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 4, 2, 1, 2)
 	for _, roll := range []float64{90, 180, 270, 33} {
-		cfg := geomConfig(t, "ideal", 1280, 720)
+		cfg := geomConfig(t, "ideal", 1280, 1280) // square, so the rolled screen fits
 		cfg.Geometry.Roll = roll
-		cfg.Geometry.Fill = 0.5
+		cfg.Geometry.Fill = 0.8
 		fs, ts := geomFilm(t, c, cfg, 0, 1, 5)
 		var d FinderDetector
 		q, ok := d.Detect(fs[0], nil)

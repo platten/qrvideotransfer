@@ -34,28 +34,38 @@ func (s *geomStats) rms() float64 { return math.Sqrt(s.sumSq / float64(max(s.cel
 func geomMeasured(gx, gy int) bool { return (7*gx+3*gy)%11 == 0 }
 
 // geomSweep runs detection, header reading and mesh fitting on n poses of the code filmed with cfg,
-// and counts the outcomes against the ground truth.
+// and counts the outcomes against the ground truth. Each pose is filmed and measured by one worker
+// and then dropped, so that memory stays bounded by the number of workers.
 func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64) geomStats {
 	t.Helper()
-	poses := geomPoses(t, c, cfg, n, seed)
 	var mu sync.Mutex
 	s := geomStats{poses: n}
+	var filmErr error
 	geomParallel(n, func(i int) {
-		p := poses[i]
+		p, err := geomPose(c, cfg, n, i, seed)
+		if err != nil {
+			mu.Lock()
+			filmErr = err
+			mu.Unlock()
+			return
+		}
 		var d FinderDetector
 		t0 := time.Now()
 		q, ok := d.Detect(p.f, nil)
 		var hs []frame.Header
 		var mesh *Mesh
 		var anchors []AnchorObs
-		var err error
+		var fitErr error
 		if ok {
 			hs, _ = SlotReader{}.Read(p.f, q)
-			mesh, anchors, err = MeshFitter{}.Fit(p.f, q, c.layout)
+			mesh, anchors, fitErr = MeshFitter{}.Fit(p.f, q, c.layout)
 		}
 		el := time.Since(t0)
 		var r geomStats
 		r.elapsed = el
+		if !ok {
+			t.Logf("pose %d: no quad", i)
+		}
 		if ok {
 			want, mod := geomFinderTruth(c, p.tr)
 			good := true
@@ -68,6 +78,7 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 				r.found++
 			} else {
 				r.wrong++
+				t.Logf("pose %d: quad %v, want %v", i, q.Centres, want)
 			}
 			shown := geomShown(c, p.tr)
 			bad := len(hs) == 0
@@ -81,7 +92,7 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 			if !bad {
 				r.header++
 			}
-			if err != nil {
+			if fitErr != nil {
 				r.meshFailed++
 			} else {
 				rms, m := channel.CentreError(p.tr, func(gx, gy int) (float64, float64, bool) {
@@ -114,6 +125,9 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 		s.elapsed += r.elapsed
 		mu.Unlock()
 	})
+	if filmErr != nil {
+		t.Fatal(filmErr)
+	}
 	t.Logf("%s, %d poses: finders %d (%.2f%%), wrong %d; header %d (%.2f%%), wrong %d; mesh failed %d; "+
 		"centre error %.4f cell RMS over %d cells, worst capture %.4f; anchors %d of %d; vision %.1f ms per capture",
 		cfg.Name, n, s.found, 100*float64(s.found)/float64(n), s.wrong, s.header, 100*float64(s.header)/float64(n), s.wrongHeader,
@@ -217,9 +231,11 @@ func TestGeometryPresetsLong(t *testing.T) {
 }
 
 // TestGeometry16x10 runs the same assertions on a 16:10 grid (432 x 270, so Ux differs from Uy)
-// with the handheld preset at 1280 x 720, 12 poses from seed 3000.
+// with the handheld preset at 1920 x 1080, 12 poses from seed 3000. The screen fills 0.7 of the
+// width instead of 0.8, so that the taller code stays inside a 16:9 capture.
 func TestGeometry16x10(t *testing.T) {
 	c := geomNewCode(t, 432, 270, 4, 2, 4, 14)
-	cfg := geomConfig(t, "tripod", 1920, 1080)
+	cfg := geomConfig(t, "handheld", 1920, 1080)
+	cfg.Geometry.Fill = 0.7
 	geomCheck(t, geomSweep(t, c, cfg, 12, 3000), 1, 1)
 }

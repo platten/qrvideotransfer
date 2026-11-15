@@ -96,16 +96,25 @@ func TestHeaderPairs(t *testing.T) {
 	}
 }
 
-// TestHeaderAllFour: when each copy has two different eighths of its slots inverted, so that no copy
-// and no pair decodes, the sum of all four does.
+// TestHeaderAllFour: when each copy has a different quarter of its slots inverted and the others
+// faded to a fifth of the way from their level to the other, no copy and no pair decodes, but the
+// sum of all four does: every slot is wrong in one copy and weakly right in three.
 func TestHeaderAllFour(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 4, 2, 1, 9)
 	f := geomPlain(c, 0)
 	h := c.headers[0]
+	bits := h.Encode()
 	for s := range frame.HeaderSlots {
-		g := s % 8
-		geomFlip(c, f, h, g/2, s) // groups 0-1 in copy 0, 2-3 in copy 1, ...
-		geomFlip(c, f, h, (g/2+1)%4, s)
+		for cp := range 4 {
+			switch {
+			case s%4 == cp:
+				geomFlip(c, f, h, cp, s)
+			case bits[s]:
+				geomPaintSlot(c, f, cp, s, 191)
+			default:
+				geomPaintSlot(c, f, cp, s, 60)
+			}
+		}
 	}
 	q := geomPlainQuad(c)
 	soft, _ := copySoft(f, q)

@@ -62,7 +62,9 @@ func geomNewCode(t testing.TB, gridX, gridY, pitch int, mod uint8, n int, seed u
 	return c
 }
 
-// geomConfig returns the preset, resized to w x h camera pixels unless w is 0.
+// geomConfig returns the preset, resized to w x h camera pixels unless w is 0. Unlike
+// channel.Config.Resize it also scales the blur and the shake, which are in camera pixels, with the
+// width, so that a small capture looks like the preset's 4K capture downscaled.
 func geomConfig(t testing.TB, preset string, w, h int) channel.Config {
 	t.Helper()
 	cfg, err := channel.Preset(preset)
@@ -70,7 +72,10 @@ func geomConfig(t testing.TB, preset string, w, h int) channel.Config {
 		t.Fatal(err)
 	}
 	if w != 0 {
+		k := float64(w) / float64(cfg.Geometry.Width)
 		cfg = cfg.Resize(w, h)
+		cfg.Optics.Blur *= k
+		cfg.Geometry.Shake *= k
 	}
 	return cfg
 }
@@ -116,35 +121,36 @@ func geomFinderTruth(c *geomCode, tr *channel.Truth) (centres [4]Point, module [
 	return centres, module
 }
 
-// geomPose is one simulated pose: a capture of the code and its truth.
-type geomPose struct {
+// geomShot is one simulated pose: a capture of the code and its truth.
+type geomShot struct {
 	f  *video.Frame
 	tr *channel.Truth
 }
 
-// geomPoses films n independent poses of the code with cfg, one capture each, with seeds
-// seed, seed+1, ..., in parallel. A pose whose capture was dropped is filmed again with the next
-// seed past the range.
-func geomPoses(t testing.TB, c *geomCode, cfg channel.Config, n int, seed uint64) []geomPose {
-	t.Helper()
-	out := make([]geomPose, n)
-	errs := make([]error, n)
-	geomParallel(n, func(i int) {
-		s := seed + uint64(i) //nolint:gosec // i >= 0
-		for k := 1; ; k++ {
-			g := prng.SplitMix64{State: s}
-			start := time.Duration(g.Next() % uint64(c.input.Period)) //nolint:gosec // positive
-			fs, ts, err := geomFilmErr(c, cfg, start, 1, s)
-			if err != nil || len(fs) == 1 {
-				if err == nil {
-					out[i] = geomPose{fs[0], ts[0]}
-				}
-				errs[i] = err
-				return
-			}
-			s += uint64(n * k) //nolint:gosec // small
+// geomPose films pose i of a set of n: one capture of the code with cfg, with seed seed+i and a
+// display time drawn from it. When the capture is dropped it films again with seed+i+n, and so on.
+func geomPose(c *geomCode, cfg channel.Config, n, i int, seed uint64) (geomShot, error) {
+	s := seed + uint64(i) //nolint:gosec // i >= 0
+	for {
+		g := prng.SplitMix64{State: s}
+		start := time.Duration(g.Next() % uint64(c.input.Period)) //nolint:gosec // positive
+		fs, ts, err := geomFilmErr(c, cfg, start, 1, s)
+		if err != nil {
+			return geomShot{}, err
 		}
-	})
+		if len(fs) == 1 {
+			return geomShot{fs[0], ts[0]}, nil
+		}
+		s += uint64(n) //nolint:gosec // n > 0
+	}
+}
+
+// geomPoses films poses 0..n-1 (see geomPose) in parallel.
+func geomPoses(t testing.TB, c *geomCode, cfg channel.Config, n int, seed uint64) []geomShot {
+	t.Helper()
+	out := make([]geomShot, n)
+	errs := make([]error, n)
+	geomParallel(n, func(i int) { out[i], errs[i] = geomPose(c, cfg, n, i, seed) })
 	for _, err := range errs {
 		if err != nil {
 			t.Fatal(err)
