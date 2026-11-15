@@ -10,8 +10,10 @@ import (
 // TestSampleGlareFlagged: the simulator's specular glare patch (5% of the code area) on handheld
 // 4K captures (480 x 270 grid, seeds 22000 and 22001). Each pose is filmed twice, with and without
 // the patch, which leaves everything else equal; both are sampled through the mesh fitted to the
-// capture without it. Cells the patch changes by 20 code values or more must come back saturated
-// (at most 3% missed), and cells it leaves within 1 code value must not (at most 0.1% flagged).
+// capture without it. Cells the patch turns near-white (changed by 20 code values or more, and at
+// 225 or above) must come back saturated (at most 3% missed), and cells it leaves within 1 code
+// value must not (at most 0.1% flagged). Cells on the patch's soft edge, brightened but not
+// clipped, are counted apart: telling them from data is the equaliser's part.
 func TestSampleGlareFlagged(t *testing.T) {
 	n := 2
 	if geomRace {
@@ -23,7 +25,7 @@ func TestSampleGlareFlagged(t *testing.T) {
 	glared.Optics.Glare = 0.05
 	cells := c.layout.DataCells()
 	oc, og := make([]modem.Obs, len(cells)), make([]modem.Obs, len(cells))
-	var under, missed, outside, falseFlags int
+	var under, partial, missed, outside, falseFlags int
 	for i := range n {
 		pc, err := geomPose(c, clean, n, i, 22000)
 		if err != nil {
@@ -46,6 +48,8 @@ func TestSampleGlareFlagged(t *testing.T) {
 		FootprintSampler{}.Sample(og, pg.f, m, cells)
 		for k := range cells {
 			switch diff := math.Abs(float64(og[k].Y - oc[k].Y)); {
+			case diff >= 20 && og[k].Y < sampleClipWhite-sampleClipMargin:
+				partial++ // brightened by the patch but under the clip level: left to the equaliser
 			case diff >= 20:
 				under++
 				if !og[k].Saturated {
@@ -60,7 +64,8 @@ func TestSampleGlareFlagged(t *testing.T) {
 		}
 	}
 	missRate, falseRate := float64(missed)/float64(max(1, under)), float64(falseFlags)/float64(max(1, outside))
-	t.Logf("under the patch %d cells, %.2f%% not flagged; outside %d cells, %.3f%% flagged", under, 100*missRate, outside, 100*falseRate)
+	t.Logf("under the patch %d near-white cells, %.2f%% not flagged; %d brightened cells on its soft edge; outside %d cells, %.3f%% flagged",
+		under, 100*missRate, partial, outside, 100*falseRate)
 	if under == 0 || missRate > 0.03 {
 		t.Errorf("%.2f%% of %d glared cells not flagged, want at most 3%%", 100*missRate, under)
 	}

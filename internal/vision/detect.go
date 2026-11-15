@@ -355,9 +355,6 @@ func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int) (Quad, bool)
 			}
 		}
 	}
-	if len(top) == 0 {
-		return Quad{}, false
-	}
 	quad := func(best [4]*detectCluster) Quad {
 		var q Quad
 		for k, c := range best {
@@ -374,7 +371,7 @@ func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int) (Quad, bool)
 			return q, true
 		}
 	}
-	return Quad{}, false
+	return d.three(f, v, normal, inverted)
 }
 
 // detectVerify refines the candidates at full resolution, most hits first, and keeps up to n that
@@ -472,7 +469,7 @@ func detectRefine(v *geomLuma, c gpt, m float64, inv bool) (gpt, float64, bool) 
 				}
 				mid := (i1 - i0 + o1 - o0) / 4 // along u, relative to p
 				axis[a].at += p.dot(u) + mid
-				axis[a].mod += ((i0+i1)/3 + (o0+o1)/5) / 2
+				axis[a].mod += (i0 + i1 + o0 + o1) / 8 // spans of 3 and 5 modules; blur moves them oppositely
 				axis[a].n++
 			}
 		}

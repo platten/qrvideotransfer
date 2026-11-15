@@ -26,8 +26,10 @@ func geomPlainMesh(c *geomCode) *Mesh {
 	return geomAffineMesh(func(x, y float64) Point { return Point{x * p, y * p} })
 }
 
-// TestSamplePlain: on rendered frames every cell's observation is its symbol's appearance, for
-// brightness and colour modulations and at 10 bits.
+// TestSamplePlain: on rendered frames every cell's values are its symbol's appearance, for
+// brightness and colour modulations and at 10 bits. A rendered frame's white is exactly the
+// limited-range white, where a clipped highlight lands, so a white cell inside a white
+// neighbourhood is flagged as glare: at most 2% of the cells with black and white, 0.1% otherwise.
 func TestSamplePlain(t *testing.T) {
 	for _, mod := range []uint8{1, 2, 3, 4} {
 		c := geomNewCode(t, 212, 120, 8, mod, 1, 30)
@@ -38,13 +40,27 @@ func TestSamplePlain(t *testing.T) {
 		cells := c.layout.DataCells()
 		obs := make([]modem.Obs, len(cells))
 		FootprintSampler{}.Sample(obs, geomPlain(c, 0), geomPlainMesh(c), cells)
+		flagged := 0
 		for i, o := range obs {
 			s := cm.Map(c.symbols[0][i])
 			k := float32(int(1) << (s.Bits - 8))
-			want := modem.Obs{Y: float32(s.Y) / k, Cb: float32(s.Cb) / k, Cr: float32(s.Cr) / k}
+			want := modem.Obs{Y: float32(s.Y) / k, Cb: float32(s.Cb) / k, Cr: float32(s.Cr) / k, Saturated: o.Saturated}
 			if !geomObsNear(o, want) {
 				t.Fatalf("modulation %d cell %d: got %+v, want %+v", mod, i, o, want)
 			}
+			if o.Saturated {
+				flagged++
+				if s.Y != uint16(235)<<(s.Bits-8) {
+					t.Errorf("modulation %d cell %d: flagged at Y %d", mod, i, s.Y)
+				}
+			}
+		}
+		most := 0.001
+		if mod == 1 {
+			most = 0.02
+		}
+		if share := float64(flagged) / float64(len(cells)); share > most {
+			t.Errorf("modulation %d: %.2f%% of cells flagged, want at most %.1f%%", mod, 100*share, 100*most)
 		}
 	}
 }

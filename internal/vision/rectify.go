@@ -382,7 +382,8 @@ func rectifyMeasure(v *geomLuma, m *Mesh, o *AnchorObs) {
 		c := gpt(m.At(x, y))
 		hx := gpt(m.At(x+h, y)).sub(gpt(m.At(x-h, y))).mul(0.5)
 		hy := gpt(m.At(x, y+h)).sub(gpt(m.At(x, y-h))).mul(0.5)
-		return v.footprint(c, hx, hy)
+		o, _ := v.footprint(c, hx, hy)
+		return o
 	}
 	avg := func(a, b modem.Obs) modem.Obs {
 		return modem.Obs{Y: (a.Y + b.Y) / 2, Cb: (a.Cb + b.Cb) / 2, Cr: (a.Cr + b.Cr) / 2, Saturated: a.Saturated || b.Saturated}
