@@ -12,7 +12,7 @@ import (
 )
 
 // geomDetectRate films n poses of the code with cfg and counts the quads found with every centre
-// within half a module of the truth, the wrong quads, and the smallest true finder module seen,
+// within a module of the truth, the wrong quads, and the smallest true finder module seen,
 // in camera pixels.
 func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64) (found, wrong int, minMod float64) {
 	t.Helper()
@@ -32,7 +32,7 @@ func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed u
 		want, mod := geomFinderTruth(c, p.tr)
 		good := ok
 		for k := range 4 {
-			if ok && geomDist(q.Centres[k], want[k]) > mod[k]/2 {
+			if ok && geomDist(q.Centres[k], want[k]) > mod[k] {
 				good = false
 			}
 		}

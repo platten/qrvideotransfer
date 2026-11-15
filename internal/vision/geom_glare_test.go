@@ -123,7 +123,7 @@ func geomGlareMeasure(c *geomCode, f *video.Frame, tr *channel.Truth, discs []ge
 	}
 	want, mod := geomFinderTruth(c, tr)
 	for k := range 4 {
-		if geomDist(q.Centres[k], want[k]) > mod[k]/2 {
+		if geomDist(q.Centres[k], want[k]) > mod[k] {
 			s.wrong++
 			return
 		}
@@ -188,7 +188,8 @@ func geomGlareMeasure(c *geomCode, f *video.Frame, tr *channel.Truth, discs []ge
 // 480 x 270 grid: 200 poses (seeds 20000 to 20199), each measured under every case of
 // geomGlareCases. It reports, per case, the finders found, wrong quads, headers read, wrong
 // headers, the cell-centre error outside 1.5 patch radii, and how the data cells under a patch
-// come back (marked saturated, or as near-white values). It only logs; it runs with
+// come back (marked saturated, or as near-white values). It asserts no wrong quad or header in any
+// case, and, with a finder under the patch, at least 198 of 200 located and read. It runs with
 // QRVT_LONG_TESTS=1.
 func TestGlareStudy(t *testing.T) {
 	if !geomLong() {
@@ -237,6 +238,12 @@ func TestGlareStudy(t *testing.T) {
 		t.Logf("GLARE %-24s found %3d/%d wrong %d | header %3d wrong %d | mesh failed %d | centre RMS outside %.4f cell over %d | under patch %d cells: %.1f%% saturated, %.1f%% near-white unflagged",
 			gc.name, s.found, s.poses, s.wrong, s.header, s.wrongHeader, s.meshFailed, math.Sqrt(s.sumSq/float64(max(1, s.cells))), s.cells,
 			s.inside, 100*float64(s.insideSaturated)/float64(max(1, s.inside)), 100*float64(s.insideWhite)/float64(max(1, s.inside)))
+		if s.wrong != 0 || s.wrongHeader != 0 {
+			t.Errorf("%s: %d wrong quads, %d wrong headers", gc.name, s.wrong, s.wrongHeader)
+		}
+		if k < 4 && (s.found < 198 || s.header < 198) {
+			t.Errorf("%s: located %d and read %d of %d, want at least 198 (99%%)", gc.name, s.found, s.header, s.poses)
+		}
 	}
 }
 

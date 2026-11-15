@@ -15,8 +15,9 @@ import (
 // geomStats are the geometry assertions' counts over a set of poses.
 type geomStats struct {
 	poses       int
-	found       int     // quads found with every centre within half a module of the truth
-	wrong       int     // quads found elsewhere
+	found       int     // quads located with every centre within a module of the truth
+	imprecise   int     // of those, quads with a centre more than half a module off (a hidden finder's)
+	wrong       int     // quads located elsewhere
 	header      int     // captures whose header was read, with no wrong header
 	wrongHeader int     // captures for which a wrong header was returned
 	meshFailed  int     // captures whose mesh fit failed
@@ -72,14 +73,15 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 		}
 		if ok {
 			want, mod := geomFinderTruth(c, p.tr)
-			good := true
+			worst := 0.0
 			for k := range 4 {
-				if geomDist(q.Centres[k], want[k]) > mod[k]/2 {
-					good = false
-				}
+				worst = max(worst, geomDist(q.Centres[k], want[k])/mod[k])
 			}
-			if good {
+			if worst <= 1 {
 				r.found++
+				if worst > 0.5 {
+					r.imprecise++
+				}
 			} else {
 				r.wrong++
 				t.Logf("pose %d: quad %v, want %v", i, q.Centres, want)
@@ -117,6 +119,7 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 		}
 		mu.Lock()
 		s.found += r.found
+		s.imprecise += r.imprecise
 		s.wrong += r.wrong
 		s.header += r.header
 		s.wrongHeader += r.wrongHeader
@@ -132,9 +135,9 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 	if filmErr != nil {
 		t.Fatal(filmErr)
 	}
-	t.Logf("%s, %d poses: finders %d (%.2f%%), wrong %d; header %d (%.2f%%), wrong %d; mesh failed %d; "+
+	t.Logf("%s, %d poses: finders %d (%.2f%%, %d with a centre over half a module off), wrong %d; header %d (%.2f%%), wrong %d; mesh failed %d; "+
 		"centre error %.4f cell RMS over %d cells, worst capture %.4f; anchors %d of %d; vision %.1f ms per capture",
-		cfg.Name, n, s.found, 100*float64(s.found)/float64(n), s.wrong, s.header, 100*float64(s.header)/float64(n), s.wrongHeader,
+		cfg.Name, n, s.found, 100*float64(s.found)/float64(n), s.imprecise, s.wrong, s.header, 100*float64(s.header)/float64(n), s.wrongHeader,
 		s.meshFailed, s.rms(), s.cells, s.worst, s.anchors, s.anchorTotal, float64(s.elapsed.Microseconds())/1000/float64(n))
 	return s
 }
