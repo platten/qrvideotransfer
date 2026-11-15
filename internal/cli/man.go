@@ -11,7 +11,8 @@ import (
 
 // manPage renders the manual page of a command tree. Flag descriptions carry their defaults, as in
 // --help; the generator has no field for them, so they are appended to the usage text while the
-// page is built and removed afterwards.
+// page is built and removed afterwards, so it is not safe for concurrent use on the same command
+// tree.
 func manPage(root *cobra.Command) (string, error) {
 	var restore []func()
 	defer func() {

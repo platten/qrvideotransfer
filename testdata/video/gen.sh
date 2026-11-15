@@ -27,4 +27,10 @@ $FF -f lavfi -i "color=gray:s=64x64:r=30,noise=alls=60:allf=t+u,format=yuv444p" 
 # Duration element to make the container lie.
 $FF -f lavfi -i "color=gray:s=3840x2160:r=30" -frames:v 600 -c:v libx264 -preset ultrafast -qp 51 \
   -g 100000 -bf 0 skip.mkv
-ls -l hevc8.mp4 hevc10hlg.mp4 hevc444.mp4 skip.mkv
+
+# The same kind of file, smaller: 100 frames at 1920x1080 in about 9 KB. Under the race detector,
+# TestSkipPictures rewrites its Duration to make the container lie; decoding until the limit stops
+# it costs the limit times the file size, a quarter of what skip.mkv would cost.
+$FF -f lavfi -i "color=gray:s=1920x1080:r=30" -frames:v 100 -c:v libx264 -preset ultrafast -qp 51 \
+  -g 100000 -bf 0 skip1080.mkv
+ls -l hevc8.mp4 hevc10hlg.mp4 hevc444.mp4 skip.mkv skip1080.mkv

@@ -882,11 +882,18 @@ func TestCaptureLimits(t *testing.T) {
 	}
 }
 
+// The clip and time factor of TestSkipPictures' decode-time check; race_test.go changes them.
+var (
+	skipDecodeClip = "skip.mkv"
+	skipTimeFactor = 1
+)
+
 // TestSkipPictures: a small file of many skip pictures is refused from the probe by
 // MaxDecodedPixelsPerInputByte; the same file in a container that lies about its length is stopped
 // while decoding (SECURITY.md 9.5). Both stay under 1 GiB and finish within 60 s. Not parallel, so
 // that the process's heap is this decode's: the Go heap peak, which includes the instance's whole
-// 512 MiB reservation, is sampled while it runs.
+// 512 MiB reservation, is sampled while it runs. Race builds use a smaller clip and a longer time
+// bound (race_test.go); every runner's non-race step asserts the 4K clip within 60 s.
 func TestSkipPictures(t *testing.T) {
 	b := embedded(t)
 	_, err := b.NewDecoder(t.Context(), clip("skip.mkv"), DecodeConfig{BrightnessOnly: true})
@@ -897,8 +904,8 @@ func TestSkipPictures(t *testing.T) {
 	}
 	t.Log(err)
 
-	// Rewrite the Matroska Duration (60,000 ms) to 100 ms: the probe then promises 3 frames.
-	data, _ := os.ReadFile(clip("skip.mkv"))
+	// Rewrite the Matroska Duration to 100 ms: the probe then promises 3 frames.
+	data, _ := os.ReadFile(clip(skipDecodeClip))
 	i := bytes.Index(data, []byte{0x44, 0x89, 0x88})
 	if i < 0 {
 		t.Fatal("no Duration element")
@@ -950,8 +957,11 @@ func TestSkipPictures(t *testing.T) {
 	if !errors.As(err, &le) || le.Limit != "MaxDecodedPixelsPerInputByte" {
 		t.Fatalf("decoding the lying file: %v after %d frames", err, n)
 	}
-	if el := time.Since(start); el > 60*time.Second {
-		t.Errorf("took %v", el)
+	bound := 60 * time.Second * time.Duration(skipTimeFactor)
+	el := time.Since(start)
+	t.Logf("decoding took %v", el)
+	if el > bound {
+		t.Errorf("took %v, more than %v", el, bound)
 	}
 	if used := peak.Load() - min(peak.Load(), heap0); used > 1<<30 || p.peak.Load() > EngineMemoryLimit {
 		t.Errorf("peak heap growth %d MiB, linear memory %d MiB", used>>20, p.peak.Load()>>20)
