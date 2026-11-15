@@ -125,6 +125,14 @@ func hostileWorker(mode string) int {
 		binary.BigEndian.PutUint64(b[32:], uint64(5*time.Second)) // ready to memory reserved
 		_ = writeMsg(os.Stdout, msgProgress, b)
 		time.Sleep(time.Hour)
+	case "futurereserve": // claims its memory will be reserved a day from now, then hangs
+		b := bytes.Repeat([]byte{0xff}, progressLen) // -1: not yet
+		binary.BigEndian.PutUint64(b[0:], 0)
+		binary.BigEndian.PutUint64(b[8:], 0)
+		binary.BigEndian.PutUint64(b[16:], 0)
+		binary.BigEndian.PutUint64(b[32:], uint64(24*time.Hour))
+		_ = writeMsg(os.Stdout, msgProgress, b)
+		time.Sleep(time.Hour)
 	case "readyhang": // says it is ready, then hangs
 		_ = writeMsg(os.Stdout, msgReady, nil)
 		time.Sleep(time.Hour)

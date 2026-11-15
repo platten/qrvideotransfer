@@ -92,6 +92,25 @@ func TestWorkerReservationNotStall(t *testing.T) {
 	gone(t, ps.all(), 5*time.Second)
 }
 
+// TestWorkerFutureReservation: a worker's reservation time is its word, so one that claims a time a
+// day ahead does not hold off the stall watchdog: the claim is taken as the time it arrived, and the
+// worker is stopped as a stall (2 s) within the limit plus a few seconds.
+func TestWorkerFutureReservation(t *testing.T) {
+	t.Parallel()
+	const limit = 2 * time.Second
+	p, ps := testWorkers(t, "futurereserve")
+	err := run(testCtx(t, 30*time.Second), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
+		timeout: limit})
+	var le *LimitError
+	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
+		t.Fatalf("got %v", err)
+	}
+	if el := ps.since(); el > limit+5*time.Second {
+		t.Errorf("stopped after %v", el)
+	}
+	gone(t, ps.all(), 5*time.Second)
+}
+
 // TestWorkerReservationLoadLimit: a worker that is ready but never reports its reservation is killed
 // when EngineLoadLimit (shortened to 3 s) runs out, with that limit's error and no process left, and
 // is not stopped as a stall (1 s) before then. Not parallel: it shortens the limit.
