@@ -39,6 +39,9 @@ func geomMeasured(gx, gy int) bool { return (7*gx+3*gy)%11 == 0 }
 // and then dropped, so that memory stays bounded by the number of workers.
 func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64) geomStats {
 	t.Helper()
+	if geomRace && !geomLong() {
+		n = max(1, n/4)
+	}
 	var mu sync.Mutex
 	s := geomStats{poses: n}
 	var filmErr error

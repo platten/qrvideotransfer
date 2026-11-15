@@ -141,3 +141,24 @@ func TestDetectLarge(t *testing.T) {
 		}
 	}
 }
+
+// TestDetectFiner: pose 288 of the long handheld-tilt25 run (seed 10288), whose far top-left finder
+// measures under 3 pixels per module at 1280 pixels wide, is found by the finer second scan.
+func TestDetectFiner(t *testing.T) {
+	c := geomNewCode(t, 480, 270, 4, 2, 4, 13)
+	p, err := geomPose(c, geomTilt25(t, 0, 0), 1000, 288, 10000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d FinderDetector
+	q, ok := d.Detect(p.f, nil)
+	if !ok {
+		t.Fatal("not found")
+	}
+	want, mod := geomFinderTruth(c, p.tr)
+	for k := range 4 {
+		if geomDist(q.Centres[k], want[k]) > mod[k]/2 {
+			t.Errorf("centre %d at %v, want %v", k, q.Centres[k], want[k])
+		}
+	}
+}

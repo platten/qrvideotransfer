@@ -134,7 +134,11 @@ func TestSampleSimulated(t *testing.T) {
 	cfg := geomConfig(t, "tripod", 0, 0)
 	cells := c.layout.DataCells()
 	obs := make([]modem.Obs, len(cells))
-	for _, p := range geomPoses(t, c, cfg, 2, 4000) {
+	n := 2
+	if geomRace {
+		n = 1
+	}
+	for _, p := range geomPoses(t, c, cfg, n, 4000) {
 		var d FinderDetector
 		q, ok := d.Detect(p.f, nil)
 		if !ok {
