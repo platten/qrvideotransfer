@@ -28,7 +28,8 @@ func delayReserve(t *testing.T, m *meter, d time.Duration) {
 }
 
 // stallFromReservation checks that m's instance was stopped as a stall, with the stall counted from
-// its reservation: at least the limit after it, less the tick by which the watchdog may count early.
+// its reservation: at least the limit after it. (Waiting counts from the last tick at which the
+// instance waited, up to a tick early; the reservation is counted from its own time.)
 func stallFromReservation(t *testing.T, what string, err error, m *meter, limit time.Duration) {
 	t.Helper()
 	var le *LimitError
@@ -39,7 +40,7 @@ func stallFromReservation(t *testing.T, what string, err error, m *meter, limit 
 	if mem == 0 || cancelled == 0 {
 		t.Fatalf("%s: stopped before its memory was reserved: %v", what, err)
 	}
-	if d := time.Duration(cancelled - mem); d < limit-watchTick {
+	if d := time.Duration(cancelled - mem); d < limit {
 		t.Errorf("%s: stopped %v after its reservation, limit %v: the reservation counted as a stall (%v)", what, d, limit, err)
 	}
 }
