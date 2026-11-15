@@ -152,7 +152,13 @@ func collect(inputs []string) ([]source, []Warning, error) {
 // newEntry returns the entry for the input at path, without its size and hash, and a warning when
 // its modification time had to be clamped (FORMAT.md section 12).
 func newEntry(path string, info fs.FileInfo) (Entry, *Warning) {
-	return Entry{Path: path, Mode: uint32(info.Mode().Perm()), MTime: info.ModTime().UTC().Truncate(time.Second)}, nil // stub
+	e := Entry{Path: path, Mode: uint32(info.Mode().Perm())}
+	var clamped bool
+	if e.MTime, clamped = clampMTime(info.ModTime()); !clamped {
+		return e, nil
+	}
+	return e, &Warning{WarnMTimeClamped, path, fmt.Sprintf("%q is packed with the modification time %s, not %s, "+
+		"which a manifest cannot hold", path, e.MTime.Format(time.RFC3339), info.ModTime().UTC().Format(time.RFC3339))}
 }
 
 // validateInputs applies the rules of FORMAT.md section 12 to the entries collected from the inputs
@@ -197,15 +203,9 @@ func writeStream(ctx context.Context, dst io.ReadWriteSeeker, srcs []source, o P
 			res.Bytes += s.Size
 		}
 	}
-	if len(entries) > MaxManifestEntries {
-		return nil, &LimitError{"manifest entries", int64(len(entries)), MaxManifestEntries, ""}
-	}
 	manifest, err := MarshalManifest(entries)
 	if err != nil {
 		return nil, err
-	}
-	if len(manifest) > MaxManifestBytes {
-		return nil, &LimitError{"manifest size", int64(len(manifest)), MaxManifestBytes, ""}
 	}
 	if w := receiverWarning(len(entries), len(manifest)); w != nil {
 		res.Warnings = append(res.Warnings, *w)

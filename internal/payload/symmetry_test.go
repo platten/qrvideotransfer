@@ -13,8 +13,8 @@ import (
 // writes"): these tests hold MarshalManifest to ParseManifest field by field.
 
 var (
-	minMTime = time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC)
-	maxMTime = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
+	firstMTime = time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC)
+	lastMTime  = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 )
 
 // TestManifestFuzzMTime is the input FuzzManifest found (testdata/fuzz/FuzzManifest/0ead51c862907840):
@@ -47,17 +47,17 @@ func TestClampMTime(t *testing.T) {
 	}{
 		{testTime, testTime, false},
 		{testTime.Add(999 * time.Millisecond).In(cet), testTime, false},
-		{minMTime, minMTime, false},
-		{maxMTime, maxMTime, false},
-		{maxMTime.Add(999 * time.Millisecond), maxMTime, false},
+		{firstMTime, firstMTime, false},
+		{lastMTime, lastMTime, false},
+		{lastMTime.Add(999 * time.Millisecond), lastMTime, false},
 		{time.Time{}, time.Time{}, false}, // year 1
-		{minMTime.Add(-time.Second), minMTime, true},
-		{minMTime.Add(-time.Nanosecond), minMTime, true},
-		{time.Date(0, 1, 1, 0, 0, 0, 0, cet), minMTime, true},
-		{maxMTime.Add(time.Second), maxMTime, true},
-		{time.Date(9999, 12, 31, 23, 59, 59, 0, time.FixedZone("", -3600)), maxMTime, true},
-		{time.Unix(math.MinInt64/2, 0), minMTime, true},
-		{time.Unix(math.MaxInt64/2, 0), maxMTime, true},
+		{firstMTime.Add(-time.Second), firstMTime, true},
+		{firstMTime.Add(-time.Nanosecond), firstMTime, true},
+		{time.Date(0, 1, 1, 0, 0, 0, 0, cet), firstMTime, true},
+		{lastMTime.Add(time.Second), lastMTime, true},
+		{time.Date(9999, 12, 31, 23, 59, 59, 0, time.FixedZone("", -3600)), lastMTime, true},
+		{time.Unix(math.MinInt64/2, 0), firstMTime, true},
+		{time.Unix(math.MaxInt64/2, 0), lastMTime, true},
 	} {
 		got, clamped := clampMTime(c.in)
 		if !got.Equal(c.want) || got.Location() != time.UTC || clamped != c.clamped {
@@ -127,11 +127,11 @@ func TestNewEntryClampsMTime(t *testing.T) {
 	far := time.Date(30828, 9, 14, 2, 48, 5, 0, time.UTC) // the largest Windows FILETIME
 	e, w = newEntry("d/f", fakeInfo{fs.ModeDir | 0o755, far})
 	if w == nil || w.Code != WarnMTimeClamped || w.Path != "d/f" || !strings.Contains(w.Text, "9999-12-31T23:59:59Z") ||
-		!strings.Contains(w.Text, "30828") || !e.MTime.Equal(maxMTime) {
+		!strings.Contains(w.Text, "30828") || !e.MTime.Equal(lastMTime) {
 		t.Fatalf("year 30828: %+v, %+v", e, w)
 	}
 	e, w = newEntry("old", fakeInfo{0o644, time.Date(-5, 1, 1, 0, 0, 0, 0, time.UTC)})
-	if w == nil || w.Path != "old" || !e.MTime.Equal(minMTime) {
+	if w == nil || w.Path != "old" || !e.MTime.Equal(firstMTime) {
 		t.Fatalf("year -5: %+v, %+v", e, w)
 	}
 }
