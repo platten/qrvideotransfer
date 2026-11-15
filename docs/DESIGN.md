@@ -804,7 +804,7 @@ Costs a user should expect:
   every instance, but not promptly: uncapped, stops were up to 8 times late on a CI runner
   (macos-26-intel, GOMAXPROCS + 1 spinning instances, 16.8 s against a 2 s limit), while the capped
   run stayed within its bound; on a 16-thread development machine GOMAXPROCS + 2 uncapped instances
-  were stopped on time (`TestWatchdogUnderLoad` asserts the capped case and logs the uncapped one).
+  were stopped on time (`TestWatchdogUnderLoad` asserts, in the capped case, that each instance is cancelled at most 5 s after its turn plus the limit and that every one stops; it logs how long each took to return after its cancellation, and logs the uncapped case).
   The cap stays as a real defence. Its hazard: waiting for a turn has no limit but the
   context, so a caller holding that many decoders open without reading them waits for ever on the next
   (`TestHoldAndWait`). This cap applies to instances in qrvt's own process (section 8).
@@ -1467,3 +1467,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, round 3 of the review of PR #20: section 8's worker cap counts GOMAXPROCS and, on Linux, the cgroup memory limit when smaller, and no longer implies that the cap fixed the slow CI probe (cause believed to be CPU starvation; a capped run still recorded 13 s); section 12's probe bound is 60 s |
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 12's worker progress message carries the input's bytes and reads and the time from readiness to the first read, for the breakdown a time-bound error carries (protocol version 2) |
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 17 says the test, race and coverage tasks run `internal/video` on its own after the other packages, and why (the cap and the watchdog are properties of one process on a machine other test binaries are not oversubscribing), with the cost on macos-26-intel (+5 min 32 s over the coverage and race steps, 6 min 42 s left under the race step's timeout) |
+| 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
