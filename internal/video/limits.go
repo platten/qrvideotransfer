@@ -96,6 +96,13 @@ func stallError(d time.Duration) *LimitError {
 		Hint: "the video engine made no progress for that many seconds and was stopped"}
 }
 
+// loadError is the error of an instance that has not loaded the engine and reserved its memory within
+// EngineLoadLimit.
+func loadError() *LimitError {
+	return &LimitError{Limit: "EngineLoadLimit", Value: loadLimit.Seconds(), Max: loadLimit.Seconds(),
+		Hint: "the video engine did not load and reserve its memory in that time and was stopped"}
+}
+
 // probeLimits returns the probe's bounds for a file of size bytes, for the watchdog's check: at most
 // probeReadsPerByte x size + MaxProbeReads bytes read, and maxTime running (EngineProbeTime).
 func probeLimits(size int64, maxTime time.Duration) func(*meter, time.Duration) error {

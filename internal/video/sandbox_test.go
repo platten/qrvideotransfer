@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -198,8 +199,12 @@ func TestSandboxWrite(t *testing.T) {
 // process carries on (SECURITY.md 9.3). The source is small and only the scaled picture (968 MB) is
 // too large: an 8192 x 8192 source took over 30 s to fill on windows-2025 under load, with no output,
 // and was stopped as a stall before it reached the allocation.
+// Not parallel, and its memory is returned to the system when it ends: since PR #28 it uses the
+// shipped allocator, which reserves the whole 512 MiB in this process (measured: about 500 MiB more
+// resident while it runs than the 17 MiB of the old grow-on-demand allocator), and the sandbox tests
+// running beside it had their reservations take 30 s and were stopped (CI run 43693218308).
 func TestMemoryCeiling(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(debug.FreeOSMemory)
 	e := engineFor(t)
 	m := &meter{}
 	var log logTail
@@ -304,8 +309,11 @@ func TestCancel(t *testing.T) {
 // 3840x2160, 10 bits (25 MB each), decoded by the engine (the default path), stays within the 512 MiB ceiling and
 // fails cleanly (SECURITY.md 9.3).
 // Not parallel: the time measured is the instance's own, not a wait for a slot behind the parallel
-// tests (TestWatchdog once measured 48 s on windows-2025 that way).
+// tests (TestWatchdog once measured 48 s on windows-2025 that way). Its 512 MiB reservation (the
+// shipped allocator's, since PR #28) is returned to the system when it ends, so that the parallel
+// tests do not start with it held.
 func TestMissingReferences(t *testing.T) {
+	t.Cleanup(debug.FreeOSMemory)
 	e := engineFor(t)
 	for _, refs := range [][3]int{{16, 16, 32}, {15, 15, 2}} {
 		path := filepath.Join(t.TempDir(), "refs.hevc")
