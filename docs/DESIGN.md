@@ -1323,9 +1323,23 @@ by GoReleaser).
   `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
   tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
   others. Every job and every long step has a timeout. A newer push to a pull request cancels that
-  pull request's older `ci` and `codeql` runs; runs on main, tags and schedules are never cancelled
-  (the workflow policy test allows `cancel-in-progress` only as `false` or the pull-request
-  condition). The test, race and coverage tasks run
+  pull request's older `ci` and `codeql` runs; their runs on main, and codeql's weekly runs, have a
+  group of their own (the commit SHA) and are never cancelled. The workflow policy test allows
+  `cancel-in-progress` only as a bare `false` or the pull-request condition, in block or flow style,
+  and with the latter requires a group holding both the pull request number and the commit SHA.
+  **Documents-only pull requests**: a first `changes` job lists the files a pull request changes
+  against its merge base (full history fetched; renames counted as both paths). If every one is on
+  an allow-list of files that no test, build, script, workflow or release configuration reads
+  (`tools/dev/changes.go`: `docs/FORMAT.md`, `docs/SECURITY.md`, `docs/IMPLEMENTATION_PROMPT.md`,
+  `docs/spikes/`), the six-runner checks, release snapshot, setup scripts and short fuzzing are
+  skipped; the workflow and licence checks and CodeQL still run. Every other event, and any other
+  changed file (code, tests, fixtures, golden files, build and release configuration, LICENSE,
+  NOTICE, README, and `docs/DESIGN.md`, whose preset tables `internal/channel`'s tests read), runs
+  everything. A test keeps the allow-list honest by failing if any Go string literal, workflow,
+  script or the GoReleaser configuration names a listed file. An aggregate `ci result` job waits
+  for every job and fails on any failure or cancellation, or on a gated job skipped when code
+  changed; it is the check to require from `ci.yml`, because a skipped matrix job does not report
+  under its expanded names. The test, race and coverage tasks run
   `internal/video` on its own, after the other packages have finished, not in parallel with them:
   the worker cap and the watchdog's stop latency are properties of one process on a machine that
   other test binaries are not oversubscribing, and the package's tests assert wall-clock bounds
@@ -1474,3 +1488,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
 | 2026-11-15 | M2 open risks: section 12's worker progress message also carries the time from readiness to the worker's linear memory being reserved and to its input being opened; commit 0f2f4fc added these two fields in M1 stream D and raised the protocol to version 3, which the code ships (`protocolVersion`), and no row recorded it (review of PR #26, L1; the row above for version 2 is correct for commit cec1dc3) |
 | 2026-11-15 | Stream G, CI budget: section 17 says a newer push to a pull request cancels its older `ci` and `codeql` runs, that runs on main, tags and schedules are never cancelled, and that the workflow policy test enforces this |
+| 2026-11-15 | Stream G: section 17 adds the documents-only skip (allow-list, `changes` job, aggregate `ci result` check), scopes the never-cancelled sentence to the ci and codeql runs on main and codeql's schedule, and states the stricter `cancel-in-progress` policy (flow style, quoted keys, group with the pull request number and SHA) |

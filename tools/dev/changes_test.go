@@ -70,9 +70,10 @@ func TestDocsOnlyAllowListExists(t *testing.T) {
 	}
 }
 
-// TestDocsOnlyAllowListUnread guards the allow-list: no Go string literal anywhere in the module,
-// and no non-comment text of a workflow, script or the GoReleaser configuration, may name an
-// allow-listed file (by its repository path, or for a file by its base name alone), because a
+// TestDocsOnlyAllowListUnread guards the allow-list: no Go string literal anywhere in the module
+// may name an allow-listed file (by its repository path, or for a file by its base name alone),
+// and no non-comment text of a workflow, script or the GoReleaser configuration may contain its
+// repository path, because a
 // test or build that reads such a file must run when it changes. A new reader must remove the
 // file from docsOnlyAllowList.
 func TestDocsOnlyAllowListUnread(t *testing.T) {
@@ -124,10 +125,13 @@ func TestDocsOnlyAllowListUnread(t *testing.T) {
 			if err != nil {
 				return err
 			}
+			// Here only a repository path counts: step names and descriptions cite documents by
+			// base name ("SECURITY.md section 9.6") without reading them.
 			for i, l := range lines(b) {
-				if code := strings.TrimSpace(stripComment(l)); code != "" {
-					for _, f := range strings.FieldsFunc(code, func(r rune) bool { return strings.ContainsRune(" \t'\"=,()[]{}", r) }) {
-						check(rel+":"+strconv.Itoa(i+1), f)
+				code := stripComment(l)
+				for _, e := range docsOnlyAllowList {
+					if strings.Contains(code, strings.TrimSuffix(e, "/")) {
+						hits = append(hits, rel+":"+strconv.Itoa(i+1)+" names "+e)
 					}
 				}
 			}
