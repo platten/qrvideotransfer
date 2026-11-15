@@ -33,9 +33,10 @@ var running struct {
 	roundMaxSpin, roundMaxAll              int
 }
 
-// spinning reports whether a job spins on purpose.
+// spinning reports whether a job spins on purpose. Its arguments are looked at only when it has no
+// input: some tests' argument functions substitute the input's name in place.
 func spinning(j *job) bool {
-	return j.module == "spin" || slices.Contains(j.args("", ""), "nullsrc=s=16x16:r=1000")
+	return j.module == "spin" || (j.input == "" && slices.Contains(j.args("", ""), "nullsrc=s=16x16:r=1000"))
 }
 
 // counts describes the running jobs and the load average now.
