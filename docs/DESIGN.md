@@ -536,6 +536,13 @@ For each capture:
    are fitted: in M2 the blends of two frames widened the variances, the dark level's most (a blend
    adds far more to a dark cell's code value than it takes from a light one's), and soft bits of clean
    cells came out up to 18 times less confident than they were.
+   The equaliser then makes unknown (zero soft bits) the cells that need the learned levels to judge:
+   a cell brighter than its tile's lightest level by 5 standard deviations of that level (at least 3
+   code values), or one among the 5 x 5 cells around which so many read as the lightest level that
+   chance would allow it less than once in a million, as a glare patch makes them; the flagged region
+   grows by two rings for a patch's soft edge. Measured in M2 with a patch over 5% of the code: 0.2% to
+   4.5% of the cells under it still give soft bits, and 0.01% to 0.09% of the cells away from it are
+   lost. The share of a cell's footprint near the top of the code range belongs to the sampler.
 6. **Cancel stripes.** Subtract each cell's decided level, take a 2-D Fourier transform of what remains,
    remove peaks standing above the noise, and re-estimate. Moire and backlight flicker are a few plane
    waves and show up as such peaks. As built (M2): the cell grid is padded to the next sizes with no prime
@@ -1509,3 +1516,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 radiometry and phase: section 7 rule 2 divides an anchor's linearised quadrants by their own total rather than by its white (fringes made clean anchors look mixed), interpolates bilinearly with missing anchors predicted linearly, and gives the measured weight error; section 10 step 5 fits only the cells the phase field counts (blends made clean cells' soft bits up to 18 times underconfident), step 6 gives stripe cancellation as built, step 7 widens a cell's variances by its phase weight and settles the log-variance term (omitted; honest without it) and the 1/12 floor (never binds); section 15 states the Poisson reading of the honesty test and the measured results of the radiometry and phase rows, of which phase weight error at most 0.05 is not met and its test is left failing |
 | 2026-11-15 | Owner's decision of 2026-11-15 on M2's phase field: section 15 replaces "phase weight error at most 0.05" with no wrong credit, a credited cell's true weight at least 0.80, a per-preset yield of clean cells (measured less 0.02) and a regression bound of 0.09 inner and 0.16 in the pockets, and lists the five estimators measured; section 7 rules 2 and 3 and section 10 step 8 record the accepted error, the yield and that per-cell estimation is not built, to be revisited in M5 only if the S2 or G1 recordings show the discarded cells matter |
 | 2026-11-15 | Review of PR #31: section 10 step 7 widens the variances per plane used and averaged (the code had divided by three planes for grey modulations, a third of what the step said), takes 0.02 off the share of another frame for the phase field's reading of clean cells, justifies the size against the partly mixed cells' table, and states the log-variance figures per modulation (Gray4 1.43 nats, RGB8 3.41); section 15 bounds the point estimate of pooled buckets where 100 errors are expected and asserts the partly mixed cells' table, and says which phase-field figures CI exercises |
+| 2026-11-15 | Designer's decision on PR #31: section 10 step 5 makes cells under glare unknown by two stated margins (brighter than the local lightest level; implausible against the neighbours' levels) and gives the measured miss and loss rates |
