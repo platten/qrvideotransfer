@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,10 +47,11 @@ func cover(args []string) error {
 	}
 	var parts []string
 	var errs []error
-	for i, a := range isolatedRuns(goTest(tags, "./..."), list) {
+	for i, a := range isolatedRuns(goTest(tags, "-coverprofile=PROFILE", "./..."), list) {
 		part := fmt.Sprintf("%s.%d", *profile, i)
 		parts = append(parts, part)
-		a = append(a[:len(a):len(a)], "-coverprofile="+part)
+		a = slices.Clone(measureVerbose(a))
+		a[slices.Index(a, "-coverprofile=PROFILE")] = "-coverprofile=" + part
 		errs = append(errs, run([]string{"CGO_ENABLED=0"}, "go", a...))
 	}
 	defer func() {

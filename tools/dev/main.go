@@ -393,11 +393,17 @@ func isolatedRuns(args, pkgs []string) [][]string {
 			others = append(others, p)
 		}
 	}
-	video := slices.Clone(head)
-	if os.Getenv("GITHUB_ACTIONS") == "true" && runtime.GOOS == "darwin" && runtime.GOARCH == "amd64" {
-		video = append(video, "-v") // TEMPORARY measurement: the report's lines reach the log
+	return [][]string{others, append(slices.Clone(head), "./internal/video/...")}
+}
+
+// measureVerbose adds -v to the internal/video run on the GitHub macos-26-intel runner, so that the
+// measurement report's lines reach the log. TEMPORARY measurement, removed before review.
+func measureVerbose(a []string) []string {
+	if os.Getenv("GITHUB_ACTIONS") != "true" || runtime.GOOS != "darwin" || runtime.GOARCH != "amd64" ||
+		a[len(a)-1] != "./internal/video/..." {
+		return a
 	}
-	return [][]string{others, append(video, "./internal/video/...")}
+	return append(slices.Clone(a[:len(a)-1]), "-v", a[len(a)-1])
 }
 
 // packages lists the module's packages, with the given build tags.
@@ -421,7 +427,7 @@ func runTests(env []string, tags string, goArgs []string) error {
 	}
 	var errs []error
 	for _, a := range isolatedRuns(goArgs, pkgs) {
-		errs = append(errs, run(env, "go", a...))
+		errs = append(errs, run(env, "go", measureVerbose(a)...))
 	}
 	return errors.Join(errs...)
 }
