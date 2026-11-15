@@ -111,7 +111,8 @@ A line through the centre therefore crosses dark, light, dark, light, dark in th
 
 The top-left, top-right and bottom-left finders are as described and their separators are light.
 The **bottom-right finder is inverted**: dark and light are exchanged in the finder and its separator.
-This fixes rotation and mirroring.
+This fixes rotation. A decoder assumes the capture is not mirrored: with one inverted finder, a mirror
+image swaps the top-right and bottom-left finders.
 
 ### 4.2 Header slots
 
@@ -560,3 +561,4 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-14 | M1 stream A, third independent review of PR 7: section 12 says an xz body holds exactly one block (the encoder always wrote one), refused at a second block header, and states the chunk rules: the first chunk resets the dictionary, no later chunk does, only the first LZMA chunk sets properties, and lc + lp and pb are at most 4. The reason: accepting many blocks let a small stream make a decoder allocate a new 8 MiB dictionary per block. XZ Utils output with several blocks (multithreaded, `--block-size`, `--block-list`) is no longer accepted. The frozen streams did not change |
 | 2026-11-14 | M1 stream A, fourth independent review of PR 7: section 12 limits LZMA state resets without new properties (control 0xA0 to 0xBF) to directly after an uncompressed chunk, once per 32 KiB of uncompressed-chunk data, and a new run of uncompressed chunks to once per 32 KiB of uncompressed-chunk data before it; it says qrvt's encoder writes one block, replacing "one block is what every encoder writes" (XZ Utils 5.8.4 splits its output even at -0 and -1) |
 | 2026-11-15 | Fix of the short fuzz job's FuzzManifest finding: section 12 says the encoder clamps `mtime` to 0000-01-01T00:00:00Z .. 9999-12-31T23:59:59Z, the times RFC 3339 can write, and warns naming each file it clamped (it wrote `-0001-12-31T23:00:00Z`, which its own decoder refuses, for a manifest time of year 0000 at +01:00); that a decoder accepts any RFC 3339 time; and that the encoder never writes a manifest its decoder would refuse, stopping with an error naming the entry for a negative file size or a path that is not valid UTF-8. No value a decoder relies on changed; the frozen vectors did not change |
+| 2026-11-15 | M2 Geometry, designer ruling on PR #30: section 4.1 says the inverted finder fixes rotation only, and that a decoder assumes the capture is not mirrored (one inverted finder cannot tell a mirror image from the original, whose top-right and bottom-left finders it swaps). No bit on screen changes |
