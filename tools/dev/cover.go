@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -37,7 +38,29 @@ func cover(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := run([]string{"CGO_ENABLED=0"}, "go", goTest(tags, "-coverprofile="+*profile, "./...")...); err != nil {
+	// Two runs, as the test task does (isolatedRuns): every package but internal/video, then
+	// internal/video on its own; their profiles are merged into one.
+	list, err := packages(tags)
+	if err != nil {
+		return err
+	}
+	var parts []string
+	var errs []error
+	for i, a := range isolatedRuns(goTest(tags, "./..."), list) {
+		part := fmt.Sprintf("%s.%d", *profile, i)
+		parts = append(parts, part)
+		a = append(a[:len(a):len(a)], "-coverprofile="+part)
+		errs = append(errs, run([]string{"CGO_ENABLED=0"}, "go", a...))
+	}
+	defer func() {
+		for _, p := range parts {
+			_ = os.Remove(p)
+		}
+	}()
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	if err := mergeProfiles(*profile, parts...); err != nil {
 		return err
 	}
 	pkgs, err := parseProfile(*profile)

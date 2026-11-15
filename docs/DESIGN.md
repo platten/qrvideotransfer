@@ -1321,7 +1321,13 @@ by GoReleaser).
   checkout is mounted read-only and the containers run with `no-new-privileges`. One step runs the
   `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
   tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
-  others. Every job and every long step has a timeout.
+  others. Every job and every long step has a timeout. The test, race and coverage tasks run
+  `internal/video` on its own, after the other packages have finished, not in parallel with them:
+  the worker cap and the watchdog's stop latency are properties of one process on a machine that
+  other test binaries are not oversubscribing, and the package's tests assert wall-clock bounds
+  (`EngineProbeTime`, stall stops) that held alone and failed on 4-vCPU runners when the other
+  packages' test binaries ran beside it. CI tests them under that condition (`tools/dev`,
+  `isolatedRuns`).
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
@@ -1458,3 +1464,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, round 2 of the review of PR #20: section 8 withdraws PR #15's uncapped worker processes: `internal/video` caps them at `video.WorkerProcesses()` (CPU count, reduced so that workers at 920 MB fit in half the physical memory), with waiting for a turn not counted against any bound, prompted by a probe that exceeded its wall-clock bound on macos-26-intel; the hold-and-wait hazard now applies to both caps |
 | 2026-11-14 | M1 stream D, round 3 of the review of PR #20: section 8's worker cap counts GOMAXPROCS and, on Linux, the cgroup memory limit when smaller, and no longer implies that the cap fixed the slow CI probe (cause believed to be CPU starvation; a capped run still recorded 13 s); section 12's probe bound is 60 s |
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 12's worker progress message carries the input's bytes and reads and the time from readiness to the first read, for the breakdown a time-bound error carries (protocol version 2) |
+| 2026-11-14 | M1 stream D, time-bound diagnostics: section 17 says the test, race and coverage tasks run `internal/video` on its own after the other packages, and why (the cap and the watchdog are properties of one process on a machine other test binaries are not oversubscribing) |
