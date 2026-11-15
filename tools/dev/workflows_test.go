@@ -36,6 +36,10 @@ func TestWorkflowProblemsFixtures(t *testing.T) {
 		{"write-all.yml", []string{"top-level permissions: write-all"}},
 		{"pr-target.yml", []string{"line 4: pull_request_target"}},
 		{"pr-target-list.yml", []string{"line 3: pull_request_target"}},
+		{"cancel-always.yml", []string{
+			"line 9: cancel-in-progress must be false or ${{ github.event_name == 'pull_request' }}",
+			"line 15: cancel-in-progress must be false or ${{ github.event_name == 'pull_request' }}",
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
@@ -49,6 +53,25 @@ func TestWorkflowProblemsFixtures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWorkflowProblemsCancelAllowed(t *testing.T) {
+	wf := `name: x
+on: [push, pull_request]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  a:
+    concurrency:
+      group: a
+      cancel-in-progress: false # a comment
+`
+	if got := workflowProblems("x.yml", []byte(wf), true); len(got) != 0 {
+		t.Fatalf("allowed cancel-in-progress forms gave problems: %v", got)
 	}
 }
 

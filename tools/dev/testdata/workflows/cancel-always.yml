@@ -1,0 +1,17 @@
+# Violations: cancelling in-progress runs unconditionally would also cancel runs on main and tags,
+# and so would any expression other than the pull-request condition.
+name: cancel-always
+on: [push, pull_request]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: a-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    steps:
+      - run: "true"

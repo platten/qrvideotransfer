@@ -50,7 +50,7 @@ func dictByte(t *testing.T, hdr []byte) int {
 
 func TestXZDictionaryLimit(t *testing.T) {
 	es := []tarEntry{fileHdr("a", "content")}
-	a := archive(t, MarshalManifest(manifestFor(es...)), es...)
+	a := archive(t, marshal(manifestFor(es...)), es...)
 	h := Header{Method: MethodXZ, ArchiveLen: int64(len(a))}
 	for _, code := range []byte{40, 23, 24} { // 4 GiB - 1, 12 MiB, 16 MiB
 		body := xzBody(t, a, func(hdr []byte) { hdr[dictByte(t, hdr)] = code })
@@ -77,7 +77,7 @@ func TestXZDictionaryLimit(t *testing.T) {
 
 func TestXZStructureRejects(t *testing.T) {
 	es := []tarEntry{fileHdr("a", "content")}
-	a := archive(t, MarshalManifest(manifestFor(es...)), es...)
+	a := archive(t, marshal(manifestFor(es...)), es...)
 	h := Header{Method: MethodXZ, ArchiveLen: int64(len(a))}
 	good := compressForTest(t, CompressXZ, a)
 	cases := map[string][]byte{
@@ -142,7 +142,7 @@ func zstdFrame(hdr []byte, data []byte) []byte {
 
 func TestZstdWindowLimit(t *testing.T) {
 	es := []tarEntry{fileHdr("a", "content")}
-	a := archive(t, MarshalManifest(manifestFor(es...)), es...)
+	a := archive(t, marshal(manifestFor(es...)), es...)
 	h := Header{Method: MethodZstd, ArchiveLen: int64(len(a))}
 	fcs := func(n uint64) []byte {
 		b := binary.LittleEndian.AppendUint64(nil, n)
@@ -242,7 +242,7 @@ func TestDeepManifestResources(t *testing.T) {
 		t.Skip("the time bound does not apply under the race detector; it runs in the ordinary test task")
 	}
 	start := time.Now()
-	m := MarshalManifest(worstCase(false, limits{MaxManifestEntries, MaxManifestBytes}))
+	m := marshal(worstCase(false, limits{MaxManifestEntries, MaxManifestBytes}))
 	if len(m) < MaxManifestBytes-1024 || len(m) > MaxManifestBytes {
 		t.Fatalf("manifest is %d bytes", len(m))
 	}

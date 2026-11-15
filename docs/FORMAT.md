@@ -421,7 +421,13 @@ The stream is what the outer code protects. Its length L includes every field be
 - Two inputs with the same base name, or any path that breaks the path rules below, stop the encode
   with an error. The error lists every path that breaks a path rule, each with the rule it breaks, not
   only the first. Nothing is renamed silently.
-- `mtime` is in whole seconds, UTC, written as RFC 3339 with a `Z` suffix.
+- `mtime` is in whole seconds, UTC, written as RFC 3339 with a `Z` suffix. RFC 3339 has a four-digit
+  year, so a time before 0000-01-01T00:00:00Z is written as that time and a time after
+  9999-12-31T23:59:59Z as that time; the encoder warns, naming each file whose time it clamped. A
+  decoder accepts any RFC 3339 time, including one whose offset moves it outside those years. The
+  encoder never writes a manifest its decoder would refuse: a field it cannot write as the decoder
+  requires (a negative file size, a path that is not valid UTF-8) stops the encode with an error
+  naming the entry.
 - The manifest is written with its keys in the order shown above and no whitespace between tokens.
 - Tar headers carry the path, size, the low 9 mode bits and the modification time. User and group ids
   are 0 and their names empty.
@@ -554,4 +560,5 @@ the interleaver rows were also reproduced independently by a reviewer.
 | 2026-11-14 | M1 stream A, second independent review of PR 7: section 12 says the decoder rejects an xz LZMA2 chunk whose data the LZMA decoder does not consume exactly, and a block whose check, padding or declared sizes are wrong, or an index or footer that does not match the blocks (the reference decoder now parses the xz container itself). `COM0` and `LPT0` are device names too; section 13's `stream.json` gains their refused manifests. The frozen streams did not change |
 | 2026-11-14 | M1 stream A, third independent review of PR 7: section 12 says an xz body holds exactly one block (the encoder always wrote one), refused at a second block header, and states the chunk rules: the first chunk resets the dictionary, no later chunk does, only the first LZMA chunk sets properties, and lc + lp and pb are at most 4. The reason: accepting many blocks let a small stream make a decoder allocate a new 8 MiB dictionary per block. XZ Utils output with several blocks (multithreaded, `--block-size`, `--block-list`) is no longer accepted. The frozen streams did not change |
 | 2026-11-14 | M1 stream A, fourth independent review of PR 7: section 12 limits LZMA state resets without new properties (control 0xA0 to 0xBF) to directly after an uncompressed chunk, once per 32 KiB of uncompressed-chunk data, and a new run of uncompressed chunks to once per 32 KiB of uncompressed-chunk data before it; it says qrvt's encoder writes one block, replacing "one block is what every encoder writes" (XZ Utils 5.8.4 splits its output even at -0 and -1) |
+| 2026-11-15 | Fix of the short fuzz job's FuzzManifest finding: section 12 says the encoder clamps `mtime` to 0000-01-01T00:00:00Z .. 9999-12-31T23:59:59Z, the times RFC 3339 can write, and warns naming each file it clamped (it wrote `-0001-12-31T23:00:00Z`, which its own decoder refuses, for a manifest time of year 0000 at +01:00); that a decoder accepts any RFC 3339 time; and that the encoder never writes a manifest its decoder would refuse, stopping with an error naming the entry for a negative file size or a path that is not valid UTF-8. No value a decoder relies on changed; the frozen vectors did not change |
 | 2026-11-15 | M2 Geometry, designer ruling on PR #30: section 4.1 says the inverted finder fixes rotation only, and that a decoder assumes the capture is not mirrored (one inverted finder cannot tell a mirror image from the original, whose top-right and bottom-left finders it swaps). No bit on screen changes |

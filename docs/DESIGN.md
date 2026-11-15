@@ -1354,7 +1354,10 @@ by GoReleaser).
   checkout is mounted read-only and the containers run with `no-new-privileges`. One step runs the
   `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
   tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
-  others. Every job and every long step has a timeout. The test, race and coverage tasks run
+  others. Every job and every long step has a timeout. A newer push to a pull request cancels that
+  pull request's older `ci` and `codeql` runs; runs on main, tags and schedules are never cancelled
+  (the workflow policy test allows `cancel-in-progress` only as `false` or the pull-request
+  condition). The test, race and coverage tasks run
   `internal/video` on its own, after the other packages have finished, not in parallel with them:
   the worker cap and the watchdog's stop latency are properties of one process on a machine that
   other test binaries are not oversubscribing, and the package's tests assert wall-clock bounds
@@ -1502,5 +1505,6 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 17 says the test, race and coverage tasks run `internal/video` on its own after the other packages, and why (the cap and the watchdog are properties of one process on a machine other test binaries are not oversubscribing), with the cost on macos-26-intel (+5 min 32 s over the coverage and race steps, 6 min 42 s left under the race step's timeout) |
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
 | 2026-11-15 | M2 open risks: section 12's worker progress message also carries the time from readiness to the worker's linear memory being reserved and to its input being opened; commit 0f2f4fc added these two fields in M1 stream D and raised the protocol to version 3, which the code ships (`protocolVersion`), and no row recorded it (review of PR #26, L1; the row above for version 2 is correct for commit cec1dc3) |
+| 2026-11-15 | Stream G, CI budget: section 17 says a newer push to a pull request cancels its older `ci` and `codeql` runs, that runs on main, tags and schedules are never cancelled, and that the workflow policy test enforces this |
 | 2026-11-15 | M2 Geometry: section 10, steps 1 to 4, records what was built: the midrange binarisation, diagonal and full-resolution checks and quad rules of the detector, its one finer rescan when the 1280-pixel scan finds no quad (measured: 3 of 1,000 poses at 25 degrees of tilt), and that it assumes a capture that is not mirrored; radial distortion with k1 chosen by slot contrast for the header, the finder references, and which pairs are tried; the order, refinement, outlier rule and node spacing of the mesh and its cell coordinates; and what the sampler calls saturated |
 | 2026-11-15 | M2 Geometry, designer ruling on PR #30: section 6 and section 10's distortion table no longer claim that mirroring is handled; a decoder assumes the capture is not mirrored (FORMAT.md section 4.1), and mirrored recordings are left to M5. Section 10 step 1 records the accepted departure from "at most 1280 pixels wide" (one rescan one step finer when no quad is found) with its evidence: 997 of 1,000 simulated 4K poses at up to 25 degrees of tilt found by the 1280-pixel scan alone, 1,000 with the rescan |

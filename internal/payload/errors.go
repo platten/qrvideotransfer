@@ -129,6 +129,7 @@ const (
 	WarnSkippedFile   WarningCode = "SkippedFile"   // a link or special file was not packed
 	WarnKeyReadable   WarningCode = "KeyReadable"   // a private key file is readable by others
 	WarnReceiverLimit WarningCode = "ReceiverLimit" // the receiver must raise a default limit
+	WarnMTimeClamped  WarningCode = "MTimeClamped"  // a modification time outside years 0000-9999 was clamped
 )
 
 // Warning is a condition the caller should report that does not stop the work.
