@@ -30,6 +30,9 @@ func (t *timedMem) Reallocate(size uint64) []byte {
 		return nil
 	}
 	if t.buf == nil || size > uint64(cap(t.buf)) {
+		if t.buf == nil {
+			beforeReserve(t.m)
+		}
 		nb := make([]byte, size, max(size, t.capacity))
 		copy(nb, t.buf)
 		t.buf = nb
@@ -41,6 +44,10 @@ func (t *timedMem) Reallocate(size uint64) []byte {
 	}
 	return t.buf
 }
+
+// beforeReserve is called with the instance's meter just before its linear memory is reserved;
+// tests delay the reservation with it.
+var beforeReserve = func(*meter) {}
 
 // Free implements experimental.LinearMemory. wazero frees the memory as it closes the module.
 func (t *timedMem) Free() {

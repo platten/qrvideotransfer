@@ -171,6 +171,19 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	}
 	defer func() { <-tokens }()
 	m.ready()
+	// Until its memory is reserved the instance is loading: loadLimit bounds it, not the watchdog.
+	m.loading.Store(true)
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	var overdue atomic.Bool
+	loadTimer := time.AfterFunc(loadLimit, func() {
+		if m.memAt.Load() == 0 {
+			overdue.Store(true)
+			m.cancelledAt.CompareAndSwap(0, time.Now().UnixNano())
+			cancel(loadError())
+		}
+	})
+	defer loadTimer.Stop()
 	var in string
 	reads := &atomic.Int64{}
 	if j.progress == progReads {
@@ -199,5 +212,8 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 		},
 	})
 	m.runAt.CompareAndSwap(0, time.Now().UnixNano())
+	if overdue.Load() {
+		return 0, loadError()
+	}
 	return int(rc), err
 }
