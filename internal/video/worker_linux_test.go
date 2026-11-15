@@ -35,7 +35,11 @@ func TestStartProcJob(t *testing.T) {
 		if job {
 			want = syscall.SIGKILL
 		}
-		if got := cmd.SysProcAttr.Pdeathsig; got != want {
+		got := syscall.Signal(0)
+		if cmd.SysProcAttr != nil {
+			got = cmd.SysProcAttr.Pdeathsig
+		}
+		if got != want {
 			t.Errorf("job %v: parent-death signal %v, want %v", job, got, want)
 		}
 	}
