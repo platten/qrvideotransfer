@@ -180,8 +180,12 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 }
 
 // reservedAt is the reservation time at (Unix nanoseconds) as a time the watchdog can compare with
-// now.
-func reservedAt(_ time.Time, at int64) time.Time { return time.Unix(0, at) }
+// now, the tick's time: now less the wall-clock time since the reservation, so it keeps now's
+// monotonic reading and the stall is measured on the monotonic clock. Only a clock step between the
+// reservation and this tick (at most one tick) can move it.
+func reservedAt(now time.Time, at int64) time.Time {
+	return now.Add(-time.Duration(now.UnixNano() - at))
+}
 
 // meterWriter counts bytes written through it, unless count is false; a blocked Write counts as
 // waiting.
