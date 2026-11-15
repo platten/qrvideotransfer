@@ -225,9 +225,14 @@ Rules for version 1:
    as the last index plus 0 to 3, chosen by the phase markers, only when fewer than four frame periods
    have passed. Otherwise the capture is skipped.
 2. **Phase field.** At each anchor, the four quadrant intensities are linearised using the anchor's own
-   black and white and the palette's gamma, then solved for non-negative weights summing to one, one per
-   value of frame index mod 4. Interpolating across the lattice gives per-cell weights. This handles
-   boundaries in any direction, player tearing and three-frame blends.
+   black and the palette's gamma and divided by their own total, which is the white reference because the
+   weights sum to one (the anchor's white serves when that total is below half of it); the result is
+   projected onto non-negative weights summing to one, one per value of frame index mod 4. Interpolating
+   bilinearly across the lattice, with missing anchors predicted linearly from their neighbours, gives
+   per-cell weights. This handles boundaries in any direction, player tearing and three-frame blends.
+   Measured in M2: dividing by the anchor's white instead let fringes of 24 code values make clean
+   anchors look mixed, so that two of three recordings had no codeword left to decode; the per-cell
+   weight error reaches 0.08 where a blend spans only a few lattice steps (section 15).
 3. **Assignment.** A cell contributes to code frame *k* only if the weight for *k* mod 4 is at least 0.92.
    Otherwise its soft bits are zero.
 4. **Guarantee.** With camera interval *Tc*, exposure *E*, pixel response *tr* and display period *Td*,
@@ -524,13 +529,26 @@ For each capture:
 5. **Calibrate levels.** Per tile of about 32 x 30 cells, keep a centre and variance for each level.
    Start from the palette and the anchors' black and white, refine with two or three rounds of
    expectation-maximisation on the data cells (scrambling makes levels equally likely, and their order
-   resolves the labels), and interpolate between tiles.
+   resolves the labels), and interpolate between tiles. Only cells that the anchors' phase field counts
+   are fitted: in M2 the blends of two frames widened the variances, the dark level's most (a blend
+   adds far more to a dark cell's code value than it takes from a light one's), and soft bits of clean
+   cells came out up to 18 times less confident than they were.
 6. **Cancel stripes.** Subtract each cell's decided level, take a 2-D Fourier transform of what remains,
    remove peaks standing above the noise, and re-estimate. Moire and backlight flicker are a few plane
-   waves and show up as such peaks.
+   waves and show up as such peaks. As built (M2): the cell grid is padded to the next sizes with no prime
+   factor above 5, so gaps stay near a tenth of it; a peak is a bin above 20 times the median power, its
+   neighbours going with it above 4 times; the estimate is repeated on what is left up to six times with
+   the levels decided afresh, and the whole step twice with the levels refitted between.
 7. **Soft bits.** For each bit, the difference between the best matching level with that bit 0 and with
    that bit 1, scaled by the variance, as a clipped 8-bit value in units of a quarter nat
-   (`modem.LLRScale`). Saturated cells give zero.
+   (`modem.LLRScale`). Saturated cells give zero. A cell with phase weight *w* has its variances widened
+   by (1 - *w*)^2 times the variance of the level centres, the most another frame can add. M2 settled the
+   two points the M1 review left open. Measured per-level variances differ by up to ten times (the dark
+   level widest), so the omitted log-variance term would reach about 1.2 nats, yet confidence measured
+   honest without it (section 15), and `modem.LLR` is unchanged. The 1/12 minimum variance never binds: a
+   soft bit is clipped once half the level spacing exceeds 8 times the standard deviation, 2.3 code
+   values at that floor, and the narrowest half-spacing of any modulation is 15.6 (Gray8, on the 8-bit
+   scale), so the floor costs nothing at 10 bits either.
 8. **Assign and sum.** Apply the phase rules of section 7 and add into the code frame's accumulator.
 
 | Distortion | Handled by |
@@ -1243,9 +1261,9 @@ How the parameters are read, and the values every preset shares:
 | --- | --- |
 | Perspective to 25 degrees, lens distortion, rolling shear | Cell-centre error at most 0.15 cell RMS; finders found in at least 99.9% of 1,000 random poses; the header read in at least 99.5% of captures on `handheld` |
 | Blur, noise, recorder quantiser | Raw bit error rate never rises as a parameter improves, and stays within 10% of reference values stored when M2 is merged |
-| Gamma, white balance, tone curve, vignetting | Confidence is honest: with soft bits grouped into ten buckets by stated confidence, the observed error rate of every bucket holding at least 10,000 bits lies between half and twice the stated rate |
-| Moire fringes, flicker bands | Decoding succeeds with stripe cancellation on at an amplitude where it fails with it off |
-| Frame mixing, any boundary direction | Phase weight error at most 0.05; no soft bit is ever credited to the wrong code frame |
+| Gamma, white balance, tone curve, vignetting | Confidence is honest: with soft bits grouped into ten buckets by stated confidence, the observed error rate of every bucket holding at least 10,000 bits lies between half and twice the stated rate. A bucket passes when its error count is consistent, at the 0.1% level of a Poisson test, with a rate in that band, so where few errors are expected only overconfidence can be shown. Met in M2 on `tripod` and `handheld` for Gray4, Gray2 and RGB8 under gamma error +-0.3, white balance +-0.10 and vignetting 0.25, each case alone and pooled |
+| Moire fringes, flicker bands | Decoding succeeds with stripe cancellation on at an amplitude where it fails with it off. Met in M2: on `handheld`, Gray4 with `normal`, at fringe amplitude 24 every codeword decodes with it on and none with it off, for three fringe periods and directions |
+| Frame mixing, any boundary direction | Phase weight error at most 0.05; no soft bit is ever credited to the wrong code frame. M2 measured no wrong credit (smallest true weight of a credited cell 0.80) but did not meet 0.05: at cells interpolated between four observed anchors the error reached 0.082 and exceeded 0.05 in 9 of 24 combinations of scan direction and roll, chiefly where panel and camera scan in opposite directions; beyond the outermost anchors and beside the finders, where the format places none, it reached 0.15. The test bounds it at 0.09 until the estimator improves |
 | Camera at twice the display rate, any phase offset | One pass succeeds for every offset |
 | Camera equal to the display rate | At 30 fps both, 4 ms exposure and 8 ms readout: succeeds within 4 loop passes |
 | Dropped frames, bursts, mid-loop start | With parity 20, whose budget is 16.7% of frames: succeeds at 14.7% random loss; at 18.7% reports which blocks are short and writes nothing |
@@ -1468,3 +1486,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 12's worker progress message carries the input's bytes and reads and the time from readiness to the first read, for the breakdown a time-bound error carries (protocol version 2) |
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 17 says the test, race and coverage tasks run `internal/video` on its own after the other packages, and why (the cap and the watchdog are properties of one process on a machine other test binaries are not oversubscribing), with the cost on macos-26-intel (+5 min 32 s over the coverage and race steps, 6 min 42 s left under the race step's timeout) |
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
+| 2026-11-15 | M2 radiometry and phase: section 7 rule 2 divides an anchor's linearised quadrants by their own total rather than by its white (fringes made clean anchors look mixed), interpolates bilinearly with missing anchors predicted linearly, and gives the measured weight error; section 10 step 5 fits only the cells the phase field counts (blends made clean cells' soft bits up to 18 times underconfident), step 6 gives stripe cancellation as built, step 7 widens a cell's variances by its phase weight and settles the log-variance term (omitted; honest without it) and the 1/12 floor (never binds); section 15 states the Poisson reading of the honesty test and the measured results of the radiometry and phase rows, of which phase weight error at most 0.05 is not met |
