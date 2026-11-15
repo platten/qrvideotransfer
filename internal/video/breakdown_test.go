@@ -73,6 +73,15 @@ func TestBreakdownOnTimeBounds(t *testing.T) {
 	if !strings.Contains(err.Error(), "EngineProbeTime") || !strings.Contains(err.Error(), "wall ") {
 		t.Errorf("probe time: %v", err)
 	}
+	// An in-process instance's stop is timed in three parts after its cancellation: until the guest
+	// reached a check, the module's close, and the return from the run call.
+	err = run(t.Context(), engineFor(t), job{prog: "ffmpeg", timeout: time.Second, progress: progOutput,
+		args: func(string, string) []string { return spin }})
+	for _, want := range []string{"cancellation to guest check", "module close", "run return"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("in-process stall %v lacks %q", err, want)
+		}
+	}
 	stuck := fakeRunner(func(ctx context.Context, j *job, m *meter) (int, error) { <-ctx.Done(); return 0, nil })
 	err = run(t.Context(), stuck, job{timeout: time.Second})
 	if !strings.Contains(err.Error(), "EngineStallTimeout") || !strings.Contains(err.Error(), "since last progress") {
