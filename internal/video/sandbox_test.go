@@ -201,16 +201,21 @@ func TestSandboxWrite(t *testing.T) {
 func TestMemoryCeiling(t *testing.T) {
 	t.Parallel()
 	e := engineFor(t)
-	var p peakAlloc
-	log, err := ffmpegJob(withPeak(t.Context(), &p), e, "", "-v", "error", "-f", "lavfi", "-i", "color=s=64x64:d=1",
-		"-vf", "scale=11000:11000,format=rgba64le", "-frames:v", "1", "-f", "null", "-")
+	m := &meter{}
+	var log logTail
+	err := run(t.Context(), e, job{prog: "ffmpeg", stderr: &log, progress: progOutput, meter: m,
+		args: func(string, string) []string {
+			return []string{"-v", "error", "-f", "lavfi", "-i", "color=s=64x64:d=1",
+				"-vf", "scale=11000:11000,format=rgba64le", "-frames:v", "1", "-f", "null", "-"}
+		}})
 	if !errors.Is(err, ErrEngine) {
-		t.Fatalf("over the ceiling: %v (%s)", err, log)
+		t.Fatalf("over the ceiling: %v (%s)", err, log.String())
 	}
-	if p.peak.Load() > EngineMemoryLimit || !strings.Contains(err.Error(), "memory") {
-		t.Errorf("peak linear memory %d", p.peak.Load())
+	// The peak is what the instance's allocator gave it: never above the ceiling, and not nothing.
+	if p := m.memPeak.Load(); p > EngineMemoryLimit || p == 0 || !strings.Contains(err.Error(), "memory") {
+		t.Errorf("peak linear memory %d", p)
 	}
-	t.Logf("reported: %v; peak linear memory %d MiB", err, p.peak.Load()>>20)
+	t.Logf("reported: %v; peak linear memory %d MiB", err, m.memPeak.Load()>>20)
 	// The engine still works.
 	if _, err := ffmpegJob(t.Context(), e, "", "-v", "error", "-f", "lavfi", "-i", "color=s=64x64:d=0.1", "-f", "null", "-"); err != nil {
 		t.Fatal(err)
@@ -307,16 +312,16 @@ func TestMissingReferences(t *testing.T) {
 		if err := os.WriteFile(path, craftHEVC(refs[0], refs[1], refs[2], 2), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		var p peakAlloc
+		m := &meter{}
 		start := time.Now()
 		var out countWriter
-		err := run(withPeak(t.Context(), &p), e, job{prog: "ffmpeg", input: path, stdout: &out, progress: progOutput,
+		err := run(t.Context(), e, job{prog: "ffmpeg", input: path, stdout: &out, progress: progOutput, meter: m,
 			args: func(in, _ string) []string {
 				return []string{"-v", "error", "-f", "hevc", "-i", in, "-f", "rawvideo", "-pix_fmt", "gray10le", "pipe:1"}
 			}})
-		t.Logf("refs %v: %v; peak linear memory %d MiB; %d bytes out; %v", refs, err, p.peak.Load()>>20, out.n, time.Since(start))
-		if p.peak.Load() > EngineMemoryLimit {
-			t.Errorf("peak linear memory %d over the ceiling", p.peak.Load())
+		t.Logf("refs %v: %v; peak linear memory %d MiB; %d bytes out; %v", refs, err, m.memPeak.Load()>>20, out.n, time.Since(start))
+		if p := m.memPeak.Load(); p > EngineMemoryLimit || p == 0 {
+			t.Errorf("peak linear memory %d: over the ceiling or not recorded", p)
 		}
 		if time.Since(start) > time.Minute {
 			t.Errorf("took %v", time.Since(start))
