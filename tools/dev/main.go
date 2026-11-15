@@ -383,12 +383,17 @@ func fuzzTargets(list string) []fuzzTarget {
 	return ts
 }
 
-// fuzzAll calls fuzzOne for every target in turn.
+// fuzzAll calls fuzzOne for every target in turn, whatever the earlier ones returned, and returns
+// an error listing every target that failed, so that one finding does not hide another.
 func fuzzAll(ts []fuzzTarget, fuzzOne func(fuzzTarget) error) error {
+	var failed []string
 	for _, t := range ts {
 		if err := fuzzOne(t); err != nil {
-			return err // stub: stops at the first failure
+			failed = append(failed, fmt.Sprintf("\n\t%s %s: %v", t.pkg, t.name, err))
 		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d fuzz targets failed:%s", len(failed), len(ts), strings.Join(failed, ""))
 	}
 	return nil
 }
