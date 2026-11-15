@@ -165,6 +165,12 @@ func (st *confirmation) predict(k int, with []int, w, h int) (gpt, float64, bool
 // cells and confirmFinderTolModule modules of where the located anchors and the other finders
 // listed in check put it.
 func (st *confirmation) agrees(check []int, w, h int) bool {
+	return len(st.disagree(check, w, h)) == 0
+}
+
+// disagree returns the finders listed in check that do not agree (see agrees).
+func (st *confirmation) disagree(check []int, w, h int) []int {
+	var out []int
 	for _, k := range check {
 		var others []int
 		for _, j := range check {
@@ -175,10 +181,10 @@ func (st *confirmation) agrees(check []int, w, h int) bool {
 		p, cell, ok := st.predict(k, others, w, h)
 		uy := st.src[0].Y / 4.5 // cells per finder module: c0 = 4.5 Uy
 		if !ok || !(p.sub(st.dst[k]).norm() <= min(confirmFinderTol, confirmFinderTolModule*uy)*cell) {
-			return false
+			out = append(out, k)
 		}
 	}
-	return true
+	return out
 }
 
 // confirms reports whether quad q is a code's. Its header must decode, and the decoded grid must
@@ -190,12 +196,22 @@ func (st *confirmation) agrees(check []int, w, h int) bool {
 // placed mostly by the finders nearest it; the leave-one-out check catches that finder, and it does
 // not depend on the anchors next to any one finder being readable. Each distinct decoded grid is
 // tried (locate).
+//
+// When it reports false it leaves in d.gateFailed whether a decoded grid failed the gate, and in
+// d.disagree the corners whose finders disagreed with the anchors, so that the three-finder path
+// can leave out the finders of that quad.
 func (d *FinderDetector) confirms(f *video.Frame, v *geomLuma, q Quad) bool {
 	all := []int{0, 1, 2, 3}
+	d.gateFailed, d.disagree = false, d.disagree[:0]
 	for _, st := range d.locate(f, v, q, all) {
-		if st.enough() && st.agrees(all, v.w, v.h) {
+		if !st.enough() {
+			continue
+		}
+		bad := st.disagree(all, v.w, v.h)
+		if len(bad) == 0 {
 			return true
 		}
+		d.disagree = append(d.disagree, bad...)
 	}
 	return false
 }

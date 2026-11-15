@@ -40,7 +40,8 @@ type FinderDetector struct {
 	clusters   []detectCluster
 	layouts    []*frame.Layout // of the grids decoded lately, at most confirmMaxLayouts
 	grids      [][2]int        // distinct grids used during this Detect
-	gateFailed bool            // a decoded grid failed the 1.5-pixel gate during this Detect
+	gateFailed bool            // the last confirmed quad decoded a grid that failed the 1.5-pixel gate
+	disagree   []int           // the last confirmed quad's corners that disagreed with its anchors
 	hidden     int             // the corner the last located quad predicted, or -1 with four in view
 }
 
@@ -369,18 +370,27 @@ func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int, three bool) 
 	// Data cells can mimic a finder at the finder's own scale (on a grid of 135 rows or fewer a finder
 	// module is at most one cell), so the best quads are confirmed by their header, best first. A
 	// quad whose header does not decode is not reported: a wrong quad would feed wrong cells on.
+	// A rejected quad's finders that decoded a grid failing the 1.5-pixel gate, and its finders that
+	// disagreed with the anchors, are left out of the three-finder path: the first are a hostile or
+	// foreign code's, the second decoys.
+	excluded := map[*detectCluster]bool{}
 	for _, t := range top {
 		if q := quad(t.q); d.confirms(f, v, q) {
 			return q, true
 		}
+		if d.gateFailed {
+			for _, c := range t.q {
+				excluded[c] = true
+			}
+		}
+		for _, k := range d.disagree {
+			excluded[t.q[k]] = true
+		}
 	}
-	// Three finders are tried on the last scan only, and not when a four-finder quad decoded a header
-	// whose grid failed the 1.5-pixel gate: the finders are then real, and a hostile header would
-	// fail the gate again.
-	if !three || d.gateFailed {
+	if !three { // three finders are tried on the last scan only
 		return Quad{}, false
 	}
-	return d.three(f, v, normal, inverted)
+	return d.three(f, v, normal, inverted, excluded)
 }
 
 // detectVerify refines the candidates at full resolution, most hits first, and keeps up to n that

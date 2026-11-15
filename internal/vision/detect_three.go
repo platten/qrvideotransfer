@@ -21,7 +21,7 @@ const (
 	threeSearchSteps  = 5
 	// threeCandidates is how many three-finder quads are tried: each costs a search of up to 121
 	// header decodes, and a hostile frame can offer many.
-	threeCandidates = 2
+	threeCandidates = 3
 )
 
 // threeCandidate is a quad of three finders found and a fourth predicted.
@@ -36,7 +36,7 @@ type threeCandidate struct {
 // predicted (threePredict); candidates are scored and checked as four-finder quads are
 // (detectScore), the best threeCandidates first. A candidate is located only if confirmThree confirms
 // it; a quad is never accepted on three finders alone.
-func (d *FinderDetector) three(f *video.Frame, v *geomLuma, normal, inverted []*detectCluster) (Quad, bool) {
+func (d *FinderDetector) three(f *video.Frame, v *geomLuma, normal, inverted []*detectCluster, excluded map[*detectCluster]bool) (Quad, bool) {
 	var top []threeCandidate
 	consider := func(c [4]*detectCluster, k int) {
 		var at [4]gpt
@@ -64,6 +64,9 @@ func (d *FinderDetector) three(f *video.Frame, v *geomLuma, normal, inverted []*
 	}
 	sized := func(cs ...*detectCluster) bool {
 		for i, a := range cs {
+			if excluded[a] {
+				return false
+			}
 			for _, b := range cs[i+1:] {
 				if a == b || !detectSizes(a, b) {
 					return false
