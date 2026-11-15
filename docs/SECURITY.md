@@ -127,14 +127,17 @@ Implementation defaults, each a named constant with a test that exceeds it:
 A decode that reaches a limit stops with an error that names the limit and, where one exists, the flag
 that raises it. Two limits have a flag in version 1: the unpacked size (`--max-size`) and the manifest
 (`--max-entries`, up to 1,000,000 entries and 64 MiB). An error from a limit on time
-(`EngineStallTimeout`, `EngineProbeTime`, `EngineLoadLimit`) also says where the instance's time went:
-wall time, start to ready, ready to first read, the input's reads and bytes, time since the last
-progress, and the worker processes and in-process instances running. It is sanitised like other
-engine text. On the normal path it costs, per instance, one memory-allocator wrapper and one close
-notifier (three small allocations, 112 bytes, about 40 ns to set up) and seven timestamps (the run's
-start, readiness, the memory reserved, the input opened, the module beginning to close, its memory
-freed and the run call's return; each a `time.Now`, 0.6-1.3 µs for all seven); per read of the
-input, two atomic additions (about 8 ns, a timestamp and a compare-and-swap added on the first);
+(`EngineStallTimeout`, `EngineProbeTime`, `EngineLoadLimit`) also says where the instance's time
+went: wall time, start to ready, in a worker ready to memory reserved and ready to input opened,
+ready to first read, the input's reads and bytes, time since the last progress, after the watchdog's
+cancellation how long the instance took to stop (for an in-process instance in three parts: until
+the guest reached a check, the module's close, and the return from the run call), and the worker
+processes and in-process instances running. It is sanitised like other engine text. On the normal
+path it costs, per instance, one memory-allocator wrapper and one close notifier (three small
+allocations, 112 bytes, about 40 ns to set up) and seven timestamps (the run's start, readiness, the
+memory reserved, the input opened, the module beginning to close, its memory freed and the run
+call's return; each a `time.Now`, 0.6-1.3 µs for all seven under load, S1 section 14.2); per read of
+the input, two atomic additions (about 8 ns, a timestamp and a compare-and-swap added on the first);
 and, from each worker, a progress message (48-byte payload) every 200 ms while its counts change,
 about 0.4 µs for the worker to build and send, so at most about 2.5 µs a second (the parent's
 handling was not timed separately); before, only probes sent progress messages. Measured on the S1
@@ -468,3 +471,4 @@ instruction and states which versions receive fixes.
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 9.5 separates the test process's Go heap (sampled and asserted) from the worker's memory (bounded by construction, and measured by sampling each worker while it runs (VmHWM on Linux, ps on macOS) and asserted under 1 GiB; not measured on Windows; a worker's rusage carries the parent's high-water mark on Linux), replacing the in-process linear-memory sample that read 0 since PR #15 |
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 5 states only the measured stop times: on the default path a worker is stopped by killing its process, measured at most 0.46 s after cancellation; on the fallback path the watchdog cancelled on time, but one instance returned 8.4 s after its cancellation on an oversubscribed 4-vCPU runner, cause not established, and no stop time after cancellation is claimed for it. `TestWatchdogUnderLoad` asserts the cancellation and the stop and logs the return time; section 9.3's 3 s is labelled a measurement on one machine |
 | 2026-11-15 | M2 open risks: section 5 states the measured normal-path cost of the time-bound breakdown (commits cec1dc3, 0f2f4fc and 7469139): an allocator wrapper and close notifier per instance (112 bytes, about 40 ns) and seven timestamps per instance (0.6-1.3 µs in all), two atomic additions per read (about 8 ns), and each worker's progress message every 200 ms while its counts change (about 0.4 µs each), where it said "a few atomic operations per read and nothing else"; no measurable change to an in-process decode (review of PR #26, L2) |
+| 2026-11-15 | M2 open risks, review of PR #27: section 5 lists everything the time-bound breakdown reports (a worker's ready to memory reserved and ready to input opened, and the stop after the watchdog's cancellation, in three parts for an in-process instance), and marks the seven timestamps' 0.6-1.3 µs as measured under load (S1 section 14.2) |
