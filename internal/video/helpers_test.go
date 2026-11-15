@@ -108,8 +108,17 @@ func decodeAll(t *testing.T, d Decoder) []Frame {
 	return out
 }
 
-// embedded returns the embedded backend with the default compilation cache.
+// embedded returns the embedded backend with the default compilation cache, its instances watched
+// for slow samples (slow_test.go). Its InProcess always reports nil; use unwatched to test that.
 func embedded(t *testing.T) *Embedded {
+	t.Helper()
+	b := unwatched(t)
+	b.r = observed{r: b.r, t: t}
+	return b
+}
+
+// unwatched returns the embedded backend with the default compilation cache.
+func unwatched(t *testing.T) *Embedded {
 	t.Helper()
 	b, err := NewEmbedded(Options{})
 	if err != nil {

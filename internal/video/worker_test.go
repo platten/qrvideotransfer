@@ -208,7 +208,9 @@ func TestWorkerSpin(t *testing.T) {
 		t.Skip("takes 30 s")
 	}
 	p, ps := testWorkers(t)
+	stop := spin1(&spinning.worker)
 	err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil }})
+	stop()
 	var le *LimitError
 	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" || !strings.Contains(err.Error(), "since last progress") {
 		t.Fatalf("got %v", err)
@@ -252,7 +254,8 @@ func parentKilled(t *testing.T, mode string) {
 		_ = cmd.Process.Kill()
 		t.Fatalf("fake parent said %q: %v", line, err)
 	}
-	time.Sleep(time.Second) // the worker is spinning now
+	defer spin1(&spinning.otherProcess)() // counted from here: its worker started before the line
+	time.Sleep(time.Second)               // the worker is spinning now
 	if !processAlive(pid) {
 		t.Fatal("the worker is not running")
 	}
@@ -442,7 +445,7 @@ func TestWorkerStatusRecovers(t *testing.T) {
 	defer func() { setWorkers(w, nil); degraded.Store(nil) }()
 	p, _ := testWorkers(t, "pre-garbage")
 	setWorkers(p, nil)
-	hit := embedded(t)
+	hit := unwatched(t)
 	if _, err := hit.Probe(ctx, clip("hevc8.mp4")); err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +453,7 @@ func TestWorkerStatusRecovers(t *testing.T) {
 		t.Fatalf("after a failed start: status %v, backend %v", WorkerStatus(), hit.InProcess())
 	}
 	setWorkers(w, nil)
-	clean := embedded(t)
+	clean := unwatched(t)
 	if _, err := clean.Probe(ctx, clip("hevc8.mp4")); err != nil {
 		t.Fatal(err)
 	}

@@ -230,6 +230,7 @@ func TestWatchdog(t *testing.T) {
 		t.Skip("takes 30 s")
 	}
 	e := engineFor(t)
+	defer spin1(&spinning.inProcess)()
 	start := time.Now()
 	_, err := ffmpegJob(t.Context(), e, "", spin...)
 	el := time.Since(start)
@@ -263,7 +264,7 @@ func TestCancel(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	errs := make([]error, 3)
-	wg.Go(func() { _, errs[0] = ffmpegJob(ctx, e, "", spin...) })
+	wg.Go(func() { defer spin1(&spinning.inProcess)(); _, errs[0] = ffmpegJob(ctx, e, "", spin...) })
 	wg.Go(func() {
 		var fr Frame
 		for errs[1] == nil {

@@ -75,8 +75,10 @@ func TestBreakdownOnTimeBounds(t *testing.T) {
 	}
 	// An in-process instance's stop is timed in three parts after its cancellation: until the guest
 	// reached a check, the module's close, and the return from the run call.
+	stop := spin1(&spinning.inProcess)
 	err = run(t.Context(), engineFor(t), job{prog: "ffmpeg", timeout: time.Second, progress: progOutput,
 		args: func(string, string) []string { return spin }})
+	stop()
 	for _, want := range []string{"cancellation to guest check", "module close", "run return"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("in-process stall %v lacks %q", err, want)

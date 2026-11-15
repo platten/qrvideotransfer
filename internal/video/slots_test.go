@@ -3,6 +3,7 @@ package video
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"sync"
 	"testing"
@@ -34,6 +35,7 @@ func TestWatchdogUnderLoad(t *testing.T) {
 	for _, k := range []int{capped, n} {
 		old := slots
 		slots = make(chan struct{}, k)
+		t.Logf("%d slots, before: %s", k, machineLoad())
 		start := time.Now()
 		var wg sync.WaitGroup
 		errs := make([]error, n)
@@ -42,6 +44,10 @@ func TestWatchdogUnderLoad(t *testing.T) {
 		for i := range n {
 			ms[i] = &meter{}
 			wg.Go(func() {
+				defer spin1(&spinning.inProcess)()
+				done := make(chan struct{})
+				defer close(done)
+				go watchSlow(t, fmt.Sprintf("%d slots, instance %d", k, i), false, ms[i], done)
 				errs[i] = run(t.Context(), e, job{prog: "ffmpeg", progress: progOutput, timeout: limit,
 					args: func(string, string) []string { return spin }, meter: ms[i]})
 				ends[i] = time.Now()
