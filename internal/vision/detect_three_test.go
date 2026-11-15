@@ -2,9 +2,7 @@ package vision
 
 import (
 	"math"
-	"runtime"
 	"testing"
-	"time"
 
 	"github.com/platten/qrvideotransfer/internal/frame"
 	"github.com/platten/qrvideotransfer/internal/video"
@@ -104,25 +102,51 @@ func TestDetectThreeHostile(t *testing.T) {
 	draw(200, 150, frame.TopLeft)
 	draw(1700, 150, frame.TopRight)
 	draw(1700, 930, frame.BottomRight)
-	var d FinderDetector
-	var before, after runtime.MemStats
-	const n = 3
-	runtime.ReadMemStats(&before)
-	start := time.Now()
-	for range n {
-		if q, ok := d.Detect(f, nil); ok {
-			t.Fatalf("located %v", q.Centres)
+	c := geomNewCode(t, 240, 135, 8, 2, 1, 39) // a real code of the same size, for the reference
+	geomCostRatio(t, "three finder patterns on noise", geomPlain(c, 0), f, [][]uint16{f.Y}, 4, 32<<20)
+}
+
+// TestDetectThreeHostile4K: the costly three-finder path at 4K. A real 480 x 270 code at 8 pixels
+// per cell, its bottom-right finder covered, whose four header copies claim 2047 x 1393 (inside the
+// 1.5-pixel gate, so a layout is built and the anchors are searched), alternating with 2046 x 1393,
+// is never located; each Detect allocates at most 32 MB and takes at most 6 times as long as
+// locating the real code in the same process.
+func TestDetectThreeHostile4K(t *testing.T) {
+	c := geomNewCode(t, 480, 270, 8, 2, 1, 40)
+	q := geomPlainQuad(c)
+	var planes [][]uint16
+	for _, gx := range []int{2047, 2046} {
+		g := geomPlain(c, 0)
+		g.Y = geomFakeCopies(t, c, gx, 1393, 0, 1, 2, 3)
+		geomPaintDisc(g, q.Centres[3].X, q.Centres[3].Y, 12*float64(c.pitch), 235)
+		planes = append(planes, g.Y)
+	}
+	geomCostRatio(t, "4K three-finder hostile header", geomPlain(c, 0), geomPlain(c, 0), planes, 6, 32<<20)
+}
+
+// TestThreeFindersConflictingCopy: with finder k covered and header copy j repainted to claim a
+// 300 x 180 grid, for every k and j, the code is still located from three finders with its true
+// grid: the conflicting grid takes one layout of the two allowed, which are cached by grid.
+func TestThreeFindersConflictingCopy(t *testing.T) {
+	c := geomNewCode(t, 320, 180, 8, 2, 1, 41)
+	want := geomPlainQuad(c)
+	for k := range 4 {
+		for j := range 4 {
+			f := geomPlain(c, 0)
+			f.Y = geomFakeCopies(t, c, 300, 180, j)
+			geomPaintDisc(f, want.Centres[k].X, want.Centres[k].Y, 12*float64(c.pitch), 235)
+			var d FinderDetector
+			q, ok := d.Detect(f, nil)
+			if !ok {
+				t.Errorf("finder %d covered, copy %d conflicting: not located", k, j)
+				continue
+			}
+			for i := range 4 {
+				if e := geomDist(q.Centres[i], want.Centres[i]); e > want.Module {
+					t.Errorf("finder %d covered, copy %d conflicting: centre %d at %v, want %v", k, j, i, q.Centres[i], want.Centres[i])
+				}
+			}
 		}
-	}
-	el := time.Since(start) / n
-	runtime.ReadMemStats(&after)
-	alloc := (after.TotalAlloc - before.TotalAlloc) / n
-	t.Logf("per Detect: %v, %.1f MB allocated", el, float64(alloc)/(1<<20))
-	if alloc > 32<<20 {
-		t.Errorf("%.1f MB allocated per Detect, want at most 32", float64(alloc)/(1<<20))
-	}
-	if el > 10*time.Second && !geomRace {
-		t.Errorf("%v per Detect, want at most 10 s", el)
 	}
 }
 

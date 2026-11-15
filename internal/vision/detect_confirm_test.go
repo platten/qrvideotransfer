@@ -1,9 +1,7 @@
 package vision
 
 import (
-	"runtime"
 	"testing"
-	"time"
 
 	"github.com/platten/qrvideotransfer/internal/frame"
 )
@@ -136,35 +134,12 @@ func geomFakeGrid(t *testing.T, c *geomCode, gridX, gridY int) []uint16 {
 }
 
 // TestDetectHostileGrid: a frame whose header claims a 2047 x 2047 grid, alternating with 2047 x
-// 2046 from call to call, is never located, and each Detect stays within 16 MB of allocation for an
-// 848 x 480 frame (a 2047 x 2047 layout alone allocates about 22 MB). Wall-clock time is only
-// bounded loosely, 10 s, for slow CI runners (about 20 ms on a quiet core; 526 ms on macos-26-intel).
+// 2046 from call to call, is never located; each Detect allocates at most 16 MB for an 848 x 480
+// frame (a 2047 x 2047 layout alone allocates about 22 MB) and takes at most twice as long as
+// locating the real code in the same process. The grid fails the 1.5-pixel gate, so the
+// three-finder path is not tried either.
 func TestDetectHostileGrid(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 4, 2, 1, 26)
 	a, b := geomFakeGrid(t, c, 2047, 2047), geomFakeGrid(t, c, 2047, 2046)
-	f := geomPlain(c, 0)
-	var d FinderDetector
-	var before, after runtime.MemStats
-	const n = 6
-	runtime.ReadMemStats(&before)
-	start := time.Now()
-	for i := range n {
-		f.Y = a
-		if i%2 == 1 {
-			f.Y = b
-		}
-		if _, ok := d.Detect(f, nil); ok {
-			t.Fatalf("call %d: located a code whose header claims a 2047-cell grid", i)
-		}
-	}
-	el := time.Since(start) / n
-	runtime.ReadMemStats(&after)
-	alloc := (after.TotalAlloc - before.TotalAlloc) / n
-	t.Logf("per Detect: %v, %.1f MB allocated", el, float64(alloc)/(1<<20))
-	if alloc > 16<<20 {
-		t.Errorf("%.1f MB allocated per Detect, want at most 16", float64(alloc)/(1<<20))
-	}
-	if el > 10*time.Second && !geomRace {
-		t.Errorf("%v per Detect, want at most 10 s", el)
-	}
+	geomCostRatio(t, "2047-cell header", geomPlain(c, 0), geomPlain(c, 0), [][]uint16{a, b}, 2, 16<<20)
 }

@@ -65,6 +65,49 @@ func TestSamplePlain(t *testing.T) {
 	}
 }
 
+// TestSamplePartialClip: display white at the clip over only part of the code (non-uniform screen,
+// vignetting, an exposure gradient). A rendered 212 x 120 frame keeps its white at 235 over the left
+// share of the width and has it lowered to 226 elsewhere, for shares of 5% to 95%: the glare flag
+// stays within the same ceilings as for white at the clip everywhere, 2% of the cells with black
+// and white and 0.1% otherwise, at every share.
+func TestSamplePartialClip(t *testing.T) {
+	for _, mod := range []uint8{1, 2, 3} {
+		c := geomNewCode(t, 212, 120, 8, mod, 1, 30)
+		cells := c.layout.DataCells()
+		obs := make([]modem.Obs, len(cells))
+		most := 0.001
+		if mod == 1 {
+			most = 0.02
+		}
+		worst, at := 0.0, 0
+		for share := 5; share <= 95; share += 5 {
+			f := geomPlain(c, 0)
+			edge := f.W * share / 100
+			for y := range f.H {
+				for x := edge; x < f.W; x++ {
+					if f.Y[y*f.W+x] == 235 {
+						f.Y[y*f.W+x] = 226
+					}
+				}
+			}
+			FootprintSampler{}.Sample(obs, f, geomPlainMesh(c), cells)
+			flagged := 0
+			for _, o := range obs {
+				if o.Saturated {
+					flagged++
+				}
+			}
+			if s := float64(flagged) / float64(len(cells)); s > worst {
+				worst, at = s, share
+			}
+		}
+		t.Logf("modulation %d: at most %.2f%% of cells flagged (white clipped over %d%% of the width)", mod, 100*worst, at)
+		if worst > most {
+			t.Errorf("modulation %d: %.2f%% of cells flagged with white clipped over %d%% of the width, want at most %.1f%%", mod, 100*worst, at, 100*most)
+		}
+	}
+}
+
 // TestSampleCentral: only the central 60% of a cell counts; its outer fifth on each side does not.
 func TestSampleCentral(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 16, 2, 1, 31)
