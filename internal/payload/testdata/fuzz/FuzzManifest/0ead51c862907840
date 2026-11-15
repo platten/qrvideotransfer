@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"version\":1,\"entries\":[{\"path\":\"a\",\"type\":\"dir\",\"mode\":0,\"mtime\":\"0000-01-01T0:00:00+01:00\"}]}")

@@ -81,7 +81,7 @@ func collect(inputs []string) ([]source, []Warning, error) {
 		names = map[string]string{}
 	)
 	add := func(file, path string, info fs.FileInfo) error {
-		e := Entry{Path: path, Mode: uint32(info.Mode().Perm()), MTime: info.ModTime().UTC().Truncate(time.Second)}
+		e, w := newEntry(path, info)
 		switch {
 		case info.IsDir():
 			e.Dir = true
@@ -96,6 +96,9 @@ func collect(inputs []string) ([]source, []Warning, error) {
 			warns = append(warns, Warning{WarnSkippedFile, path,
 				fmt.Sprintf("skipped %q: only regular files and folders are packed, not %v", path, info.Mode().Type())})
 			return nil
+		}
+		if w != nil {
+			warns = append(warns, *w)
 		}
 		srcs = append(srcs, source{e, file})
 		return nil
@@ -146,6 +149,18 @@ func collect(inputs []string) ([]source, []Warning, error) {
 	return srcs, warns, nil
 }
 
+// newEntry returns the entry for the input at path, without its size and hash, and a warning when
+// its modification time had to be clamped (FORMAT.md section 12).
+func newEntry(path string, info fs.FileInfo) (Entry, *Warning) {
+	e := Entry{Path: path, Mode: uint32(info.Mode().Perm())}
+	var clamped bool
+	if e.MTime, clamped = clampMTime(info.ModTime()); !clamped {
+		return e, nil
+	}
+	return e, &Warning{WarnMTimeClamped, path, fmt.Sprintf("%q is packed with the modification time %s, not %s, "+
+		"which a manifest cannot hold", path, e.MTime.Format(time.RFC3339), info.ModTime().UTC().Format(time.RFC3339))}
+}
+
 // validateInputs applies the rules of FORMAT.md section 12 to the entries collected from the inputs
 // and returns an [InputsError] listing every path that breaks one.
 func validateInputs(entries []Entry) error {
@@ -188,12 +203,9 @@ func writeStream(ctx context.Context, dst io.ReadWriteSeeker, srcs []source, o P
 			res.Bytes += s.Size
 		}
 	}
-	if len(entries) > MaxManifestEntries {
-		return nil, &LimitError{"manifest entries", int64(len(entries)), MaxManifestEntries, ""}
-	}
-	manifest := MarshalManifest(entries)
-	if len(manifest) > MaxManifestBytes {
-		return nil, &LimitError{"manifest size", int64(len(manifest)), MaxManifestBytes, ""}
+	manifest, err := MarshalManifest(entries)
+	if err != nil {
+		return nil, err
 	}
 	if w := receiverWarning(len(entries), len(manifest)); w != nil {
 		res.Warnings = append(res.Warnings, *w)
