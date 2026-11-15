@@ -34,6 +34,9 @@ type meter struct {
 	// instance's turn). Until its linear memory is reserved (memAt), it is loading, not stalled:
 	// the reservation precedes any guest code, and EngineLoadLimit bounds it instead.
 	loading atomic.Bool
+	// onReserve, when set, is called once, by the goroutine that reserved the memory, as soon as it
+	// is reserved (a worker reports it at once). Set before the instance starts.
+	onReserve func()
 	// memPeak is the largest linear memory the instance reached, in bytes (timedAlloc).
 	memPeak     atomic.Int64
 	cancelledAt atomic.Int64 // when the watchdog cancelled the instance
@@ -46,7 +49,11 @@ type meter struct {
 func (m *meter) ready() { m.readyAt.CompareAndSwap(0, time.Now().UnixNano()) }
 
 // reserved records that the instance's linear memory has been reserved.
-func (m *meter) reserved() { m.memAt.CompareAndSwap(0, time.Now().UnixNano()) }
+func (m *meter) reserved() {
+	if m.memAt.CompareAndSwap(0, time.Now().UnixNano()) && m.onReserve != nil {
+		m.onReserve()
+	}
+}
 
 // reserving reports whether the instance is loading and has not yet reserved its linear memory.
 func (m *meter) reserving() bool { return m.loading.Load() && m.memAt.Load() == 0 }
