@@ -63,6 +63,9 @@ type LimitError struct {
 	Limit      string
 	Value, Max float64
 	Hint       string // what to do about it; may be empty
+	// Detail, for a limit on time, says where the instance's time went (wall time, start to ready,
+	// ready to first read, reads, time since the last progress, instances running); may be empty.
+	Detail string
 }
 
 // Error implements the error interface.
@@ -70,6 +73,9 @@ func (e *LimitError) Error() string {
 	s := fmt.Sprintf("video: %s exceeded: %s, limit %s", e.Limit, num(e.Value), num(e.Max))
 	if e.Hint != "" {
 		s += "; " + e.Hint
+	}
+	if e.Detail != "" {
+		s += " (" + sanitise(e.Detail, 400) + ")"
 	}
 	return s
 }

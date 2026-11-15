@@ -14,9 +14,11 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"codeberg.org/gruf/go-ffmpreg/wasm"
 	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/experimental"
 )
 
 // The engine is ffmpeg n5.1.10 with x264, compiled to WebAssembly by go-ffmpreg v0.6.22. This is a
@@ -168,6 +170,7 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 		return 0, ctx.Err()
 	}
 	defer func() { <-tokens }()
+	m.ready()
 	var in string
 	reads := &atomic.Int64{}
 	if j.progress == progReads {
@@ -177,16 +180,30 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	if j.input != "" {
 		name := inputName(j.input)
 		in = "/in/" + name
-		fsc = fsc.WithFSMount(inputFS{path: j.input, name: name, reads: reads}, "/in")
+		fsc = fsc.WithFSMount(inputFS{path: j.input, name: name, reads: reads, m: m}, "/in")
 	}
 	if j.outDir != "" {
 		fsc = fsc.WithDirMount(j.outDir, "/out")
 	}
+	// For a time-bound error's breakdown: when the memory is reserved and freed (timedAlloc, unless
+	// a test installed its own allocator), when the module begins to close (after the guest reached
+	// a check, when cancelled), and when the run call returns.
+	if ctx.Value(ownAllocator{}) == nil {
+		ctx = experimental.WithMemoryAllocator(ctx, timedAlloc{m})
+	}
+	ctx = experimental.WithCloseNotifier(ctx, experimental.CloseNotifyFunc(func(context.Context, uint32) {
+		m.checkAt.CompareAndSwap(0, time.Now().UnixNano())
+	}))
 	rc, err := wasm.Run(ctx, e.rt, e.cm, wasm.Args{
 		Name: j.prog, Args: j.args(in, "/out"), Stdin: j.stdin, Stdout: j.stdout, Stderr: j.stderr,
 		Config: func(c wazero.ModuleConfig) wazero.ModuleConfig {
 			return c.WithSysWalltime().WithSysNanotime().WithFSConfig(fsc)
 		},
 	})
+	m.runAt.CompareAndSwap(0, time.Now().UnixNano())
 	return int(rc), err
 }
+
+// ownAllocator is the context key with which a test that installs its own wazero memory allocator
+// keeps exec from replacing it.
+type ownAllocator struct{}

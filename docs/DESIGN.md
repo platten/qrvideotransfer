@@ -804,7 +804,7 @@ Costs a user should expect:
   every instance, but not promptly: uncapped, stops were up to 8 times late on a CI runner
   (macos-26-intel, GOMAXPROCS + 1 spinning instances, 16.8 s against a 2 s limit), while the capped
   run stayed within its bound; on a 16-thread development machine GOMAXPROCS + 2 uncapped instances
-  were stopped on time (`TestWatchdogUnderLoad` asserts the capped case and logs the uncapped one).
+  were stopped on time (`TestWatchdogUnderLoad` asserts, in the capped case, that each instance is cancelled at most 5 s after its turn plus the limit and that every one stops; it logs how long each took to return after its cancellation, and logs the uncapped case).
   The cap stays as a real defence. Its hazard: waiting for a turn has no limit but the
   context, so a caller holding that many decoders open without reading them waits for ever on the next
   (`TestHoldAndWait`). This cap applies to instances in qrvt's own process (section 8).
@@ -824,7 +824,9 @@ Costs a user should expect:
   program's standard input, if any, is sent only once the worker reports the engine loaded. The
   worker keeps every control: the read-only single-file counting view, the 512 MiB ceiling, and
   `MaxDecodedPixelsPerInputByte` as a bound on its output. Results come back as typed, length-prefixed
-  messages (output, log, input reads, exit status) that the parent bounds before allocating and
+  messages (output, log, progress, exit status; the progress message carries the bytes counted as a
+  probe's progress, the input's bytes and read calls, and the time from readiness to the first read,
+  for the breakdown a time-bound error carries, SECURITY.md section 5) that the parent bounds before allocating and
   sanitises before printing; a lying worker can end a job, not make the parent allocate. The worker
   gets an empty environment (on Windows only `SYSTEMROOT`, `TEMP`, `TMP`), its working directory in the
   temporary directory, and no descriptors or handles but its three standard ones: on Unix it closes,
@@ -1319,7 +1321,15 @@ by GoReleaser).
   checkout is mounted read-only and the containers run with `no-new-privileges`. One step runs the
   `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
   tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
-  others. Every job and every long step has a timeout.
+  others. Every job and every long step has a timeout. The test, race and coverage tasks run
+  `internal/video` on its own, after the other packages have finished, not in parallel with them:
+  the worker cap and the watchdog's stop latency are properties of one process on a machine that
+  other test binaries are not oversubscribing, and the package's tests assert wall-clock bounds
+  (`EngineProbeTime`, stall stops) that held alone and failed on 4-vCPU runners when the other
+  packages' test binaries ran beside it. CI tests them under that condition (`tools/dev`,
+  `isolatedRuns`). The cost, accepted by the owner, on the slowest runner (macos-26-intel): the
+  coverage step went from 4 min 08 s to 7 min 13 s and the race step from 10 min 51 s to 13 min 18 s,
+  5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
@@ -1455,3 +1465,6 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, review of PR #20: section 12's fallback is reported per backend by `(*video.Embedded).InProcess` (the pipeline warns once per decode), and `video.WorkerStatus` is the process's current state, cleared when a worker next reaches ready |
 | 2026-11-14 | M1 stream D, round 2 of the review of PR #20: section 8 withdraws PR #15's uncapped worker processes: `internal/video` caps them at `video.WorkerProcesses()` (CPU count, reduced so that workers at 920 MB fit in half the physical memory), with waiting for a turn not counted against any bound, prompted by a probe that exceeded its wall-clock bound on macos-26-intel; the hold-and-wait hazard now applies to both caps |
 | 2026-11-14 | M1 stream D, round 3 of the review of PR #20: section 8's worker cap counts GOMAXPROCS and, on Linux, the cgroup memory limit when smaller, and no longer implies that the cap fixed the slow CI probe (cause believed to be CPU starvation; a capped run still recorded 13 s); section 12's probe bound is 60 s |
+| 2026-11-14 | M1 stream D, time-bound diagnostics: section 12's worker progress message carries the input's bytes and reads and the time from readiness to the first read, for the breakdown a time-bound error carries (protocol version 2) |
+| 2026-11-14 | M1 stream D, time-bound diagnostics: section 17 says the test, race and coverage tasks run `internal/video` on its own after the other packages, and why (the cap and the watchdog are properties of one process on a machine other test binaries are not oversubscribing), with the cost on macos-26-intel (+5 min 32 s over the coverage and race steps, 6 min 42 s left under the race step's timeout) |
+| 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |

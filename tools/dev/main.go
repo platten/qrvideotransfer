@@ -11,6 +11,7 @@ package main
 import (
 	"debug/buildinfo"
 	"debug/elf"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -212,7 +213,7 @@ func test(args []string) error {
 		return err
 	}
 	env, goArgs := testCommand(args, tags)
-	return run(env, "go", goArgs...)
+	return runTests(env, tags, goArgs)
 }
 
 // lintRuns returns the golangci-lint invocations: the default build, then, when the release build
@@ -369,4 +370,74 @@ func fuzz(args []string) error {
 	}
 	fmt.Printf("fuzzed %d targets for %s each\n", n, d)
 	return nil
+}
+
+// isolated is the package that runs on its own (DESIGN.md section 17). Its tests assert properties
+// of one process: the worker cap and the watchdog's stop latency, and wall-clock bounds such as
+// EngineProbeTime. Those hold on a machine that other test binaries are not oversubscribing, so CI
+// tests them under that condition: run in parallel with every other package on a 4-vCPU runner,
+// they failed on time bounds that the package alone meets.
+const isolated = module + "/internal/video"
+
+// isolatedRuns splits a go test command whose last argument is ./... into two: every package but
+// the isolated one (pkgs lists them all, from go list), then the isolated one alone. Any other
+// command is run as it is.
+func isolatedRuns(args, pkgs []string) [][]string {
+	if len(args) == 0 || args[len(args)-1] != "./..." {
+		return [][]string{args}
+	}
+	head := args[:len(args)-1]
+	others := slices.Clone(head)
+	for _, p := range pkgs {
+		if p != isolated && !strings.HasPrefix(p, isolated+"/") {
+			others = append(others, p)
+		}
+	}
+	return [][]string{others, append(slices.Clone(head), "./internal/video/...")}
+}
+
+// packages lists the module's packages, with the given build tags.
+func packages(tags string) ([]string, error) {
+	args := []string{"list"}
+	if tags != "" {
+		args = append(args, "-tags="+tags)
+	}
+	out, err := output("go", append(args, "./...")...)
+	if err != nil {
+		return nil, fmt.Errorf("go list: %w: %s", err, out)
+	}
+	return strings.Fields(out), nil
+}
+
+// runTests runs go test with goArgs as isolatedRuns splits it, all runs even if one fails.
+func runTests(env []string, tags string, goArgs []string) error {
+	pkgs, err := packages(tags)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, a := range isolatedRuns(goArgs, pkgs) {
+		errs = append(errs, run(env, "go", a...))
+	}
+	return errors.Join(errs...)
+}
+
+// mergeProfiles writes the coverage profiles srcs, in order, to dst as one profile with the first's
+// mode line.
+func mergeProfiles(dst string, srcs ...string) error {
+	var out strings.Builder
+	for i, s := range srcs {
+		b, err := os.ReadFile(s)
+		if err != nil {
+			return err
+		}
+		text := string(b)
+		if i > 0 {
+			if _, rest, ok := strings.Cut(text, "\n"); ok && strings.HasPrefix(text, "mode:") {
+				text = rest
+			}
+		}
+		out.WriteString(text)
+	}
+	return os.WriteFile(dst, []byte(out.String()), 0o600)
 }

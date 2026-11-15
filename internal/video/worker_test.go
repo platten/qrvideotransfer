@@ -90,11 +90,11 @@ func hostileWorker(mode string) int {
 		_ = writeMsg(os.Stdout, msgOut, make([]byte, 100))
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
 	case "lies": // a huge read count, an error text with escapes, a failure
-		_ = writeMsg(os.Stdout, msgProgress, binary.BigEndian.AppendUint64(nil, 1<<62))
+		_ = writeMsg(os.Stdout, msgProgress, bytes.Repeat([]byte{0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, progressLen/8)) // every count and time at its largest
 		_ = writeMsg(os.Stdout, msgLog, []byte("\x1b[31mred\x1b[0m"))
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(7, "\x1b]0;title\x07bad"))
 	case "slowload": // compiling the engine on a slow machine: no progress, then the ready message
-		time.Sleep(3 * time.Second)
+		time.Sleep(6 * time.Second)
 		_ = writeMsg(os.Stdout, msgReady, nil)
 		_ = writeMsg(os.Stdout, msgExit, exitMsg(0, ""))
 	case "c1": // a refusal whose text, cut to its bound, starts inside a two-byte character (U+06DB)
@@ -210,7 +210,7 @@ func TestWorkerSpin(t *testing.T) {
 	p, ps := testWorkers(t)
 	err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil }})
 	var le *LimitError
-	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
+	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" || !strings.Contains(err.Error(), "since last progress") {
 		t.Fatalf("got %v", err)
 	}
 	// Timed from the worker's start, after any wait for a slot. The watchdog may last have seen the
@@ -350,7 +350,7 @@ func TestWorkerLoadLimit(t *testing.T) {
 	err := run(ctx, workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
 		timeout: time.Second})
 	var le *LimitError
-	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" {
+	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" || !strings.Contains(err.Error(), "never ready") {
 		t.Fatalf("got %v", err)
 	}
 	if el := ps.since(); el < 2*time.Second || el > 12*time.Second {
@@ -745,7 +745,7 @@ func TestWorkerJob(t *testing.T) {
 	// The worker refuses a bad job with a message, and a malformed one without.
 	var out bytes.Buffer
 	in := &bytes.Buffer{}
-	_ = writeMsg(in, msgJob, []byte(`{"prog":"sh","version":1}`))
+	_ = writeMsg(in, msgJob, []byte(fmt.Sprintf(`{"prog":"sh","version":%d}`, protocolVersion)))
 	if code := serveWorker(in, &out, func(int) {}); code != 2 {
 		t.Errorf("bad job: exit %d", code)
 	}
@@ -772,12 +772,16 @@ func TestWorkerJob(t *testing.T) {
 
 // TestWorkerSlowLoad: the time a worker spends loading and compiling the engine, before it says it
 // is ready, is not a stall (a first run on a slow machine compiles for longer than the watchdog's
-// limit).
+// limit). The load (6 s) is twice the stall limit (3 s), so a load taken for a stall would fail.
+// The limit is three ticks, not one: once the instance is ready, the parent must also take the
+// worker's exit message, sent at once, before the stall clock runs out, and that clock counts from the
+// last tick at which the instance was waiting, up to a tick before it was ready (a 1 s limit failed
+// once that way under the race detector on macos-26-intel).
 func TestWorkerSlowLoad(t *testing.T) {
 	t.Parallel()
 	p, _ := testWorkers(t, "slowload")
 	err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil },
-		timeout: time.Second})
+		timeout: 3 * time.Second})
 	if err != nil {
 		t.Fatalf("a slow engine load was taken for a stall: %v", err)
 	}

@@ -362,7 +362,7 @@ func (d *pipeDecoder) next(f *Frame) error {
 		err = d.runErr
 	}
 	if err != nil {
-		return d.stop(err)
+		return d.stop(withBreakdown(err, d.m))
 	}
 	if t.w != d.p.Width || t.h != d.p.Height {
 		return d.stop(fmt.Errorf("%w: picture size changed from %dx%d to %dx%d", ErrInvalidVideo, d.p.Width, d.p.Height, t.w, t.h))
