@@ -533,8 +533,8 @@ For each capture:
    header decodes (step 2) and the anchors agree with every finder. The decoded grid must imply at
    least 1.5 camera pixels per cell between the finders, which bounds the layout built for it by the
    image's size; when the copies decode headers with different grids (a false CRC pass, or crafted
-   content), each grid is tried, the one more copies give first, and at most two layouts are built
-   per capture. With that grid the anchors are located as in step 3, giving up after 64 tried with
+   content), each grid is tried, the one more copies give first; layouts are cached by grid and at most two
+   distinct grids are used per capture, on the three-finder path too. With that grid the anchors are located as in step 3, giving up after 64 tried with
    fewer than eight found (a header claiming the largest grid the gate allows at 4K then costs 0.23
    s and 25 MB per capture); at least eight, and a quarter of those inside the capture, must be
    found, and each finder in turn must lie within the smaller of one cell and half a module of where
@@ -556,7 +556,9 @@ For each capture:
    where they and the three finders put it; and the quad must pass the four-finder checks above
    (header, anchors, each visible finder agreeing within the tolerance), with at least four anchors located
    in the quarter of the grid nearest the hidden finder. A quad is never accepted on three finders
-   alone; with two hidden, nothing is located. The hidden centre is an estimate. The tests judge
+   alone; with two hidden, nothing is located. To bound the cost on hostile frames the three-finder
+   path runs on the last scan only, tries two candidate quads, and is skipped when a four-finder
+   quad decoded a header whose grid failed the 1.5-pixel gate. The hidden centre is an estimate. The tests judge
    quads by the designer's line: a visible finder more than half a module from the truth makes the
    quad wrong; only the hidden finder may be up to one module off, and only when the header reads,
    the mesh fits and the capture's cell-centre error is at most 0.15 cell, which makes it imprecise
@@ -564,7 +566,7 @@ For each capture:
    area on each finder in turn, 200 handheld 4K poses each: 200 of 200 located and read, none
    imprecise, no wrong quad or header, cell-centre error outside the patch 0.019 cell RMS
    (four-finder captures: 0.019).
-   **Measured limit** (`TestDetectModuleSweep`, measured at commit adfba68): a 240 x 135 grid,
+   **Measured limit** (`TestDetectModuleSweep`, measured at commit 12933bb): a 240 x 135 grid,
    whose finder module is one cell, filmed at 1920 x 1080 with each preset's own blur, 200 poses per
    size (seeds 7000 to 7199). Codes located, exact or imprecise, by untilted camera pixels per cell,
    with the wrong quads in brackets where there were any:
@@ -572,15 +574,18 @@ For each capture:
    | Preset (blur) | 2.8 | 3.2 | 3.6 | 4.0 | 4.4 | 4.8 | 6.0 | 7.2 |
    | --- | --- | --- | --- | --- | --- | --- | --- | --- |
    | tripod (1.0) | 200 | 200 | 200 | 200 | 200 | 200 | 200 | 200 |
-   | handheld (1.5) | 31 (2) | 186 | 199 (1) | 200 | 200 | 200 | 200 | 200 |
-   | budget-android (1.5) | 30 (1) | 193 | 200 | 200 | 200 | 200 | 200 | 200 |
-   | iphone-hdr (1.5, 10-bit HLG) | 0 | 84 | 168 | 196 | 200 | 200 | 200 | 200 |
-   | harsh (2.0, tilt 25, glare 2%) | 0 | 0 | 1 | 32 | 95 (2) | 135 | 184 | 181 |
+   | handheld (1.5) | 20 (2) | 185 (3) | 199 (1) | 200 | 200 | 200 | 200 | 200 |
+   | budget-android (1.5) | 19 | 191 | 200 | 200 | 200 | 200 | 200 | 200 |
+   | iphone-hdr (1.5, 10-bit HLG) | 0 | 80 (1) | 157 | 194 | 200 | 200 | 200 | 200 |
+   | harsh (2.0, tilt 25, glare 2%) | 0 | 0 | 1 | 17 | 65 | 101 (1) | 169 | 158 |
 
-   At most 4 of a column's located quads were imprecise (harsh at 7.2). The wrong quads were the
+   At most 1 of a column's located quads was imprecise (harsh at 6.0 and 7.2). The wrong quads were the
    code with a centre between half a module and about 0.75 module off (their headers read
    correctly), counted wrong by the line above. The cell-centre error at 4.0 pixels per cell was
-   0.047 (tripod), 0.090 (handheld), 0.081 (budget-android) and 0.131 (iphone-hdr) cell RMS. The
+   0.044 (tripod), 0.086 (handheld), 0.076 (budget-android) and 0.124 (iphone-hdr) cell RMS. The
+   three-finder path's cost limits (last scan only, two candidates) located fewer codes below the
+   reliable sizes than before them, most for harsh at 1080p (184 and 181 at 6.0 and 7.2 before, 169
+   and 158 now); harsh at 4K is unchanged at 997 of 1,000. The
    smallest cells at which the code is reliably located (at least 199 of 200, none wrong), against
    the planning point of 5 camera pixels per cell (section 11):
 
@@ -592,7 +597,7 @@ For each capture:
    | iphone-hdr | 4.4 | 1.1 times |
    | harsh | not reached at 1080p | — |
 
-   **Limit:** harsh is never reliably located at 1080p: at most 184 of 200, at 6 pixels per cell (a
+   **Limit:** harsh is never reliably located at 1080p: at most 169 of 200, at 6 pixels per cell (a
    finder and its surroundings under the glare patch, or the code out of frame at 25 degrees and fill
    0.75 or more). At 4K, 997 of 1,000. Always-on tests assert every pose at 4.0 (handheld) and 4.8
    (iphone-hdr) (`TestDetectModuleLimit`). On grids of 270 rows or more a finder module is two cells
@@ -625,28 +630,33 @@ For each capture:
    plus the corners' residuals interpolated over the anchor lattice; cell (x, y) covers
    [x, x+1) x [y, y+1) of the mesh's coordinates. The fit fails unless at least one anchor, and at
    least a quarter of those the model places inside the capture, are located. Once eight anchors are
-   located the global model is refitted to the anchors alone: a finder half a module to a cell off
-   had pulled the mesh corner by up to 0.5 cell with the weight of an anchor; now 0.00 (sampled every
-   third cell, 240 x 135 and 212 x 120 grids).
+   located, a finder stays in the global model's fit only while it lies within a quarter cell of
+   where the anchors alone put it: a finder half a module to a cell off had pulled the mesh corner
+   by up to 0.5 cell with the weight of an anchor, now 0.00 (sampled every third cell, 240 x 135 and
+   212 x 120 grids), while accurate finders keep steadying the corners (dropping them all raised
+   the cell-centre error at 4.0 pixels per cell by about 7%).
 4. **Sample.** Take the mean of the central 60% of each cell's footprint directly from the camera planes.
    The image is never warped whole. As built: a cell is saturated when any of its brightness samples is
    at the bottom or top of the code range; a cell outside the capture is saturated with zero values.
    **Glare.** In limited-range video a sensor-clipped highlight lands near the nominal white (235 at
-   8 bits), not the top of the code range, so a cell is also saturated when it is under glare: at
-   least half of its samples are clipped (at or above 231, the nominal white less 4 codes), and so
-   are 85% of the samples over its 3 x 3-cell neighbourhood, or, when clipped cells standing alone are
-   rare (at most 5% of the cells sampled: the display's white is below the clip), every such cell.
-   The margin takes in noise (a clipped sample falls below 231 about one time in twenty under the
-   handheld noise, while display white exposed at 0.9 of the range, about 225, rarely reaches it);
-   the neighbourhood spares a capture whose white sits on the clip (the ideal preset), where every
-   white cell is clipped but stands among dark ones. Measured on the simulator's 5% patch (handheld,
-   4K): 0.1% of the cells it turns near-white unflagged, 0.004% of untouched cells flagged; on the
-   ideal preset 0.01% (four greys) and 1% (black and white) of cells flagged. **Accepted cost:** on a
-   perfect digital frame, whose white is exactly the limited-range white, the rule discards up to 1%
-   of black-and-white cells (white cells among mostly white neighbours) and under 0.1% with other
-   modulations (`TestSamplePlain` allows 2% and 0.1%); M3 checks that the digital loopback still
-   passes with margin under that loss (section 18). Cells on a patch's soft
-   edge, brightened but under the clip, are not flagged here; the equaliser compares them with the
+   8 bits), not the top of the code range, so a cell is also saturated when it is under glare. A
+   cell is clipped when at least half of its samples are at or above 231 (the nominal white less 4
+   codes; a clipped sample falls below 231 about one time in twenty under the handheld noise, while
+   display white exposed at 0.9 of the range, about 225, rarely reaches it). A clipped cell is
+   flagged when 90% of the samples over its 3 x 3-cell neighbourhood are clipped too (inside a
+   patch), or when at least two of its eight neighbours are such cells (a patch's rim). The decision
+   is local: a white data cell at the clip stands among scrambled cells, so it is spared whether the
+   display's white reaches the clip over the whole code or over a part of it (an earlier rule
+   decided that for the whole capture, and flagged up to 4.8% of cells when the clip covered only
+   part of the code). Measured on the simulator's 5% patch (handheld, 4K): 2.4% of the cells it
+   turns near-white unflagged, no untouched cell flagged; on the ideal preset 0.00% (four greys) and
+   0.3% (black and white) of cells flagged; with white at the clip over part of a rendered code, at
+   most 1.7% (black and white) and 0.04% (four greys). **Accepted cost:** on a perfect digital
+   frame, whose white is exactly the limited-range white, the rule discards about 1.75% of
+   black-and-white cells (white cells among mostly white neighbours), 0.04% with four greys and none
+   with eight colours or levels (`TestSamplePlain` allows 2% and 0.1%); M3 checks that the digital
+   loopback still passes with margin under that loss (section 18). Cells on a patch's soft edge,
+   brightened but under the clip, are not flagged here; the equaliser compares them with the
    learned white and the neighbouring tiles (steps 5 and 6). Anchors' Black and White are not
    flagged by this rule.
 5. **Calibrate levels.** Per tile of about 32 x 30 cells, keep a centre and variance for each level.
@@ -1520,7 +1530,7 @@ writing each package format by hand.
 | S2 | The owner films a test pattern on each device; the real channel is measured and the default mode confirmed or changed. Does not block M1-M3 |
 | M1 | Building blocks in parallel, including keys and signing |
 | M2 | Vision, including header reading and stripe cancellation |
-| M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards up to 1% of black-and-white cells of a perfect frame (section 10, step 4) |
+| M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards about 1.75% of black-and-white cells of a perfect frame (section 10, step 4) |
 | M4 | `calibrate`, `inspect`, profiles |
 | G1 | The owner films the calibration video and sample transfers |
 | M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings; inferring the frame index of a capture whose header copies all fail, from the last index and the phase markers with the quad carried by tracking (deferred from M2, section 7 rule 1); mirrored recordings (FORMAT.md section 4.1) |
@@ -1627,3 +1637,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 Geometry, follow-up to PR #30 (owner and designer decisions on glare): section 10 step 1 locates a code from three finders when a fourth is hidden (prediction from module sizes, header and anchor confirmation, never on three alone), re-measures the table of codes located, and adds the smallest reliable cell size per preset beside the planning point of 5 (tripod below 2.8, handheld 3.6, budget-android 3.6, iphone-hdr 4.4; the coordinator's figure of 4.0 for budget-android was measured before this change) with harsh never reliable at 1080p as a limit. Step 4 flags glared cells as saturated (share, margin and neighbourhood rule with their reasons and measured rates), replacing the known gap. A capture whose four copies all fail stays not located, as section 7 rule 1 says, with the M5 item there |
 | 2026-11-15 | M2 Geometry, follow-up to PR #30, designer ruling: section 10 step 1 states the line between exact, imprecise and wrong quads (only a hidden finder may be up to a module off, and only when the header reads, the mesh fits and the centre error is at most 0.15; imprecise quads at most 3%), re-measures the table of codes located under it at a stated commit, with the wrong quads (all below the reliable sizes) shown; step 4 records that the glare rule discards up to 1% of black-and-white cells of a perfect digital frame; section 18 adds to M3 a check that the digital loopback passes with margin under that loss |
 | 2026-11-15 | M2 Geometry, round 3 of PR #30: section 7 rule 1 records the deferral of its index inference to M5 as a designer ruling (2026-11-15); rule 9 no longer cites a bound that M2 does not apply; section 18's M5 row adds that inference and mirrored recordings. Section 10 step 1: a visible finder must agree within the smaller of one cell and half a module, Fit drops the finders from its global model once eight anchors are located, a capture's headers are kept whole and each distinct grid is tried (up to two layouts), and the confirmation gives up after 64 anchors with fewer than eight found. The table of codes located is re-measured at adfba68 and states its commit; handheld's smallest reliable size becomes 4.0 (3.6 gave 199 located and 1 wrong under the stricter tolerance), also in section 11 condition 2 |
+| 2026-11-15 | M2 Geometry, review of PR #38: section 10 step 1 says layouts are cached by grid with at most two distinct grids per capture on the three-finder path too, and gives that path's cost limits (last scan only, two candidates, skipped after a gate failure) and their effect below the reliable sizes; the table of codes located is re-measured at 12933bb with its cell-centre errors. Step 3: a finder stays in the global fit while within a quarter cell of the anchors' model, instead of leaving it once eight anchors are found. Step 4: the glare decision is local (area, or two area neighbours for a rim), with the measured rates, and the perfect-frame cost is about 1.75% of black-and-white cells, also in section 18's M3 row |
