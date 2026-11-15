@@ -221,6 +221,26 @@ func TestCIResultNeedsEveryJob(t *testing.T) {
 	}
 }
 
+// TestCIRetargetAndCodeOutput checks two properties of ci.yml from the review of PR #35: a pull
+// request whose base branch changes (an edited event) is classified again (M2), and ci result
+// fails unless the changes job's code output is exactly true or false (L3).
+func TestCIRetargetAndCodeOutput(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"  pull_request:\n    types: [opened, synchronize, reopened, edited]\n",
+		`if [ "$CODE" != true ] && [ "$CODE" != false ]; then`,
+		`if [ "$CODE" != false ] && echo "$NEEDS" | jq -e '[.[].result] | any(. == "skipped")'`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("ci.yml lacks %q", want)
+		}
+	}
+}
+
 func TestCIJobsParse(t *testing.T) {
 	wf := "on: push\njobs:\n  changes:\n    runs-on: x\n  check:\n    needs: changes\n    if: needs.changes.outputs.code == 'true'\n" +
 		"  result:\n    needs: [changes, check]\n    if: always()\n"

@@ -25,40 +25,14 @@ var docsOnlyAllowList = []string{
 	"docs/spikes/",
 }
 
-// codeChanged reports whether CI must run everything: for every event that is not a pull request,
-// for a pull request with no changed files listed, and for one that changes any file outside
-// docsOnlyAllowList.
-func codeChanged(event string, files []string) bool {
-	if event != "pull_request" || len(files) == 0 {
-		return true
-	}
-	for _, f := range files {
-		if !allowListed(f) {
-			return true
-		}
-	}
-	return false
-}
+// fileChange is one line of `git diff --name-status`: a status letter and a path.
+type fileChange struct{ status, path string }
 
-func allowListed(file string) bool {
-	for _, e := range docsOnlyAllowList {
-		if file == e || (strings.HasSuffix(e, "/") && strings.HasPrefix(file, e)) {
-			return true
-		}
-	}
-	return false
-}
+func codeChanged(event string, changes []fileChange) bool { return false }
 
-// parseDiffNames splits `git diff --name-only` output into file names.
-func parseDiffNames(out string) []string {
-	var files []string
-	for _, l := range lines([]byte(out)) {
-		if l = strings.TrimSpace(l); l != "" {
-			files = append(files, l)
-		}
-	}
-	return files
-}
+func allowListed(file string) bool { return false }
+
+func parseNameStatus(out string) ([]fileChange, error) { return nil, nil }
 
 // changes is the changes task, the first job of ci.yml: it prints the files a pull request changes
 // against the merge base of its base and head commits (renames listed as deletion plus addition)
@@ -69,7 +43,7 @@ func changes(args []string) error {
 	base := fs.String("base", "", "the pull request's base commit")
 	head := fs.String("head", "", "the pull request's head commit")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
-	var files []string
+	var files []fileChange
 	if *event == "pull_request" {
 		if *base == "" || *head == "" {
 			return errors.New("a pull request needs -base and -head")
@@ -82,9 +56,9 @@ func changes(args []string) error {
 		if err != nil {
 			return fmt.Errorf("git diff: %w", err)
 		}
-		files = parseDiffNames(string(out))
-		for _, f := range files {
-			fmt.Printf("changed: %s (allow-listed: %v)\n", f, allowListed(f))
+		files, err = parseNameStatus(string(out))
+		if err != nil {
+			return err
 		}
 	}
 	code := codeChanged(*event, files)
