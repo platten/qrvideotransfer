@@ -48,7 +48,8 @@ func TestConfirmsDecoy(t *testing.T) {
 	}
 }
 
-// TestConfirmsOneLayout: within one Detect at most one layout is built; a second grid is refused.
+// TestConfirmsOneLayout: within one Detect at most confirmMaxLayouts layouts are built; one more grid
+// is refused.
 func TestConfirmsOneLayout(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 4, 2, 1, 27)
 	f := geomPlain(c, 0)
@@ -57,11 +58,11 @@ func TestConfirmsOneLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := FinderDetector{layout: other, built: true}
+	d := FinderDetector{layout: other, built: confirmMaxLayouts}
 	if d.confirms(f, &v, geomPlainQuad(c)) {
-		t.Error("a second layout was built in one Detect")
+		t.Error("a layout beyond the cap was built in one Detect")
 	}
-	d.built = false
+	d.built = 0
 	if !d.confirms(f, &v, geomPlainQuad(c)) || d.layout.GridX() != 212 {
 		t.Error("true quad not confirmed with a fresh layout")
 	}
