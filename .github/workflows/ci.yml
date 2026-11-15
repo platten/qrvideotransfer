@@ -6,7 +6,11 @@ name: ci
 on:
   push:
     branches: [main]
+  # edited: a pull request whose base branch changes is classified again against the new base (a
+  # docs-only change on a stacked branch may bring code once retargeted to main). Editing the title
+  # or body also starts a run, which cancels the older run of the same pull request.
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -374,7 +378,11 @@ jobs:
             echo "::error::a job failed or was cancelled"
             exit 1
           fi
-          if [ "$CODE" = true ] && echo "$NEEDS" | jq -e '[.[].result] | any(. == "skipped")' >/dev/null; then
+          if [ "$CODE" != true ] && [ "$CODE" != false ]; then
+            echo "::error::the changes job reported code='$CODE', not true or false"
+            exit 1
+          fi
+          if [ "$CODE" != false ] && echo "$NEEDS" | jq -e '[.[].result] | any(. == "skipped")' >/dev/null; then
             echo "::error::a job was skipped although code changed"
             exit 1
           fi

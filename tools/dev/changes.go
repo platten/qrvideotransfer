@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -15,27 +17,71 @@ import (
 
 // docsOnlyAllowList holds the only files whose change cannot affect a test or a build: no test,
 // build, script, workflow or release configuration reads them, which TestDocsOnlyAllowListUnread
-// checks. An entry ending in "/" covers a directory. docs/DESIGN.md is absent on purpose, because
+// checks. Entries are path.Match patterns, so `docs/spikes/*.md` covers the Markdown files directly
+// in that directory and nothing below it. docs/DESIGN.md is absent on purpose, because
 // internal/channel's tests read its preset tables; so are LICENSE, NOTICE and README.md, which
 // go into the release archives. A file that a test or build starts reading must leave this list.
 var docsOnlyAllowList = []string{
 	"docs/FORMAT.md",
 	"docs/IMPLEMENTATION_PROMPT.md",
 	"docs/SECURITY.md",
-	"docs/spikes/",
+	"docs/spikes/*.md",
 }
 
 // fileChange is one line of `git diff --name-status`: a status letter and a path.
 type fileChange struct{ status, path string }
 
-func codeChanged(event string, changes []fileChange) bool { return false }
+// codeChanged reports whether CI must run everything: for every event that is not a pull request,
+// for a pull request with no changed files listed, and for one with any change that is not the
+// addition or modification of an allow-listed file. Deletions count as code, because a test may
+// list the files it expects (TestDocsOnlyAllowListExists does).
+func codeChanged(event string, changes []fileChange) bool {
+	if event != "pull_request" || len(changes) == 0 {
+		return true
+	}
+	for _, c := range changes {
+		if (c.status != "A" && c.status != "M") || !allowListed(c.path) {
+			return true
+		}
+	}
+	return false
+}
 
-func allowListed(file string) bool { return false }
+// allowListed reports whether a path is on docsOnlyAllowList and is not code by its type: Go
+// source, module files, test data and .gitattributes are code wherever they sit.
+func allowListed(file string) bool {
+	base := path.Base(file)
+	if strings.HasSuffix(base, ".go") || base == "go.mod" || base == "go.sum" || base == ".gitattributes" ||
+		slices.Contains(strings.Split(file, "/"), "testdata") {
+		return false
+	}
+	for _, e := range docsOnlyAllowList {
+		if ok, _ := path.Match(e, file); ok {
+			return true
+		}
+	}
+	return false
+}
 
-func parseNameStatus(out string) ([]fileChange, error) { return nil, nil }
+// parseNameStatus parses `git diff --name-status --no-renames` output.
+func parseNameStatus(out string) ([]fileChange, error) {
+	var changes []fileChange
+	for _, l := range lines([]byte(out)) {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		status, p, ok := strings.Cut(l, "\t")
+		if !ok || status == "" || p == "" {
+			return nil, fmt.Errorf("unexpected git diff line %q", l)
+		}
+		changes = append(changes, fileChange{status, p})
+	}
+	return changes, nil
+}
 
 // changes is the changes task, the first job of ci.yml: it prints the files a pull request changes
-// against the merge base of its base and head commits (renames listed as deletion plus addition)
+// against the merge base of its base and head commits, with their status (renames listed as a
+// deletion plus an addition)
 // and writes code=true or code=false to $GITHUB_OUTPUT when that is set.
 func changes(args []string) error {
 	fs := newFlags("changes")
@@ -52,13 +98,16 @@ func changes(args []string) error {
 		if err != nil {
 			return fmt.Errorf("git merge-base %s %s: %w", *base, *head, err)
 		}
-		out, err := exec.Command("git", "diff", "--name-only", "--no-renames", strings.TrimSpace(string(mb)), *head).Output()
+		out, err := exec.Command("git", "diff", "--name-status", "--no-renames", strings.TrimSpace(string(mb)), *head).Output()
 		if err != nil {
 			return fmt.Errorf("git diff: %w", err)
 		}
 		files, err = parseNameStatus(string(out))
 		if err != nil {
 			return err
+		}
+		for _, f := range files {
+			fmt.Printf("changed: %s %s (allow-listed: %v)\n", f.status, f.path, allowListed(f.path))
 		}
 	}
 	code := codeChanged(*event, files)
