@@ -192,7 +192,10 @@ func testCommand(args []string, tags string) (env, goArgs []string) {
 	env = []string{"CGO_ENABLED=0"}
 	var extra []string
 	if *race {
-		env, extra = []string{"CGO_ENABLED=1"}, append(extra, "-race")
+		// internal/video's engine tests take minutes under the race detector on the slowest runner
+		// (macos-26-intel), past go test's default of 10 minutes per package; 18 minutes stays inside
+		// the CI step's 20.
+		env, extra = []string{"CGO_ENABLED=1"}, append(extra, "-race", "-timeout=18m")
 	}
 	if *long {
 		env = append(env, "QRVT_LONG_TESTS=1")
