@@ -168,7 +168,7 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 				}
 				last, since = v, now
 			} else if at := m.memAt.Load(); m.loading.Load() && at > since.UnixNano() {
-				since = time.Unix(0, at) // the stall clock starts when the reservation completed
+				since = reservedAt(now, at) // the stall clock starts when the reservation completed
 			}
 			if now.Sub(since) >= timeout {
 				m.cancelledAt.Store(time.Now().UnixNano())
@@ -178,6 +178,10 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 		}
 	}
 }
+
+// reservedAt is the reservation time at (Unix nanoseconds) as a time the watchdog can compare with
+// now.
+func reservedAt(_ time.Time, at int64) time.Time { return time.Unix(0, at) }
 
 // meterWriter counts bytes written through it, unless count is false; a blocked Write counts as
 // waiting.
