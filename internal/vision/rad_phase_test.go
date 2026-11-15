@@ -153,7 +153,7 @@ const (
 // minYield gives the yield floor per preset for the CI version (index 0) and the long version.
 var minYield = map[string][2]float64{
 	"tripod":   {0.96, 0.96}, // measured 0.9857 and 0.9863
-	"handheld": {0.96, 0.97}, // measured 0.9886 and 0.9904
+	"handheld": {0.96, 0.97}, // measured 0.9898 (CI, with its roll-60 case) and 0.9904
 }
 
 // TestPhaseWeights asserts DESIGN.md section 15 for frame mixing on `tripod` and `handheld` with

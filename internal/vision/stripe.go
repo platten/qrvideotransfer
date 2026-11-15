@@ -238,8 +238,10 @@ func (t *fft2) transform(re, im []float64, inverse bool) {
 	}
 }
 
-// fft1 is a 1-D mixed-radix (2, 3, 5) Cooley-Tukey transform of length n. Products are converted
-// explicitly so that no platform fuses them into FMA instructions: results are identical everywhere.
+// fft1 is a 1-D mixed-radix (2, 3, 5) Cooley-Tukey transform of length n. Its products are
+// converted explicitly so that no platform fuses them into FMA instructions: the transform gives
+// identical results everywhere. The rest of stripe cancellation and the EM fit do not promise that;
+// their level decisions may differ in the last bit between platforms.
 type fft1 struct {
 	n       int
 	factors []int

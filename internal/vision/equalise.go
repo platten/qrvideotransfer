@@ -20,6 +20,12 @@ const (
 	defaultRounds = 3
 	priorCells    = 4 // weight, in cells, of a tile's starting levels in every EM round
 	stripePasses  = 2 // rounds of stripe cancellation and refitting
+	// cleanBias is how far below 1 the phase field puts cells that show one frame only: 0.97 to
+	// 0.99 measured, because noise and blur leave a little light in the dark quadrants. Widening
+	// the variances for it made clean cells underconfident (Gray4 on tripod with gamma error +0.3:
+	// bucket 1 at 0.34 times the stated rate), so it is taken off the share of another frame
+	// before widening.
+	cleanBias = 0.02
 )
 
 // TileEqualiser implements Equaliser: per-tile level statistics started from the palette and the
@@ -275,6 +281,10 @@ func (f *Field) interpolate(k int, fx, fy float64) modem.LocalStats {
 // observations give zeros and do not count.
 func SoftBits(dst []int8, obs []modem.Obs, l *frame.Layout, f *Field, m modem.Modem, p *PhaseField, phase int) int {
 	b := m.BitsPerCell()
+	np := 3
+	if m.Planes() == modem.PlaneY {
+		np = 1
+	}
 	n := 0
 	lat := f.lattice()
 	for i, c := range l.DataCells() {
@@ -286,7 +296,7 @@ func SoftBits(dst []int8, obs []modem.Obs, l *frame.Layout, f *Field, m modem.Mo
 		k, fx, fy := lat.locate(float64(c.X)+0.5-float64(f.TileW)/2, float64(c.Y)+0.5-float64(f.TileH)/2, true)
 		st := f.interpolate(k, fx, fy)
 		if p != nil {
-			blend(&st, 1-float64(p.Weights[i][phase&3]), 3)
+			blend(&st, 1-float64(p.Weights[i][phase&3])-cleanBias, np)
 		}
 		m.LLR(d, obs[i], &st, 1)
 		n++
@@ -295,7 +305,9 @@ func SoftBits(dst []int8, obs []modem.Obs, l *frame.Layout, f *Field, m modem.Mo
 }
 
 // blend widens every level's variance by what a share u of another code frame, showing a random
-// level, adds to a cell: u^2 times the variance of the level centres, per plane.
+// level, adds to a cell: u^2 times the variance of the level centres in each of the np planes the
+// modulation uses (1 for brightness only, else 3), averaged over those planes, because LocalStats
+// holds one variance per level for every plane (DESIGN.md section 10, step 7).
 func blend(st *modem.LocalStats, u float64, np int) {
 	if !(u > 0) {
 		return
@@ -303,18 +315,18 @@ func blend(st *modem.LocalStats, u float64, np int) {
 	n := st.Levels
 	var mean [3]float64
 	for lv := range n {
-		for p := range 3 {
+		for p := range np {
 			mean[p] += float64(st.Centre[lv][p]) / float64(n)
 		}
 	}
 	spread := 0.0
 	for lv := range n {
-		for p := range 3 {
+		for p := range np {
 			d := float64(st.Centre[lv][p]) - mean[p]
-			spread += d * d
+			spread += float64(d * d)
 		}
 	}
-	add := float32(u * u * spread / float64(3*n))
+	add := float32(float64(u*u) * spread / float64(np*n))
 	for lv := range n {
 		st.Variance[lv] += add
 	}
