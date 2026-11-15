@@ -21,7 +21,7 @@ const (
 	threeSearchSteps  = 5
 	// threeCandidates is how many three-finder quads are tried: each costs a search of up to 121
 	// header decodes, and a hostile frame can offer many.
-	threeCandidates = 3
+	threeCandidates = 2
 )
 
 // threeCandidate is a quad of three finders found and a fourth predicted.

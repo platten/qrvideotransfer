@@ -22,9 +22,10 @@ const (
 	rectifyOutlier   = 0.35 // largest deviation of a corner from its neighbours' displacement, cells
 	rectifyLatticeX  = 32   // anchor pitch, cells (FORMAT.md section 5.2)
 	rectifyLatticeY  = 30
-	// rectifyAnchorsOnly is the number of located anchors from which the global model is fitted to
-	// the anchors alone, without the finders.
+	// rectifyAnchorsOnly is the number of located anchors from which a finder must agree with the
+	// anchors, within rectifyFinderKeep cells, to stay in the global model's fit.
 	rectifyAnchorsOnly = 8
+	rectifyFinderKeep  = 0.25
 )
 
 // MeshFitter is the Rectifier of docs/DESIGN.md section 10, step 3. The zero value is ready to use
@@ -92,9 +93,10 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 	}
 	rectifyLocate(&v, &model, src, cells, obs, contrast*rectifyMinSaddle, 0)
 
-	// Refit with the corners, reject outliers, refit. Once rectifyAnchorsOnly anchors are located
-	// the finders leave the refit: a finder off by a fraction of a module would otherwise pull the
-	// mesh's corner with the weight of an anchor, and it cannot be rejected as one.
+	// Refit with the corners, reject outliers, refit. Once rectifyAnchorsOnly anchors are located,
+	// a finder stays in the refit only while it lies within rectifyFinderKeep cells of where the
+	// anchors alone put it: a finder off by a fraction of a module would otherwise pull the mesh's
+	// corner with the weight of an anchor, while an accurate one still steadies the corner.
 	for range 2 {
 		var s, d []gpt
 		for i := range obs {
@@ -104,6 +106,15 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 		}
 		if len(s) < rectifyAnchorsOnly {
 			s, d = append(s, src...), append(d, dst...)
+		} else if m0, _, ok := geomFitModelK1(s, d, v.w, v.h); ok {
+			for k, c := range src {
+				ex := m0.at(c.add(gpt{0.5, 0})).sub(m0.at(c.sub(gpt{0.5, 0})))
+				ey := m0.at(c.add(gpt{0, 0.5})).sub(m0.at(c.sub(gpt{0, 0.5})))
+				cell := math.Sqrt(math.Abs(ex.cross(ey)))
+				if m0.at(c).sub(dst[k]).norm() <= rectifyFinderKeep*cell {
+					s, d = append(s, c), append(d, dst[k])
+				}
+			}
 		}
 		if len(s) >= 8 {
 			if m, _, ok := geomFitModelK1(s, d, v.w, v.h); ok {

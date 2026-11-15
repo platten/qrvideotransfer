@@ -80,8 +80,8 @@ func (d *FinderDetector) locate(f *video.Frame, v *geomLuma, q Quad, from []int)
 }
 
 // locateGrid locates the anchors of quad q for a gx x gy grid (see locate). It reports false when
-// the grid implies fewer than confirmMinPitch pixels per cell or a layout beyond confirmMaxLayouts
-// would be built in this Detect.
+// the grid implies fewer than confirmMinPitch pixels per cell (and records that the gate failed) or
+// when layoutFor refuses the grid.
 func (d *FinderDetector) locateGrid(v *geomLuma, q Quad, from []int, gx, gy int) (*confirmation, bool) {
 	c0 := 4.5 * float64(gy) / 135
 	st := &confirmation{src: []gpt{{c0, c0}, {float64(gx) - c0, c0}, {c0, float64(gy) - c0}, {float64(gx) - c0, float64(gy) - c0}}}
@@ -92,19 +92,13 @@ func (d *FinderDetector) locateGrid(v *geomLuma, q Quad, from []int, gx, gy int)
 	across := (dst[1].sub(dst[0]).norm() + dst[3].sub(dst[2]).norm()) / 2 / (src[1].X - src[0].X)
 	down := (dst[2].sub(dst[0]).norm() + dst[3].sub(dst[1]).norm()) / 2 / (src[2].Y - src[0].Y)
 	if !(across >= confirmMinPitch && down >= confirmMinPitch) {
+		d.gateFailed = true
 		return nil, false
 	}
 	st.pitch = (across + down) / 2
-	if d.layout == nil || d.layout.GridX() != gx || d.layout.GridY() != gy {
-		if d.built >= confirmMaxLayouts {
-			return nil, false
-		}
-		l, err := frame.NewLayout(gx, gy)
-		if err != nil {
-			return nil, false
-		}
-		d.layout = l
-		d.built++
+	layout, ok := d.layoutFor(gx, gy)
+	if !ok {
+		return nil, false
 	}
 	hm, ok := headerModel(v, q)
 	if !ok {
@@ -119,7 +113,7 @@ func (d *FinderDetector) locateGrid(v *geomLuma, q Quad, from []int, gx, gy int)
 	for _, r := range refs {
 		contrast = max(contrast, r[1]-r[0])
 	}
-	anchors := d.layout.Anchors()
+	anchors := layout.Anchors()
 	obs := make([]AnchorObs, len(anchors))
 	cells := make([]gpt, len(anchors))
 	for i, a := range anchors {
@@ -214,4 +208,31 @@ func firstEnough(sts []*confirmation) (*confirmation, bool) {
 		}
 	}
 	return nil, false
+}
+
+// layoutFor returns the layout of a gx x gy grid, cached by grid (the confirmMaxLayouts most recent
+// kept across Detects). At most confirmMaxLayouts distinct grids are used per Detect; a further one
+// is refused, so that the work stays bounded whatever the header copies claim.
+func (d *FinderDetector) layoutFor(gx, gy int) (*frame.Layout, bool) {
+	g := [2]int{gx, gy}
+	if !slices.Contains(d.grids, g) {
+		if len(d.grids) >= confirmMaxLayouts {
+			return nil, false
+		}
+		d.grids = append(d.grids, g)
+	}
+	for _, l := range d.layouts {
+		if l.GridX() == gx && l.GridY() == gy {
+			return l, true
+		}
+	}
+	l, err := frame.NewLayout(gx, gy)
+	if err != nil {
+		return nil, false
+	}
+	if len(d.layouts) >= confirmMaxLayouts {
+		d.layouts = d.layouts[1:]
+	}
+	d.layouts = append(d.layouts, l)
+	return l, true
 }

@@ -23,31 +23,29 @@ const (
 	// sampleClipWhite is the limited-range nominal white on the 8-bit scale.
 	sampleClipWhite = 235
 	// sampleClipMargin is how far below sampleClipWhite a sample still counts as clipped, in 8-bit
-	// codes. Under the simulator's handheld noise (about 2.6 codes RMS in brightness) a clipped
-	// sample falls below 233 about one time in eight, while display white exposed at 0.9 of the
-	// sensor's range (about 225) reaches 233 about one time in 200.
+	// codes: samples at 231 or above count. Under the simulator's handheld noise (about 2.6 codes
+	// RMS in brightness) a clipped sample falls below 231 about one time in twenty, while display
+	// white exposed at 0.9 of the sensor's range (about 225) rarely reaches it.
 	sampleClipMargin = 4
 	// sampleClipCell is the share of a cell's footprint samples that must be clipped for the cell to
 	// be a glare candidate: half, so that one noisy sample neither makes nor breaks it.
 	sampleClipCell = 0.5
 	// sampleClipArea is the share of the samples over the cell's 3 x 3-cell neighbourhood (its
 	// central part, 2.6 cells square) that must be clipped too. Glare is a patch many cells wide,
-	// while data is scrambled: at most this share of a neighbourhood is white only when all nine of
-	// its cells, or eight, show white, which happens to 1 cell in 2,700 or so with four greys and to
-	// 3.5% of the white cells with black and white. It spares a capture whose display white lands on
-	// the clip (the ideal preset), where every white cell is clipped. It costs the outermost cell or
-	// so of a patch, whose neighbourhood straddles its edge.
-	sampleClipArea  = 0.85
+	// while data is scrambled: this share of a neighbourhood is white only when about all nine of
+	// its cells show white, rare with four greys and with eight colours and a little over 1% of the
+	// cells with black and white. It spares a capture whose display white lands on the clip (the
+	// ideal preset, a perfect digital frame), where every white cell is clipped. The outermost cell
+	// or so of a patch, whose neighbourhood straddles its edge, is caught by sampleClipRim instead.
+	sampleClipArea  = 0.9
 	sampleClipReach = 1.3 // half-side of the neighbourhood tested, in cells
-	// sampleClipIsolated is the share of the sampled cells that may be clipped without a clipped
-	// neighbourhood before the capture is taken to show its display white at the clip. Under glare
-	// only a patch's rim is such a cell (0.4% of the cells for a 5% patch, about 0.5% for 20%);
-	// with the white at the clip every white data cell is (a quarter of the cells with four greys,
-	// an eighth with eight colours, half with black and white).
-	sampleClipIsolated = 0.05
-	// sampleClipMinCells is the fewest cells sampled at once for that decision; with fewer, only
-	// cells in a clipped area are flagged.
-	sampleClipMinCells = 1000
+	// sampleClipRim is how many of a clipped cell's eight neighbours must be in a clipped area for
+	// the cell to count as a patch's rim: two or three for a cell on a patch's edge, the inner side
+	// of its neighbourhood, and less often so for a white data cell among scrambled ones. With these
+	// values a perfect digital frame loses 1.75% of its black-and-white cells, 0.04% with four greys
+	// and none with eight colours or levels, and a simulated 5% patch leaves 2.4% of the cells it
+	// turns near-white unflagged.
+	sampleClipRim = 2
 )
 
 // FootprintSampler is the Sampler of docs/DESIGN.md section 10, step 4. The zero value is ready to
@@ -64,21 +62,21 @@ var _ Sampler = FootprintSampler{}
 // cell's centre is used.
 //
 // A cell is saturated when any of its brightness samples is at the bottom or the top of the code
-// range, or when it is under glare: at least sampleClipCell of its samples, and sampleClipArea of
-// those over its 3 x 3-cell neighbourhood, are clipped (within sampleClipMargin of the limited-range
-// white or above). A saturated cell gives zero soft bits downstream. A cell outside the capture, an
+// range, or when it is under glare: at least sampleClipCell of its samples are clipped (within
+// sampleClipMargin of the limited-range white or above), and either sampleClipArea of those over its
+// 3 x 3-cell neighbourhood are too, or sampleClipRim of its neighbours are such cells (sampleRim).
+// A saturated cell gives zero soft bits downstream. A cell outside the capture, an
 // invalid frame or mesh, or a footprint wider than 256 pixels gives a saturated observation with
 // zero values: no information.
 func (FootprintSampler) Sample(dst []modem.Obs, f *video.Frame, m *Mesh, cells []frame.Cell) {
 	n := min(len(dst), len(cells))
 	dst, cells = dst[:n], cells[:n]
 	v, ok := geomView(f)
-	type candidate struct {
+	type candidate = struct {
 		i    int
 		area bool // its neighbourhood is clipped too
 	}
 	var clipped []candidate
-	isolated := 0
 	for i := range dst {
 		if !ok {
 			dst[i] = modem.Obs{Saturated: true}
@@ -98,16 +96,49 @@ func (FootprintSampler) Sample(dst []modem.Obs, f *video.Frame, m *Mesh, cells [
 		_, nn, cn, _ := geomMean(v.y, v.w, v.h, c, hx.mul(k), hy.mul(k), v.top, v.clip())
 		area := nn > 0 && float64(cn) >= sampleClipArea*float64(nn)
 		clipped = append(clipped, candidate{i, area})
-		if !area {
-			isolated++
-		}
 	}
-	// Clipped cells standing alone mean the display's white itself reaches the clip: then only
-	// cells inside a clipped area are glare. Otherwise every clipped cell is, which also catches
-	// the edge of a patch.
-	whiteClips := len(dst) < sampleClipMinCells || float64(isolated) > sampleClipIsolated*float64(len(dst))
+	sampleRim(dst, cells, clipped)
+}
+
+// sampleRim flags the clipped candidates: each in a clipped area, and each other clipped cell with
+// at least sampleClipRim area cells among its eight neighbours, which is a patch's rim. The decision
+// is local: white data cells at the clip stand among dark ones, so a few may form an area but few
+// border three of them, whether the clip is reached over the whole code or a part of it.
+func sampleRim(dst []modem.Obs, cells []frame.Cell, clipped []struct {
+	i    int
+	area bool
+}) {
+	if len(clipped) == 0 {
+		return
+	}
+	x0, y0, x1, y1 := math.MaxInt, math.MaxInt, -1, -1
 	for _, c := range clipped {
-		if c.area || !whiteClips {
+		x, y := int(cells[c.i].X), int(cells[c.i].Y)
+		x0, y0, x1, y1 = min(x0, x), min(y0, y), max(x1, x), max(y1, y)
+	}
+	w, h := x1-x0+3, y1-y0+3    // one cell of margin each side
+	state := make([]uint8, w*h) // 1 clipped, 2 clipped area
+	at := func(x, y int) int { return (y-y0+1)*w + x - x0 + 1 }
+	for _, c := range clipped {
+		s := uint8(1)
+		if c.area {
+			s = 2
+		}
+		state[at(int(cells[c.i].X), int(cells[c.i].Y))] = s
+	}
+	for _, c := range clipped {
+		if c.area {
+			dst[c.i].Saturated = true
+			continue
+		}
+		k := at(int(cells[c.i].X), int(cells[c.i].Y))
+		n := 0
+		for _, d := range [8]int{-w - 1, -w, -w + 1, -1, 1, w - 1, w, w + 1} {
+			if state[k+d] == 2 {
+				n++
+			}
+		}
+		if n >= sampleClipRim {
 			dst[c.i].Saturated = true
 		}
 	}
