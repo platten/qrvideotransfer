@@ -185,12 +185,10 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	if j.outDir != "" {
 		fsc = fsc.WithDirMount(j.outDir, "/out")
 	}
-	// For a time-bound error's breakdown: when the memory is reserved and freed (timedAlloc, unless
-	// a test installed its own allocator), when the module begins to close (after the guest reached
-	// a check, when cancelled), and when the run call returns.
-	if ctx.Value(ownAllocator{}) == nil {
-		ctx = experimental.WithMemoryAllocator(ctx, timedAlloc{m})
-	}
+	// For a time-bound error's breakdown: when the memory is reserved and freed (timedAlloc), when
+	// the module begins to close (after the guest reached a check, when cancelled), and when the run
+	// call returns.
+	ctx = experimental.WithMemoryAllocator(ctx, timedAlloc{m})
 	ctx = experimental.WithCloseNotifier(ctx, experimental.CloseNotifyFunc(func(context.Context, uint32) {
 		m.checkAt.CompareAndSwap(0, time.Now().UnixNano())
 	}))
@@ -203,7 +201,3 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	m.runAt.CompareAndSwap(0, time.Now().UnixNano())
 	return int(rc), err
 }
-
-// ownAllocator is the context key with which a test that installs its own wazero memory allocator
-// keeps exec from replacing it.
-type ownAllocator struct{}

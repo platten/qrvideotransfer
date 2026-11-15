@@ -9,7 +9,8 @@ import (
 // timedAlloc is the linear-memory allocator of every engine instance: it allocates as wazero's own
 // does (a Go slice with the capacity wazero asks for, here the whole 512 MiB reservation, grown by
 // copying only past it), and records in m when the reservation has been made, for a time-bound
-// error's breakdown, and when the memory is freed (as the module closes).
+// error's breakdown, when the memory is freed (as the module closes), and the largest size the
+// instance reached.
 type timedAlloc struct{ m *meter }
 
 // Allocate implements experimental.MemoryAllocator.
@@ -35,6 +36,9 @@ func (t *timedMem) Reallocate(size uint64) []byte {
 		t.m.reserved()
 	}
 	t.buf = t.buf[:size]
+	if int64(size) > t.m.memPeak.Load() { //nolint:gosec // size is at most the 512 MiB ceiling
+		t.m.memPeak.Store(int64(size)) //nolint:gosec // as above
+	}
 	return t.buf
 }
 
