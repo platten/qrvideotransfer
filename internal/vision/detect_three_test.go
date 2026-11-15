@@ -1,0 +1,151 @@
+package vision
+
+import (
+	"math"
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/platten/qrvideotransfer/internal/frame"
+	"github.com/platten/qrvideotransfer/internal/video"
+)
+
+// geomPaintDisc paints a disc of radius r pixels at (cx, cy) on f's brightness with value v.
+func geomPaintDisc(f *video.Frame, cx, cy, r float64, v uint16) {
+	for y := max(0, int(cy-r)); y <= min(f.H-1, int(cy+r)); y++ {
+		for x := max(0, int(cx-r)); x <= min(f.W-1, int(cx+r)); x++ {
+			if math.Hypot(float64(x)+0.5-cx, float64(y)+0.5-cy) <= r {
+				f.Y[y*f.W+x] = v
+			}
+		}
+	}
+}
+
+// TestDetectThreeFindersPlain: with any one finder of a rendered frame covered by a white disc of
+// 12 cells' radius, the quad is located from the other three: the three visible centres within a
+// tenth of a module, the hidden one within a module, and the header reads.
+func TestDetectThreeFindersPlain(t *testing.T) {
+	c := geomNewCode(t, 320, 180, 8, 2, 1, 28)
+	want := geomPlainQuad(c)
+	for k := range 4 {
+		f := geomPlain(c, 0)
+		geomPaintDisc(f, want.Centres[k].X, want.Centres[k].Y, 12*float64(c.pitch), 235)
+		var d FinderDetector
+		q, ok := d.Detect(f, nil)
+		if !ok {
+			t.Errorf("finder %d hidden: not located", k)
+			continue
+		}
+		for j := range 4 {
+			tol := want.Module / 10
+			if j == k {
+				tol = want.Module
+			}
+			if e := geomDist(q.Centres[j], want.Centres[j]); e > tol {
+				t.Errorf("finder %d hidden: centre %d at %v, want %v", k, j, q.Centres[j], want.Centres[j])
+			}
+		}
+		if hs, ok := (SlotReader{}).Read(f, q); !ok || hs[0] != c.headers[0] {
+			t.Errorf("finder %d hidden: header %v %v", k, hs, ok)
+		}
+	}
+}
+
+// TestDetectTwoHidden: with any two finders covered, nothing is located.
+func TestDetectTwoHidden(t *testing.T) {
+	c := geomNewCode(t, 320, 180, 8, 2, 1, 29)
+	want := geomPlainQuad(c)
+	for a := range 4 {
+		for b := a + 1; b < 4; b++ {
+			f := geomPlain(c, 0)
+			for _, k := range []int{a, b} {
+				geomPaintDisc(f, want.Centres[k].X, want.Centres[k].Y, 12*float64(c.pitch), 235)
+			}
+			var d FinderDetector
+			if q, ok := d.Detect(f, nil); ok {
+				t.Errorf("finders %d and %d hidden: located %v", a, b, q.Centres)
+			}
+		}
+	}
+}
+
+// TestDetectThreeHostile: a 1920 x 1080 frame of random noise with three finder patterns drawn at
+// plausible places (two normal, one inverted), and no header or anchors, is never located, and each
+// Detect stays within 1 s and 32 MB of allocation.
+func TestDetectThreeHostile(t *testing.T) {
+	const w, h = 1920, 1080
+	f := &video.Frame{W: w, H: h, Bits: 8, Y: make([]uint16, w*h)}
+	s := uint64(11)
+	for i := range f.Y {
+		s = s*6364136223846793005 + 1442695040888963407
+		f.Y[i] = uint16(16 + (s>>33)%220)
+	}
+	const m = 8 // pixels per module
+	draw := func(cx, cy int, c frame.Corner) {
+		for my := -1; my < 8; my++ {
+			for mx := -1; mx < 8; mx++ {
+				dark := frame.SeparatorDark(c)
+				if mx >= 0 && my >= 0 && mx < 7 && my < 7 {
+					dark = frame.FinderModuleDark(c, mx, my)
+				}
+				v := uint16(235)
+				if dark {
+					v = 16
+				}
+				for y := range m {
+					for x := range m {
+						f.Y[(cy+(my-3)*m-m/2+y)*w+cx+(mx-3)*m-m/2+x] = v
+					}
+				}
+			}
+		}
+	}
+	draw(200, 150, frame.TopLeft)
+	draw(1700, 150, frame.TopRight)
+	draw(1700, 930, frame.BottomRight)
+	var d FinderDetector
+	var before, after runtime.MemStats
+	const n = 3
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	for range n {
+		if q, ok := d.Detect(f, nil); ok {
+			t.Fatalf("located %v", q.Centres)
+		}
+	}
+	el := time.Since(start) / n
+	runtime.ReadMemStats(&after)
+	alloc := (after.TotalAlloc - before.TotalAlloc) / n
+	t.Logf("per Detect: %v, %.1f MB allocated", el, float64(alloc)/(1<<20))
+	if alloc > 32<<20 {
+		t.Errorf("%.1f MB allocated per Detect, want at most 32", float64(alloc)/(1<<20))
+	}
+	if el > time.Second && !geomRace {
+		t.Errorf("%v per Detect, want at most 1 s", el)
+	}
+}
+
+// TestGlareOnFinder: on 6 handheld 4K poses (480 x 270 grid, seeds 21000 to 21005), a glare patch
+// of 2% of the code area centred on each finder in turn: every pose located with its header read,
+// no wrong quad or header, and a cell-centre error outside the patch of at most 0.15 cell RMS.
+func TestGlareOnFinder(t *testing.T) {
+	n := 6
+	if geomRace {
+		n = 2
+	}
+	c := geomNewCode(t, 480, 270, 4, 2, 4, 30)
+	cases := geomGlareCases(c)[:4]
+	poses := geomPoses(t, c, geomConfig(t, "handheld", 0, 0), n, 21000)
+	for k, gc := range cases {
+		var s geomGlareStats
+		for i, p := range poses {
+			discs := gc.discs(c, i)
+			geomGlareMeasure(c, geomGlare(p.f, p.tr, discs), p.tr, discs, &s)
+		}
+		rms := math.Sqrt(s.sumSq / float64(max(1, s.cells)))
+		t.Logf("%s: found %d of %d, wrong %d, header %d, wrong %d, RMS outside %.4f", gc.name, s.found, s.poses, s.wrong, s.header, s.wrongHeader, rms)
+		if s.found != n || s.header != n || s.wrong != 0 || s.wrongHeader != 0 || !(rms <= 0.15) {
+			t.Errorf("finder %d under glare: found %d of %d, header %d, wrong %d and %d, RMS %.4f", k, s.found, n, s.header, s.wrong, s.wrongHeader, rms)
+		}
+	}
+}
