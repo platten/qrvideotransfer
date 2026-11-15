@@ -314,6 +314,10 @@ func runJob(j *workerJob, stdin io.Reader, w *msgWriter) (int, error) {
 		return 0, err
 	}
 	m := &meter{}
+	// The reservation is reported at once, from the goroutine that made it and before any guest code
+	// runs: once a guest spins, a garbage collection the reservation started can stop every other
+	// goroutine of this process for good (SECURITY.md T1), reportProgress's included.
+	m.onReserve = func() { msg := progressMsg(m); _ = w.send(msgProgress, msg[:]) }
 	done := make(chan struct{})
 	defer close(done)
 	go reportProgress(m, w, done)
@@ -339,22 +343,27 @@ func reportProgress(m *meter, w *msgWriter, done <-chan struct{}) {
 		case <-done:
 			return
 		case <-t.C:
-			since := func(at *atomic.Int64) int64 { // from readiness, -1: not yet
-				if v, r := at.Load(), m.readyAt.Load(); v != 0 && r != 0 {
-					return max(0, v-r)
-				}
-				return -1
-			}
-			var b [progressLen]byte
-			for i, v := range []int64{m.reads.Load(), m.inBytes.Load(), m.inCalls.Load(), since(&m.firstIn), since(&m.memAt), since(&m.openAt)} {
-				binary.BigEndian.PutUint64(b[8*i:], uint64(v)) //nolint:gosec // -1 is sent as its two's complement
-			}
-			if b != last {
+			if b := progressMsg(m); b != last {
 				last = b
 				_ = w.send(msgProgress, b[:])
 			}
 		}
 	}
+}
+
+// progressMsg is m's progress message (progressLen).
+func progressMsg(m *meter) [progressLen]byte {
+	since := func(at *atomic.Int64) int64 { // from readiness, -1: not yet
+		if v, r := at.Load(), m.readyAt.Load(); v != 0 && r != 0 {
+			return max(0, v-r)
+		}
+		return -1
+	}
+	var b [progressLen]byte
+	for i, v := range []int64{m.reads.Load(), m.inBytes.Load(), m.inCalls.Load(), since(&m.firstIn), since(&m.memAt), since(&m.openAt)} {
+		binary.BigEndian.PutUint64(b[8*i:], uint64(v)) //nolint:gosec // -1 is sent as its two's complement
+	}
+	return b
 }
 
 // Engine workers for this process: the runner, or why there is none.
