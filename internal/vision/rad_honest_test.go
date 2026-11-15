@@ -23,11 +23,7 @@ const minBucket = 10000
 // (DESIGN.md sections 10 and 15): pooled over the Gray4 variants, bucket 1 holds 24 errors where 167
 // are expected (0.14 times) and bucket 2 none where 23 are expected. The floor is that 0.14 less a
 // margin, so that the underconfidence cannot grow unnoticed; overconfidence keeps the bound of twice.
-//
-// On handheld clean cells are underconfident through the geometry pipeline (pooled bucket 1: 0.46
-// times; the preset alone 0.23 times), also accepted on 2026-11-15 and revisited with S2; its floor
-// is that 0.23 less a margin.
-var underFloor = map[string]float64{"tripod": 0.10, "handheld": 0.15}
+var underFloor = map[string]float64{"tripod": 0.10, "handheld": 0.5}
 
 // overCeil is, per preset, the largest observed error rate relative to the stated one accepted for
 // credited cells that hold some of another frame, and for tables that include them. Above the
