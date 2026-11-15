@@ -242,15 +242,17 @@ func TestWorkerSpin(t *testing.T) {
 		t.Skip("takes 30 s")
 	}
 	p, ps := testWorkers(t)
-	err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil }})
+	m := &meter{}
+	err := run(t.Context(), workerRunner{p}, job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil }, meter: m})
 	var le *LimitError
 	if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" || !strings.Contains(err.Error(), "since last progress") {
 		t.Fatalf("got %v", err)
 	}
-	// Timed from the worker's start, after any wait for a slot. The watchdog may last have seen the
-	// instance waiting up to one tick before that start, so the stop may come a tick under the limit.
-	if el := ps.since(); el < EngineStallTimeout-watchTick || el > EngineStallTimeout+5*time.Second {
-		t.Errorf("stopped after %v", el)
+	// Timed from the instance's reservation, where the stall clock starts: the worker's start and
+	// load come before it (on macos-26-intel they made a stop timed from the start 35.03 s, CI run
+	// 43704037510).
+	if el := time.Duration(m.cancelledAt.Load() - m.memAt.Load()); m.memAt.Load() == 0 || el < EngineStallTimeout || el > EngineStallTimeout+5*time.Second {
+		t.Errorf("stopped %v after the reservation (%v after the worker's start)", el, ps.since())
 	}
 	gone(t, ps.all(), 5*time.Second)
 }
