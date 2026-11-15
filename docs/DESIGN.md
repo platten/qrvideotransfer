@@ -540,9 +540,16 @@ For each capture:
    a cell brighter than its tile's lightest level by 5 standard deviations of that level (at least 3
    code values), or one among the 5 x 5 cells around which so many read as the lightest level that
    chance would allow it less than once in a million, as a glare patch makes them; the flagged region
-   grows by two rings for a patch's soft edge. Measured in M2 with a patch over 5% of the code: 0.2% to
-   4.5% of the cells under it still give soft bits, and 0.01% to 0.09% of the cells away from it are
-   lost. The share of a cell's footprint near the top of the code range belongs to the sampler.
+   grows by two rings for a patch's soft edge. Cells the phase field does not credit never trip the
+   brightness margin: they had no stripes removed, and a residual fringe lifted them above white (the M2
+   review found 0.1% to 0.2% of credited cells lost that way at fringe amplitude 24). Measured in M2
+   with a patch over 5% of the code, counting credited cells only: of those it lifts by more than half a
+   level spacing, 0% to 4.6% still give soft bits; of those more than four cells from it, at most 0.007%
+   are lost; fringes of amplitude 24 without a patch lose 0.02% of credited cells. Glare and fringes of
+   amplitude 24 together remain a residual: stripe cancellation answers the patch's broad bump with
+   waves across the capture, 6% (`tripod`) to 26% (`handheld`) of the lifted cells keep soft bits, and
+   0.1% to 0.5% of the distant cells are lost. The share of a cell's footprint near the top of the code
+   range belongs to the sampler.
 6. **Cancel stripes.** Subtract each cell's decided level, take a 2-D Fourier transform of what remains,
    remove peaks standing above the noise, and re-estimate. Moire and backlight flicker are a few plane
    waves and show up as such peaks. As built (M2): the cell grid is padded to the next sizes with no prime
@@ -553,14 +560,19 @@ For each capture:
    that bit 1, scaled by the variance, as a clipped 8-bit value in units of a quarter nat
    (`modem.LLRScale`). Saturated cells give zero. A cell with phase weight *w* has its variances widened
    by *u*^2 times the variance of the level centres, per plane used and averaged over those planes (Y
-   alone for grey modulations), where *u* = 1 - *w* - 0.02: the share of another frame the cell may hold,
-   less the 0.02 by which the phase field reads cells that show one frame only (0.97 to 0.99 measured).
+   alone for grey modulations), where *u* = 1 - *w* is the share of another frame the cell may hold.
    Measured in M2 on the credited cells that hold some of another frame, pooled over the variants: with
-   this size `handheld` Gray4 is honest (bucket 1: 0.0091 observed where 0.0119 is stated) and RGB8 within
-   the band (0.0199 against 0.0126); a third of it, as first built, left those cells up to 9 times
-   overconfident; without the 0.02, clean `tripod` cells became 2.9 times underconfident. `tripod` Gray4's
-   partly mixed cells stay overconfident (bucket 1: 0.054 against 0.0104, 5,209 bits, below the 10,000 the
-   test judges), because there the phase field overestimates the weight of cells beside narrow blends.
+   this size `handheld` is honest (Gray4 bucket 1: 0.0079 observed where 0.0116 is stated); a third of
+   it, as first built, left `tripod`'s partly mixed cells up to 9 times overconfident. Two residuals
+   remain on `tripod`, accepted by the designer on 2026-11-15 and revisited with the S2 recordings:
+   - Partly mixed cells are overconfident in buckets 0 to 2 (Gray4: 1.7, 4.3 and 2.7 times the stated
+     rate), because the phase field overestimates the weight of cells beside narrow blends. They are
+     about 1% of credited bits, and the M2 review found no decoding cost: decoding near the margin was
+     the same within one codeword when their soft bits were scaled down or zeroed.
+   - Clean cells are underconfident (Gray4 bucket 1: 24 errors where 167 are expected, 0.14 times;
+     bucket 2: none where 23 are expected), probably because the credited but partly mixed cells widen
+     the fitted variances. Underconfidence is the safe direction for the LDPC decoder. The honesty
+     test bounds it at 0.10 times on `tripod` (section 15).
    M2 settled the two points the M1 review left open. The omitted log-variance term, (planes / 2) times
    the log of the ratio of two levels' variances, measured under `handheld` up to 1.43 nats for Gray4
    (per-tile variance ratio 17.4, the dark level widest) and 3.41 nats for RGB8 (ratio 9.7, three planes),
@@ -1283,7 +1295,7 @@ How the parameters are read, and the values every preset shares:
 | --- | --- |
 | Perspective to 25 degrees, lens distortion, rolling shear | Cell-centre error at most 0.15 cell RMS; finders found in at least 99.9% of 1,000 random poses; the header read in at least 99.5% of captures on `handheld` |
 | Blur, noise, recorder quantiser | Raw bit error rate never rises as a parameter improves, and stays within 10% of reference values stored when M2 is merged |
-| Gamma, white balance, tone curve, vignetting | Confidence is honest: with soft bits grouped into ten buckets by stated confidence, the observed error rate of every bucket holding at least 10,000 bits lies between half and twice the stated rate. A bucket passes when its error count is consistent, at the 0.1% level of a Poisson test, with a rate in that band, so where few errors are expected only overconfidence can be shown; in the tables pooled over the variants, wherever at least 100 errors are expected, the observed rate itself must also lie in the band, and so must the pooled table of credited cells that hold some of another frame. Met in M2 on `tripod` and `handheld` for Gray4, Gray2 and RGB8 under gamma error +-0.3, white balance +-0.10 and vignetting 0.25, each case alone and pooled |
+| Gamma, white balance, tone curve, vignetting | Confidence is honest: with soft bits grouped into ten buckets by stated confidence, the observed error rate of every bucket holding at least 10,000 bits lies between half and twice the stated rate. A bucket passes when its error count is consistent, at the 0.1% level of a Poisson test, with a rate in that band, so where few errors are expected only overconfidence can be shown; in the tables pooled over the variants, wherever at least 100 errors are expected, the observed rate itself must also lie in the band. Credited cells that are wholly one frame and those that hold some of another are also pooled and judged apart, so that errors in opposite directions cannot cancel. On `tripod` the band's lower edge is 0.10 times the stated rate instead of half: its clean cells are underconfident (0.14 times in Gray4 bucket 1), a residual the designer accepted on 2026-11-15 and revisited with S2 (section 10, step 7). Met in M2 on `tripod` and `handheld` for Gray4, Gray2 and RGB8 under gamma error +-0.3, white balance +-0.10 and vignetting 0.25, each case alone and pooled |
 | Moire fringes, flicker bands | Decoding succeeds with stripe cancellation on at an amplitude where it fails with it off. Met in M2: on `handheld`, Gray4 with `normal`, at fringe amplitude 24 every codeword decodes with it on and none with it off, for three fringe periods and directions |
 | Frame mixing, any boundary direction | No soft bit is ever credited to the wrong code frame; every credited cell's true weight is at least 0.80; per preset, the share of truly clean cells (true weight at least 0.92) that are credited is at least its measured value less 0.02 (M2: `tripod` 0.986, `handheld` 0.989 to 0.990); as a regression check, the phase weight error is at most 0.09 at cells interpolated between four observed anchors and 0.16 beyond the outermost anchors and beside the finders. CI runs `handheld` with the panel scanning left to right at roll 60, which reaches 0.082 inner error; the smallest credited true weight, 0.802, and the pocket error closest to its bound, 0.149 against 0.16 (the tightest margin), occur only in the long run. The cost of this accepted phase accuracy is the clean-cell yield: of the cells that truly show one frame (weight at least 0.92), 0.99 are credited on `handheld` (0.9898 CI, 0.9904 long) and 0.986 on `tripod` (0.9857 CI, 0.9863 long); the designer accepted it on 2026-11-15. These replace "phase weight error at most 0.05" by the owner's decision of 2026-11-15, after five estimators were measured on `tripod` and `handheld` (largest error, inner / pockets): weights divided by the anchor's white with bilinear interpolation and nearest-neighbour fill, 0.13 / 0.44 on a 212 x 120 grid; the same with linear prediction of missing anchors, 0.07 / 0.15 on the 480 x 270 grid with 4K cameras; bicubic Catmull-Rom interpolation, no gain and worse at a sharp ramp's kinks; weights divided by the quadrants' own total, as built, 0.082 / 0.149; a boundary model fitted to all anchors at once (a quadratic surface of display time and the blur of exposure and panel response), 0.01-0.04 where the anchors see the blend but 0.067 / 0.15 where it lies beyond them, not adopted. None credited a cell to the wrong frame. The residual error comes from blends the anchors cannot locate (opposite scan directions, blends beyond the outermost anchors); per-cell estimation from the cells' own observations is not built, and the question is revisited in M5 only if the S2 or G1 recordings show that the cells it discards matter |
 | Camera at twice the display rate, any phase offset | One pass succeeds for every offset |
@@ -1518,3 +1530,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Review of PR #31: section 10 step 7 widens the variances per plane used and averaged (the code had divided by three planes for grey modulations, a third of what the step said), takes 0.02 off the share of another frame for the phase field's reading of clean cells, justifies the size against the partly mixed cells' table, and states the log-variance figures per modulation (Gray4 1.43 nats, RGB8 3.41); section 15 bounds the point estimate of pooled buckets where 100 errors are expected and asserts the partly mixed cells' table, and says which phase-field figures CI exercises |
 | 2026-11-15 | Designer's decision on PR #31: section 10 step 5 makes cells under glare unknown by two stated margins (brighter than the local lightest level; implausible against the neighbours' levels) and gives the measured miss and loss rates |
 | 2026-11-15 | Designer's decision on PR #31: section 15 records the clean-cell yield (0.99 on `handheld`, 0.986 on `tripod`) as the accepted cost of the phase accuracy |
+| 2026-11-15 | Round 2 of the review of PR #31, with the designer's ruling of 2026-11-15: section 10 step 7 drops the 0.02 taken off the share of another frame (it changed no clean cell; the justification given was wrong) and records two residuals on `tripod`, revisited with S2 (partly mixed cells overconfident in buckets 0 to 2, about 1% of credited bits; clean cells underconfident, bounded at 0.10 times); step 5 keeps uncredited cells from tripping the glare brightness margin and gives the glare figures with fringes; section 15 judges clean and partly mixed cells apart and states `tripod`'s lower edge |
