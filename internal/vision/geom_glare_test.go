@@ -191,6 +191,7 @@ func geomGlareMeasure(c *geomCode, f *video.Frame, tr *channel.Truth, discs []ge
 // come back (marked saturated, or as near-white values). It only logs; it runs with
 // QRVT_LONG_TESTS=1.
 func TestGlareStudy(t *testing.T) {
+	raceSkipStatistics(t)
 	if !geomLong() {
 		t.Skip("set QRVT_LONG_TESTS=1")
 	}
@@ -245,6 +246,7 @@ func TestGlareStudy(t *testing.T) {
 // 30999), 480 x 270 grid: finders, headers, wrong quads and headers counted separately, and the
 // cell-centre error. It only logs; it runs with QRVT_LONG_TESTS=1.
 func TestGeometryHarshLong(t *testing.T) {
+	raceSkipStatistics(t)
 	if !geomLong() {
 		t.Skip("set QRVT_LONG_TESTS=1")
 	}
