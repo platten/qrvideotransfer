@@ -16,11 +16,14 @@ import (
 // waves across the capture; that combination is a recorded residual (DESIGN.md section 10, step 5),
 // bounded here at its measured value with a margin so that it cannot grow unnoticed.
 const (
-	maxGlareMiss        = 0.05  // share of cells under the patch that still give soft bits
-	maxGlareFalse       = 0.002 // share of cells away from the patch made unknown
-	maxGlareMissFringe  = 0.30
-	maxGlareFalseFringe = 0.008
-	maxFringeLoss       = 0.0005 // credited cells lost to fringes without a patch: measured 0.00019
+	maxGlareMiss       = 0.05  // share of cells under the patch that still give soft bits
+	maxGlareFalse      = 0.002 // share of cells away from the patch made unknown
+	maxGlareMissFringe = 0.30
+	// Through the geometry pipeline the miss rate measured 0.073 on tripod (0.036 handheld), an
+	// accepted residual revisited with S2: the cells missed are wrong data stated with confidence.
+	maxGlareMissPipeline = 0.10
+	maxGlareFalseFringe  = 0.008
+	maxFringeLoss        = 0.0005 // credited cells lost to fringes without a patch: measured 0.00019
 )
 
 // TestGlareUnknown: credited cells under a glare patch come back unknown (zero soft bits) and

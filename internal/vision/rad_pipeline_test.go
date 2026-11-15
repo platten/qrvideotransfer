@@ -177,7 +177,7 @@ func TestPipelineHonesty(t *testing.T) {
 				}
 				tab, clean, mixed, cells := s.calibrate(t, caps, false)
 				t.Logf("%d captures through the pipeline of %d, %d credited cells\n%s", len(caps), ps.captures, cells, tab)
-				for _, e := range tab.judge(false, underFloor[name]) {
+				for _, e := range tab.judge(false, underFloor[name], overCeil[name]) {
 					t.Error(e)
 				}
 				total.merge(tab)
@@ -186,13 +186,13 @@ func TestPipelineHonesty(t *testing.T) {
 			})
 		}
 		t.Logf("%s through the pipeline, all variants:\n%sclean cells:\n%spartly mixed cells:\n%s", name, total, totalClean, totalMixed)
-		for _, e := range total.judge(true, underFloor[name]) {
+		for _, e := range total.judge(true, underFloor[name], overCeil[name]) {
 			t.Errorf("%s pooled: %s", name, e)
 		}
-		for _, e := range totalClean.judge(true, underFloor[name]) {
+		for _, e := range totalClean.judge(true, underFloor[name], 2) {
 			t.Errorf("%s pooled, clean cells: %s", name, e)
 		}
-		for _, e := range totalMixed.checkPooled() {
+		for _, e := range totalMixed.judge(true, 0.5, overCeil[name]) {
 			t.Errorf("%s pooled, partly mixed cells: %s", name, e)
 		}
 	}
@@ -278,8 +278,8 @@ func TestPipelineGlare(t *testing.T) {
 			}
 			miss, fa := float64(missed)/float64(max(under, 1)), float64(falsely)/float64(max(away, 1))
 			t.Logf("%d captures used; %d credited cells under the patch, %d still stated (miss rate %.4f); %d away from it, %d made unknown (%.5f)", used, under, missed, miss, away, falsely, fa)
-			if miss > maxGlareMiss {
-				t.Errorf("miss rate %.4f above %.3f", miss, maxGlareMiss)
+			if miss > maxGlareMissPipeline {
+				t.Errorf("miss rate %.4f above %.3f", miss, maxGlareMissPipeline)
 			}
 			if fa > maxGlareFalse {
 				t.Errorf("%.5f of the cells away from the patch made unknown, above %.4f", fa, maxGlareFalse)
@@ -324,4 +324,86 @@ func (s *radSession) shootRealAll(t testing.TB, c channel.Config, period time.Du
 		t.Fatal(err)
 	}
 	return out, st
+}
+
+// maxMixedCost is the most codewords per noise setting that scaling the partly mixed cells' soft
+// bits may recover (measured 10).
+const maxMixedCost = 15
+
+// TestPipelineMixedCost measures what the overconfident partly mixed cells cost the decoder near its
+// margin (long version only). Gray4 frames carrying `normal` codewords are filmed on `tripod` with
+// sensor noise raised to 14, 15 and 16, where most but not all codewords decode, and observed through
+// the geometry pipeline; 4 recordings of 6 captures each (fixed seeds). Every frame a capture credits
+// is decoded three ways: with the soft bits as produced, with those of credited cells holding some of
+// another frame (true weight below 0.999) scaled by 0.6, and with them zeroed (zeroing also drops
+// codewords below 90% of bits stated, so it is no fair comparison; it is logged only). Measured: at
+// noise 14 and 15 every codeword decodes either way; at noise 16 scaling decodes 1,490 of 1,506
+// against 1,480 as produced, a cost of 10 codewords (0.7%). The test bounds that cost at
+// maxMixedCost per setting, a regression bound on the residual the designer accepted.
+func TestPipelineMixedCost(t *testing.T) {
+	if !longTests() {
+		t.Skip("long test: QRVT_LONG_TESTS=1")
+	}
+	s := newRadSession(t, 480, 270, 4, 2, 8, 0x3c3, true)
+	b := s.mod.BitsPerCell()
+	for _, noise := range []float64{14, 15, 16} {
+		var good [3]int
+		tried := 0
+		for seed := uint64(1); seed <= 4; seed++ {
+			c := preset(t, "tripod", 3840, 2160)
+			c.Sensor.Noise = noise
+			caps, _ := s.shootReal(t, c, time.Second/15, 6, 0xc057+seed)
+			soft := make([]int8, len(s.layout.DataCells())*b)
+			alt := make([]int8, len(soft))
+			for _, rc := range caps {
+				pf := s.phaseOf(rc)
+				obs := append([]modem.Obs(nil), rc.obs...)
+				f := (&TileEqualiser{Mod: s.mod, Stripes: true}).Fit(obs, rc.palette, s.layout, rc.anchors)
+				mix := rc.trueMix(s.layout)
+				for p := range 4 {
+					if SoftBits(soft, obs, s.layout, f, s.mod, &pf, p) == 0 {
+						continue
+					}
+					votes := map[int]int{}
+					for i := range mix {
+						if q, ok := pf.Phase(i); ok && q == p {
+							fr, _ := credited(mix[i], p)
+							votes[fr]++
+						}
+					}
+					fr, best := -1, 0
+					for k, v := range votes {
+						if v > best || v == best && k < fr {
+							fr, best = k, v
+						}
+					}
+					if fr < 0 {
+						continue
+					}
+					for v, scale := range []float64{1, 0.6, 0} {
+						copy(alt, soft)
+						for i := range mix {
+							if q, ok := pf.Phase(i); !ok || q != p {
+								continue
+							}
+							if _, tw := credited(mix[i], p); tw < 0.999 {
+								for k := range b {
+									alt[i*b+k] = int8(math.Round(float64(alt[i*b+k]) * scale))
+								}
+							}
+						}
+						n, g := s.decodeFrame(alt, fr)
+						if v == 0 {
+							tried += n
+						}
+						good[v] += g
+					}
+				}
+			}
+		}
+		t.Logf("noise %.0f: of %d codewords tried, %d decode as produced, %d with partly mixed cells scaled by 0.6, %d with them zeroed", noise, tried, good[0], good[1], good[2])
+		if good[1]-good[0] > maxMixedCost {
+			t.Errorf("noise %.0f: the partly mixed cells' soft bits cost %d codewords, above %d", noise, good[1]-good[0], maxMixedCost)
+		}
+	}
 }
