@@ -2,45 +2,53 @@ package vision
 
 import (
 	"runtime"
-	"slices"
 	"testing"
 	"time"
 
 	"github.com/platten/qrvideotransfer/internal/video"
 )
 
-// geomDetectCost runs Detect n times on f, its brightness plane taken from planes in turn, and
-// returns the median time and the mean allocation per call. Every call must leave the code not
-// located when hostile is true, or located otherwise.
-func geomDetectCost(t *testing.T, f *video.Frame, planes [][]uint16, n int, hostile bool) (time.Duration, uint64) {
+// geomDetectOnce times one Detect of f with brightness plane y, and fails unless the code is not
+// located (hostile) or located (otherwise).
+func geomDetectOnce(t *testing.T, d *FinderDetector, f *video.Frame, y []uint16, hostile bool) time.Duration {
 	t.Helper()
-	var d FinderDetector
-	times := make([]time.Duration, n)
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for i := range n {
-		f.Y = planes[i%len(planes)]
-		start := time.Now()
-		_, ok := d.Detect(f, nil)
-		times[i] = time.Since(start)
-		if ok == hostile {
-			t.Fatalf("call %d: located %v, want %v", i, ok, !hostile)
-		}
+	f.Y = y
+	start := time.Now()
+	_, ok := d.Detect(f, nil)
+	el := time.Since(start)
+	if ok == hostile {
+		t.Fatalf("located %v, want %v", ok, !hostile)
 	}
-	runtime.ReadMemStats(&after)
-	slices.Sort(times)
-	return times[n/2], (after.TotalAlloc - before.TotalAlloc) / uint64(n)
+	return el
 }
 
+// geomCostRounds is how many interleaved reference and hostile runs geomCostRatio times.
+const geomCostRounds = 7
+
 // geomCostRatio asserts that a hostile frame's Detect takes at most most times a real code's of the
-// same size, measured in the same process, and allocates at most limit bytes. A ratio holds on slow
-// and loaded runners alike, where a wall-clock bound does not.
+// same size, measured in the same process, and allocates at most limit bytes. The two are timed in
+// turn, geomCostRounds times each, and the ratio is that of their fastest runs: interleaving lets
+// both see the same load, and the minimum discards the runs a busy machine slowed. A ratio holds on
+// slow and loaded runners alike, where a wall-clock bound does not.
 func geomCostRatio(t *testing.T, name string, real, hostile *video.Frame, hostilePlanes [][]uint16, most float64, limit uint64) {
 	t.Helper()
-	ref, _ := geomDetectCost(t, real, [][]uint16{real.Y}, 5, false)
-	el, alloc := geomDetectCost(t, hostile, hostilePlanes, 6, true)
+	var dr, dh FinderDetector
+	// Allocation, hostile runs only.
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for i := range len(hostilePlanes) * 2 {
+		geomDetectOnce(t, &dh, hostile, hostilePlanes[i%len(hostilePlanes)], true)
+	}
+	runtime.ReadMemStats(&after)
+	alloc := (after.TotalAlloc - before.TotalAlloc) / uint64(len(hostilePlanes)*2)
+	ref, el := time.Duration(1<<62), time.Duration(1<<62)
+	realY := real.Y
+	for i := range geomCostRounds {
+		ref = min(ref, geomDetectOnce(t, &dr, real, realY, false))
+		el = min(el, geomDetectOnce(t, &dh, hostile, hostilePlanes[i%len(hostilePlanes)], true))
+	}
 	ratio := float64(el) / float64(ref)
-	t.Logf("%s: %v per Detect against %v for a real code (%.1f times), %.1f MB allocated", name, el, ref, ratio, float64(alloc)/(1<<20))
+	t.Logf("%s: fastest %v per Detect against %v for a real code (%.1f times), %.1f MB allocated", name, el, ref, ratio, float64(alloc)/(1<<20))
 	if alloc > limit {
 		t.Errorf("%s: %.1f MB allocated per Detect, want at most %.0f", name, float64(alloc)/(1<<20), float64(limit)/(1<<20))
 	}

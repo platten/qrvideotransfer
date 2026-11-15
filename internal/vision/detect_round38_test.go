@@ -1,0 +1,80 @@
+package vision
+
+import (
+	"testing"
+
+	"github.com/platten/qrvideotransfer/internal/frame"
+	"github.com/platten/qrvideotransfer/internal/video"
+)
+
+// TestThreeFindersBesideGateFailure: a 2400 x 900 frame holding a real 320 x 180 code (4 pixels
+// per cell) with one finder covered, and beside it a small 212 x 120 code whose header claims
+// 2047 x 1393, which fails the 1.5-pixel gate. A gate failure counts against the quad that met it
+// only, so the real code is still located from three finders, for each covered corner.
+func TestThreeFindersBesideGateFailure(t *testing.T) {
+	real := geomNewCode(t, 320, 180, 4, 2, 1, 42)
+	small := geomNewCode(t, 212, 120, 4, 2, 1, 43)
+	smallY := geomFakeCopies(t, small, 2047, 1393, 0, 1, 2, 3)
+	const w, h = 2400, 900
+	const rx, ry, sx, sy = 0, 90, 1500, 200
+	want := geomPlainQuad(real)
+	for k := range 4 {
+		f := &video.Frame{W: w, H: h, Bits: 8, Y: make([]uint16, w*h)}
+		for i := range f.Y {
+			f.Y[i] = 126
+		}
+		r := geomPlain(real, 0)
+		geomPaintDisc(r, want.Centres[k].X, want.Centres[k].Y, 12*float64(real.pitch), 235)
+		for y := range r.H {
+			copy(f.Y[(ry+y)*w+rx:], r.Y[y*r.W:(y+1)*r.W])
+		}
+		sw := small.input.Frames[0].W
+		for y := range small.input.Frames[0].H {
+			copy(f.Y[(sy+y)*w+sx:], smallY[y*sw:(y+1)*sw])
+		}
+		var d FinderDetector
+		q, ok := d.Detect(f, nil)
+		if !ok {
+			t.Errorf("finder %d covered: not located", k)
+			continue
+		}
+		for j := range 4 {
+			c := Point{want.Centres[j].X + rx, want.Centres[j].Y + ry}
+			if e := geomDist(q.Centres[j], c); e > want.Module {
+				t.Errorf("finder %d covered: centre %d at %v, want %v", k, j, q.Centres[j], c)
+			}
+		}
+	}
+}
+
+// TestThreeFindersBesideDecoy: a 480 x 270 code at 4 pixels per cell whose top-right finder is
+// covered, with a copy of that finder (normal polarity) painted 1, 1.5, 2 and 3 cells to its left:
+// the code is located, every centre within a module of the truth (a decoy within half a module may
+// stand in for the finder).
+func TestThreeFindersBesideDecoy(t *testing.T) {
+	c := geomNewCode(t, 480, 270, 4, 2, 1, 44)
+	want := geomPlainQuad(c)
+	plain := geomPlain(c, 0)
+	sep := c.layout.Separator(frame.TopRight).Pixels(c.pitch)
+	for _, off := range []float64{1, 1.5, 2, 3} {
+		f := geomPlain(c, 0)
+		geomPaintDisc(f, want.Centres[1].X, want.Centres[1].Y, 12*float64(c.pitch), 235)
+		dx := int(off * float64(c.pitch))
+		for y := sep.Min.Y; y < sep.Max.Y; y++ {
+			for x := sep.Min.X; x < sep.Max.X; x++ {
+				f.Y[y*f.W+x-dx] = plain.Y[y*plain.W+x]
+			}
+		}
+		var d FinderDetector
+		q, ok := d.Detect(f, nil)
+		if !ok {
+			t.Errorf("decoy %.1f cells off: not located", off)
+			continue
+		}
+		for j := range 4 {
+			if e := geomDist(q.Centres[j], want.Centres[j]); e > want.Module {
+				t.Errorf("decoy %.1f cells off: centre %d at %v, want %v", off, j, q.Centres[j], want.Centres[j])
+			}
+		}
+	}
+}
