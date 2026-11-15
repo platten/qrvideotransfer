@@ -20,12 +20,6 @@ const (
 	defaultRounds = 3
 	priorCells    = 4 // weight, in cells, of a tile's starting levels in every EM round
 	stripePasses  = 2 // rounds of stripe cancellation and refitting
-	// cleanBias is how far below 1 the phase field puts cells that show one frame only: 0.97 to
-	// 0.99 measured, because noise and blur leave a little light in the dark quadrants. Widening
-	// the variances for it made clean cells underconfident (Gray4 on tripod with gamma error +0.3:
-	// bucket 1 at 0.34 times the stated rate), so it is taken off the share of another frame
-	// before widening.
-	cleanBias = 0.02
 )
 
 // TileEqualiser implements Equaliser: per-tile level statistics started from the palette and the
@@ -82,7 +76,7 @@ func (e *TileEqualiser) Fit(obs []modem.Obs, palette []modem.Obs, l *frame.Layou
 			}
 		}
 	}
-	flagUnknown(obs, l, f, e.Mod)
+	flagUnknown(obs, l, f, e.Mod, skip)
 	return f
 }
 
@@ -301,7 +295,7 @@ func SoftBits(dst []int8, obs []modem.Obs, l *frame.Layout, f *Field, m modem.Mo
 		k, fx, fy := lat.locate(float64(c.X)+0.5-float64(f.TileW)/2, float64(c.Y)+0.5-float64(f.TileH)/2, true)
 		st := f.interpolate(k, fx, fy)
 		if p != nil {
-			blend(&st, 1-float64(p.Weights[i][phase&3])-cleanBias, np)
+			blend(&st, 1-float64(p.Weights[i][phase&3]), np)
 		}
 		m.LLR(d, obs[i], &st, 1)
 		n++

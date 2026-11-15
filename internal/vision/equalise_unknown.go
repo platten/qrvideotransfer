@@ -29,10 +29,14 @@ const (
 	grow = 2
 )
 
-// flagUnknown marks as saturated, so that they give zero soft bits and are left out of the fit,
-// the usable cells that are brighter than white by the margin above or sit in a patch of cells
-// that all read white. It returns how many it marked.
-func flagUnknown(obs []modem.Obs, l *frame.Layout, f *Field, c *modem.Constellation) int {
+// flagUnknown marks as saturated, so that they give zero soft bits, the usable cells that are
+// brighter than white by the margin above or sit in a patch of cells that all read white. Cells
+// that skip marks (those the phase field does not credit) never trip the brightness margin: they had
+// no stripes removed, so a fringe can lift them above white, and a region grown from them would
+// spread into credited cells. They still count among the neighbours that read white, since a glare
+// patch's core spoils the anchors there and is mostly not credited. It returns how many it
+// marked.
+func flagUnknown(obs []modem.Obs, l *frame.Layout, f *Field, c *modem.Constellation, skip []bool) int {
 	cells := l.DataCells()
 	n := min(len(obs), len(cells))
 	gx, gy := l.GridX(), l.GridY()
@@ -56,7 +60,7 @@ func flagUnknown(obs []modem.Obs, l *frame.Layout, f *Field, c *modem.Constellat
 		g := int(cl.Y)*gx + int(cl.X)
 		margin := math.Max(whiteSigmas*math.Sqrt(float64(st.Variance[hi])), whiteFloor)
 		switch {
-		case float64(obs[i].Y) > float64(st.Centre[hi][0])+margin:
+		case !skipped(skip, i) && float64(obs[i].Y) > float64(st.Centre[hi][0])+margin:
 			state[g] = bright
 		case decide(obs[i], &st, np) == hi:
 			state[g] = top
