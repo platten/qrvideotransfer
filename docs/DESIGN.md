@@ -826,8 +826,9 @@ Costs a user should expect:
   `MaxDecodedPixelsPerInputByte` as a bound on its output. Results come back as typed, length-prefixed
   messages (output, log, progress, exit status; the progress message carries the bytes counted as a
   probe's progress, the input's bytes and read calls, and the time from readiness to the first read,
-  for the breakdown a time-bound error carries, SECURITY.md section 5) that the parent bounds before allocating and
-  sanitises before printing; a lying worker can end a job, not make the parent allocate. The worker
+  to the linear memory being reserved and to the input being opened, for the breakdown a time-bound
+  error carries, SECURITY.md section 5) that the parent bounds before allocating and sanitises
+  before printing; a lying worker can end a job, not make the parent allocate. The worker
   gets an empty environment (on Windows only `SYSTEMROOT`, `TEMP`, `TMP`), its working directory in the
   temporary directory, and no descriptors or handles but its three standard ones: on Unix it closes,
   as it starts, every descriptor above 2 without close-on-exec (any one qrvt itself inherited, which
@@ -1468,3 +1469,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 12's worker progress message carries the input's bytes and reads and the time from readiness to the first read, for the breakdown a time-bound error carries (protocol version 2) |
 | 2026-11-14 | M1 stream D, time-bound diagnostics: section 17 says the test, race and coverage tasks run `internal/video` on its own after the other packages, and why (the cap and the watchdog are properties of one process on a machine other test binaries are not oversubscribing), with the cost on macos-26-intel (+5 min 32 s over the coverage and race steps, 6 min 42 s left under the race step's timeout) |
 | 2026-11-15 | M1 stream D, time-bound diagnostics: section 12 says what `TestWatchdogUnderLoad` asserts (each capped instance cancelled on time and stopped) and logs (its return after cancellation) |
+| 2026-11-15 | M2 open risks: section 12's worker progress message also carries the time from readiness to the worker's linear memory being reserved and to its input being opened; commit 0f2f4fc added these two fields in M1 stream D and raised the protocol to version 3, which the code ships (`protocolVersion`), and no row recorded it (review of PR #26, L1; the row above for version 2 is correct for commit cec1dc3) |
