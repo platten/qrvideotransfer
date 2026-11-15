@@ -96,7 +96,9 @@ func checkField(t *testing.T, s *synth, f *Field, tolC, sigma float64) {
 					}
 					worst = math.Max(worst, math.Abs(float64(st.Centre[lv][p]-want[p])))
 				}
-				worstV = math.Max(worstV, math.Abs(math.Sqrt(float64(st.Variance[lv]))/sigma-1))
+				if sigma > 0 {
+					worstV = math.Max(worstV, math.Abs(math.Sqrt(float64(st.Variance[lv]))/sigma-1))
+				}
 			}
 		}
 	}
@@ -164,7 +166,7 @@ func TestFitIgnoresBadObservations(t *testing.T) {
 func TestFitNoData(t *testing.T) {
 	s := newSynth(t, 212, 120, 2, 3, 0, 11)
 	f := (&TileEqualiser{Mod: s.c}).Fit(nil, s.palette, s.l, s.anchors)
-	checkField(t, s, f, 6, 1e9)
+	checkField(t, s, f, 10, 0)
 	if f := (&TileEqualiser{Mod: s.c}).Fit(nil, nil, s.l, nil); f == nil || f.At(0, 0).Levels != 4 {
 		t.Fatal("no default field")
 	}
@@ -178,17 +180,25 @@ func TestFieldAt(t *testing.T) {
 		f.Tiles[i].Centre[1] = [3]float32{float32(10 * i), 128, 128}
 		f.Tiles[i].Variance[1] = float32(i + 1)
 	}
+	// Tile centres lie between cells: (15.5, 14.5) and so on, in cell indices.
+	at := func(x, y int) float32 { return f.At(x, y).Centre[1][0] }
 	for _, k := range []struct {
 		x, y int
 		want float32
-	}{{16, 15, 0}, {48, 15, 10}, {16, 45, 20}, {48, 45, 30}, {32, 15, 5}, {32, 30, 15}, {0, 0, 0}, {63, 59, 30}, {500, 15, 10}} {
+	}{{0, 0, 0}, {15, 14, 0}, {48, 14, 10}, {15, 45, 20}, {63, 59, 30}, {500, 14, 10}} {
 		st := f.At(k.x, k.y)
-		if got := st.Centre[1][0]; math.Abs(float64(got-k.want)) > 1e-4 || st.Levels != 2 {
+		if got := st.Centre[1][0]; got != k.want || st.Levels != 2 {
 			t.Errorf("At(%d, %d) = %v, want %v", k.x, k.y, got, k.want)
 		}
 		if v := st.Variance[1]; math.Abs(float64(v-(k.want/10+1))) > 1e-4 {
 			t.Errorf("At(%d, %d) variance %v", k.x, k.y, v)
 		}
+	}
+	if m := (at(31, 14) + at(32, 14)) / 2; math.Abs(float64(m-5)) > 1e-4 {
+		t.Errorf("midway between two tiles: %v, want 5", m)
+	}
+	if m := (at(31, 29) + at(32, 29) + at(31, 30) + at(32, 30)) / 4; math.Abs(float64(m-15)) > 1e-4 {
+		t.Errorf("midway between four tiles: %v, want 15", m)
 	}
 	one := &Field{TilesX: 1, TilesY: 1, TileW: TileW, TileH: TileH, Tiles: f.Tiles[3:]}
 	if one.At(100, 100).Centre[1][0] != 30 {

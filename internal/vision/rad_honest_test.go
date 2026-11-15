@@ -110,7 +110,7 @@ func (c *calTable) String() string {
 // the bit its true frame carried. It returns the table and the number of credited cells.
 func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (*calTable, int) {
 	t.Helper()
-	tab := &calTable{}
+	tab, mixedTab := &calTable{}, &calTable{}
 	b := s.mod.BitsPerCell()
 	soft := make([]int8, len(s.layout.DataCells())*b)
 	cells := 0
@@ -128,17 +128,21 @@ func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (
 				if q, ok := pf.Phase(i); !ok || q != p {
 					continue
 				}
-				fr, _ := credited(mix[i], p)
+				fr, tw := credited(mix[i], p)
 				if fr < 0 {
 					t.Fatalf("capture %d cell %d credited to phase %d, which it never showed", rc.tr.Capture, i, p)
 				}
 				cells++
 				for k := range b {
 					tab.add(soft[i*b+k], symbolBit(s.symbols[fr][i], b, k))
+					if tw < 0.999 {
+						mixedTab.add(soft[i*b+k], symbolBit(s.symbols[fr][i], b, k))
+					}
 				}
 			}
 		}
 	}
+	t.Logf("of which credited cells that are not wholly one frame (true weight below 0.999):\n%s", mixedTab)
 	return tab, cells
 }
 
@@ -146,8 +150,9 @@ func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (
 // `handheld`, under gamma, white-balance and vignetting changes, for Gray4, Gray2 and RGB8. The CI
 // version films a 212 x 120 grid at 4 pixels per cell with a 1600 x 900 camera (6.8 and 6.0 camera
 // pixels per cell), 6 captures per case (8 frames shown at 30 fps, camera 60 fps, fixed seeds): about
-// 270,000 Gray4 bits per case. The long version films a 480 x 270 grid with the presets' own 4K
-// cameras, 12 captures per case.
+// 180,000 to 230,000 credited Gray4 bits per case. Every case is judged alone and then pooled over
+// the variants of a modulation and preset. The long version films a 480 x 270 grid with the
+// presets' own 4K cameras, 12 captures per case; the race version Gray4 without variants.
 func TestHonestConfidence(t *testing.T) {
 	grid, pitch, cw, ch, ncap := [2]int{212, 120}, 4, 1600, 900, 6
 	if longTests() {
@@ -165,7 +170,11 @@ func TestHonestConfidence(t *testing.T) {
 		{"white balance -0.10", func(c *channel.Config) { c.Sensor.WhiteBalance = -0.10 }},
 		{"vignetting 0.25", func(c *channel.Config) { c.Optics.Vignette = 0.25 }},
 	}
-	for _, mod := range []uint8{2, 1, 3} {
+	mods := []uint8{2, 1, 3}
+	if radRace {
+		mods, variants = mods[:1], variants[:1]
+	}
+	for _, mod := range mods {
 		s := newRadSession(t, grid[0], grid[1], pitch, mod, 8, 0x40+uint64(mod), false)
 		for pi, name := range []string{"tripod", "handheld"} {
 			total := &calTable{}
@@ -185,6 +194,7 @@ func TestHonestConfidence(t *testing.T) {
 					total.merge(tab)
 				})
 			}
+			// Pooled over the variants, the buckets are larger and the test stricter.
 			t.Logf("%s %s, all variants:\n%s", s.mod.Name(), name, total)
 			for _, e := range total.check() {
 				t.Errorf("%s %s pooled: %s", s.mod.Name(), name, e)

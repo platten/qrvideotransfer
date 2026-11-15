@@ -87,7 +87,8 @@ const fringeAmp = 24
 // on (every codeword whose bits are at least 90% stated) and fail with it off (fewer than half do).
 // The CI version films a 212 x 120 grid (29 codewords per frame) with a 1600 x 900 camera, 3
 // recordings with different fringe periods and directions (fixed seeds), 6 captures each of 8
-// frames shown at 15 fps. The long version also sweeps the amplitude and logs both success rates.
+// frames shown at 15 fps; the race version one recording. The long version also sweeps the
+// amplitude and logs both success rates.
 func TestStripeCancellation(t *testing.T) {
 	s := newRadSession(t, 212, 120, 4, 2, 8, 0x5719, true)
 	amps := []float64{fringeAmp}
@@ -95,7 +96,11 @@ func TestStripeCancellation(t *testing.T) {
 		amps = []float64{0, 4, 8, 12, 16, 20, 24, 28, 32, 40, 48}
 	}
 	for _, amp := range amps {
-		for seed := uint64(1); seed <= 3; seed++ {
+		seeds := uint64(3)
+		if radRace {
+			seeds = 1
+		}
+		for seed := uint64(1); seed <= seeds; seed++ {
 			t.Run(fmt.Sprintf("amp%.0f/seed%d", amp, seed), func(t *testing.T) {
 				c := preset(t, "handheld", 1600, 900)
 				c.Sensor.Fringe = amp

@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -95,6 +96,9 @@ func newRadSession(t testing.TB, gridX, gridY, pitch int, mod uint8, n int, seed
 	return s
 }
 
+// nodeStep is the spacing, in cells, of the corner nodes the bench maps exactly.
+const nodeStep = 2
+
 // radCapture is one capture with what the bench sampled from it.
 type radCapture struct {
 	f       *video.Frame
@@ -113,7 +117,7 @@ func (s *radSession) shoot(t testing.TB, c channel.Config, period time.Duration,
 	}
 	in := channel.Input{Frames: s.frames, Period: time.Duration(len(s.frames)) * period, Cell: s.pitch}
 	var out []*radCapture
-	err := channel.Simulate(context.Background(), in, c, channel.Run{Captures: captures, Seed: seed, Workers: 4},
+	err := channel.Simulate(context.Background(), in, c, channel.Run{Captures: captures, Seed: seed, Workers: runtime.NumCPU()},
 		func(f *video.Frame, tr *channel.Truth) error {
 			out = append(out, s.observe(f, tr))
 			return nil
@@ -129,11 +133,28 @@ func (s *radSession) observe(f *video.Frame, tr *channel.Truth) *radCapture {
 	l := s.layout
 	gx, gy := l.GridX(), l.GridY()
 	rc := &radCapture{f: f, tr: tr, nodes: make([]Point, (gx+1)*(gy+1))}
+	// Corner nodes are mapped exactly every nodeStep cells and interpolated between: the mapping
+	// (perspective, lens, rolling shutter, shake) is smooth over that span.
 	p := float64(s.pitch)
-	for y := 0; y <= gy; y++ {
-		for x := 0; x <= gx; x++ {
-			u, v := tr.Point(float64(x)*p, float64(y)*p)
-			rc.nodes[y*(gx+1)+x] = Point{u, v}
+	exact := func(x, y int) Point {
+		u, v := tr.Point(float64(x)*p, float64(y)*p)
+		return Point{u, v}
+	}
+	for y0 := 0; y0 <= gy; y0 += nodeStep {
+		y1 := min(y0+nodeStep, gy)
+		for x0 := 0; x0 <= gx; x0 += nodeStep {
+			x1 := min(x0+nodeStep, gx)
+			a, b, c, d := exact(x0, y0), exact(x1, y0), exact(x0, y1), exact(x1, y1)
+			for y := y0; y <= y1; y++ {
+				fy := float64(y-y0) / float64(max(y1-y0, 1))
+				for x := x0; x <= x1; x++ {
+					fx := float64(x-x0) / float64(max(x1-x0, 1))
+					rc.nodes[y*(gx+1)+x] = Point{
+						(a.X*(1-fx)+b.X*fx)*(1-fy) + (c.X*(1-fx)+d.X*fx)*fy,
+						(a.Y*(1-fx)+b.Y*fx)*(1-fy) + (c.Y*(1-fx)+d.Y*fx)*fy,
+					}
+				}
+			}
 		}
 	}
 	cells := l.DataCells()
