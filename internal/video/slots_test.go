@@ -11,11 +11,14 @@ import (
 
 // TestWatchdogUnderLoad: more spinning instances than Ps are started at once, each with a 2 s
 // watchdog; every one must be stopped by it. With the cap, at most EngineInstances() run at a time,
-// an instance waiting for its turn is not stalled, and every one is stopped promptly: that is
-// asserted. Without the cap (DESIGN.md section 12) every one must still be stopped by the watchdog,
-// but the time is only logged: on a 16-thread development machine they were stopped on time, while
-// on the macos-26-intel CI runner five took 16.8 s against a 2 s limit (up to 8 times late), which is
-// why the cap is a real defence.
+// an instance waiting for its turn is not stalled, and every one is stopped promptly. That is
+// asserted per instance, from its own times, not as one total that also counts the turns: the
+// watchdog must cancel it at most 5 s after the stall limit from when it got its turn (the stall is
+// counted from the last tick at which it was waiting, so up to a tick earlier), and it must return at
+// most 5 s after that cancellation. Without the cap (DESIGN.md section 12) every one must still be
+// stopped by the watchdog, but the times are only logged: on a 16-thread development machine they
+// were stopped on time, while on the macos-26-intel CI runner five took 16.8 s against a 2 s limit
+// (up to 8 times late), which is why the cap is a real defence.
 // Not parallel: it replaces the slots.
 func TestWatchdogUnderLoad(t *testing.T) {
 	e := engineFor(t)
@@ -24,31 +27,41 @@ func TestWatchdogUnderLoad(t *testing.T) {
 	if capped < 1 || capped > max(1, runtime.GOMAXPROCS(0)-1) {
 		t.Fatalf("EngineInstances() = %d with GOMAXPROCS %d", capped, runtime.GOMAXPROCS(0))
 	}
-	const limit = 2 * time.Second
+	const limit, margin = 2 * time.Second, 5 * time.Second
 	for _, k := range []int{capped, n} {
 		old := slots
 		slots = make(chan struct{}, k)
 		start := time.Now()
 		var wg sync.WaitGroup
 		errs := make([]error, n)
-		ms := make([]*meter, n)      // TEMPORARY measurement
-		ends := make([]time.Time, n) // TEMPORARY measurement
+		ms := make([]*meter, n)
+		ends := make([]time.Time, n)
 		for i := range n {
-			ms[i] = &meter{} // TEMPORARY measurement
+			ms[i] = &meter{}
 			wg.Go(func() {
 				errs[i] = run(t.Context(), e, job{prog: "ffmpeg", progress: progOutput, timeout: limit,
 					args: func(string, string) []string { return spin }, meter: ms[i]})
-				ends[i] = time.Now() // TEMPORARY measurement
+				ends[i] = time.Now()
 			})
 		}
 		wg.Wait()
 		slots = old
-		rounds := (n + k - 1) / k
-		el := time.Since(start)
-		measureWatchdog(k == capped, el, time.Duration(rounds)*(limit+2*time.Second)+5*time.Second, limit, ms, ends) // TEMPORARY measurement
-		t.Logf("%d instances in %d slots (GOMAXPROCS %d): %v", n, k, runtime.GOMAXPROCS(0), el)
-		if k == capped && el > time.Duration(rounds)*(limit+2*time.Second)+5*time.Second {
-			t.Errorf("%d instances in %d slots took %v", n, k, el)
+		var lateCancel, lateStop time.Duration
+		for i, m := range ms {
+			ready, cancelled := time.Unix(0, m.readyAt.Load()), time.Unix(0, m.cancelledAt.Load())
+			if m.readyAt.Load() == 0 || m.cancelledAt.Load() == 0 {
+				t.Errorf("%d slots, instance %d: never ready or never cancelled by the watchdog", k, i)
+				continue
+			}
+			lateCancel = max(lateCancel, cancelled.Sub(ready)-limit)
+			lateStop = max(lateStop, ends[i].Sub(cancelled))
+		}
+		measureWatchdog(k == capped, time.Since(start), lateCancel, lateStop) // TEMPORARY measurement
+		t.Logf("%d instances in %d slots (GOMAXPROCS %d): %v; cancelled at most %v after turn + limit, returned at most %v after the cancellation",
+			n, k, runtime.GOMAXPROCS(0), time.Since(start), lateCancel, lateStop)
+		if k == capped && (lateCancel > margin || lateStop > margin) {
+			t.Errorf("%d instances in %d slots: a cancellation came %v after turn + limit, a return %v after its cancellation (each at most %v)",
+				n, k, lateCancel, lateStop, margin)
 		}
 		for i, err := range errs {
 			var le *LimitError

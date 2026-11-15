@@ -25,7 +25,11 @@ func TestBreakdown(t *testing.T) {
 	m.inCalls.Store(12)
 	m.inBytes.Store(1234567)
 	m.progressAt.Store(now.Add(-30 * time.Second).UnixNano())
+	m.cancelledAt.Store(now.Add(-200 * time.Millisecond).UnixNano())
 	b := m.breakdown(now)
+	if !strings.Contains(b, "stopped 0.2 s after its cancellation") {
+		t.Errorf("breakdown %q lacks the stop latency", b)
+	}
 	for _, want := range []string{"wall 63.0 s", "start to ready 1.0 s", "ready to first read 0.1 s",
 		"ready to memory reserved 0.3 s", "ready to input opened 0.1 s",
 		"12 reads, 1234567 bytes", "30.0 s since last progress", "worker processes running", "in-process instances running"} {

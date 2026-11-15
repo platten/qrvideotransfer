@@ -30,6 +30,7 @@ type meter struct {
 	// In a worker, the phases between readiness and the first read: when the instance's linear
 	// memory was reserved and when it opened its input.
 	memAt, openAt atomic.Int64
+	cancelledAt   atomic.Int64 // stub for the test commit
 }
 
 // ready records that the instance is ready to run.

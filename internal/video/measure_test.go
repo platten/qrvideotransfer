@@ -68,19 +68,13 @@ func measuring() bool {
 
 var watchdogLines []string // TestWatchdogUnderLoad's figures, in order
 
-// measureWatchdog records one TestWatchdogUnderLoad round: its total time against its bound, and each
-// instance's stop latency, from the time it was ready (its turn) plus the stall limit to its return.
-func measureWatchdog(capped bool, el, bound, limit time.Duration, ms []*meter, ends []time.Time) {
-	worst := time.Duration(0)
-	for i, m := range ms {
-		if r := m.readyAt.Load(); r != 0 {
-			worst = max(worst, ends[i].Sub(time.Unix(0, r))-limit)
-		}
-	}
+// measureWatchdog records one TestWatchdogUnderLoad round: its total time, and the worst lateness of
+// an instance's cancellation and of its return after that cancellation.
+func measureWatchdog(capped bool, el, lateCancel, lateStop time.Duration) {
 	measured.Lock()
 	defer measured.Unlock()
-	watchdogLines = append(watchdogLines, fmt.Sprintf("capped %v: total %v against %v; worst instance stop latency %v (ready + %v to return; the watchdog ticks once a second)",
-		capped, el, bound, worst, limit))
+	watchdogLines = append(watchdogLines, fmt.Sprintf("capped %v: total %v; worst cancellation %v after turn + limit; worst return %v after its own cancellation (bounds 5 s each)",
+		capped, el, lateCancel, lateStop))
 }
 
 // measureReport prints the report when measuring; the package run's result is unchanged (the
