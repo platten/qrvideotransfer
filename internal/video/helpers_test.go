@@ -1,17 +1,13 @@
 package video
 
 import (
-	"context"
 	"errors"
 	"io"
 	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
-
-	"github.com/tetratelabs/wazero/experimental"
 )
 
 // gray4 are the default Gray4 luma levels of FORMAT.md section 7.
@@ -147,44 +143,4 @@ func copyFile(t *testing.T, src, dir string) string {
 		t.Fatal(err)
 	}
 	return dst
-}
-
-// peakAlloc is a wazero memory allocator with the engine's ceiling that records the largest linear
-// memory an instance reached. Unlike the engine's, it grows on demand instead of reserving the
-// ceiling, so that the Go heap shows the memory an instance uses rather than its reservation.
-type peakAlloc struct{ peak atomic.Uint64 }
-
-func (p *peakAlloc) Allocate(c, maxSize uint64) experimental.LinearMemory {
-	return &peakMem{max: maxSize, p: p} // c is the whole ceiling when the runtime reserves it
-}
-
-type peakMem struct {
-	buf []byte
-	max uint64
-	p   *peakAlloc
-}
-
-func (m *peakMem) Reallocate(size uint64) []byte {
-	if size > m.max {
-		return nil
-	}
-	if size > uint64(cap(m.buf)) {
-		nb := make([]byte, size, min(m.max, size+size/4))
-		copy(nb, m.buf)
-		m.buf = nb
-	}
-	m.buf = m.buf[:size]
-	for {
-		old := m.p.peak.Load()
-		if size <= old || m.p.peak.CompareAndSwap(old, size) {
-			return m.buf
-		}
-	}
-}
-
-func (m *peakMem) Free() { m.buf = nil }
-
-// withPeak returns a context that makes instances started with it record their peak memory in p.
-func withPeak(ctx context.Context, p *peakAlloc) context.Context {
-	return context.WithValue(experimental.WithMemoryAllocator(ctx, p), ownAllocator{}, true)
 }

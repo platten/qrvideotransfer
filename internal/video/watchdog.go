@@ -30,7 +30,9 @@ type meter struct {
 	// In a worker, the phases between readiness and the first read: when the instance's linear
 	// memory was reserved and when it opened its input.
 	memAt, openAt atomic.Int64
-	cancelledAt   atomic.Int64 // when the watchdog cancelled the instance
+	// memPeak is the largest linear memory the instance reached, in bytes (timedAlloc).
+	memPeak     atomic.Int64
+	cancelledAt atomic.Int64 // when the watchdog cancelled the instance
 	// For an in-process stop: when the guest reached a check and its module began to close, when its
 	// memory was freed, and when the run call returned.
 	checkAt, freedAt, runAt atomic.Int64
