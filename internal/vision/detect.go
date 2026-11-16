@@ -371,8 +371,9 @@ func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int, three bool) 
 	// quad whose header does not decode is not reported: a wrong quad would feed wrong cells on.
 	// A rejected quad whose header decoded a grid failing the 1.5-pixel gate has its four finders left
 	// out of the three-finder path: they are a hostile or foreign code's. A finder that disagreed
-	// with the anchors is not left out: it may be a real finder damaged by an overlapping decoy, and
-	// the three-finder path checks every finder against the anchors again.
+	// with the anchors here is not left out: it may be a real finder damaged by an overlapping decoy.
+	// The three-finder path leaves a finder out only after one of its own candidates built on it was
+	// rejected (three).
 	excluded := map[*detectCluster]bool{}
 	for _, t := range top {
 		if q := quad(t.q); d.confirms(f, v, q) {

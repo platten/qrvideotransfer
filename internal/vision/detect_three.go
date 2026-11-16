@@ -19,8 +19,8 @@ const (
 	// degrees.
 	threeSearchRadius = 0.025
 	threeSearchSteps  = 5
-	// threeCandidates is how many three-finder quads are tried: each costs a search of up to 121
-	// header decodes, and a hostile frame can offer many.
+	// threeCandidates is how many three-finder quads are tried per Detect: each costs a search of up
+	// to 121 header decodes, and a hostile frame can offer many.
 	threeCandidates = 3
 )
 
@@ -34,9 +34,42 @@ type threeCandidate struct {
 // three tries to locate the code from three finders when no four confirm (a finder under glare or
 // an overlay). For each choice of the hidden corner, any of the four, the fourth centre is
 // predicted (threePredict); candidates are scored and checked as four-finder quads are
-// (detectScore), the best threeCandidates first. A candidate is located only if confirmThree confirms
-// it; a quad is never accepted on three finders alone.
+// (detectScore), and up to threeCandidates are tried, best first. A candidate is located only if
+// confirmThree confirms it; a quad is never accepted on three finders alone. When confirmThree
+// rejects a candidate because visible finders disagree with the anchors, those finders are left out
+// of the candidates that follow, so that quads built on a decoy beside a real finder do not take
+// every try. The finders of a quad that failed the 1.5-pixel gate arrive in excluded.
 func (d *FinderDetector) three(f *video.Frame, v *geomLuma, normal, inverted []*detectCluster, excluded map[*detectCluster]bool) (Quad, bool) {
+	tried := map[[4]*detectCluster]bool{}
+	for range threeCandidates {
+		t, ok := threeBest(normal, inverted, excluded, tried)
+		if !ok {
+			return Quad{}, false
+		}
+		key := t.q
+		key[t.missing] = nil
+		tried[key] = true
+		var q Quad
+		for j, c := range t.q {
+			q.Centres[j] = Point(c.at)
+		}
+		q.Module = t.q[t.missing].chord
+		q, ok, bad := d.confirmThree(f, v, q, t.missing)
+		if ok {
+			d.hidden = t.missing
+			return q, true
+		}
+		for _, j := range bad {
+			excluded[t.q[j]] = true
+		}
+	}
+	return Quad{}, false
+}
+
+// threeBest returns the best-scoring three-finder candidate whose finders are not excluded and that
+// was not tried (tried holds the three finders with the missing corner nil), or false when none is
+// left.
+func threeBest(normal, inverted []*detectCluster, excluded map[*detectCluster]bool, tried map[[4]*detectCluster]bool) (threeCandidate, bool) {
 	var top []threeCandidate
 	consider := func(c [4]*detectCluster, k int) {
 		var at [4]gpt
@@ -48,9 +81,12 @@ func (d *FinderDetector) three(f *video.Frame, v *geomLuma, normal, inverted []*
 				fm, chord = fm+cl.fm/3, chord+cl.chord/3
 			}
 		}
+		if tried[c] {
+			return
+		}
 		c[k] = &detectCluster{at: threePredict(at, mod, k), fm: fm, chord: chord, inv: k == 3}
 		sc, ok := detectScore(c)
-		if !ok || (len(top) == threeCandidates && sc <= top[len(top)-1].score) {
+		if !ok || (len(top) == 1 && sc <= top[0].score) {
 			return
 		}
 		i, _ := slices.BinarySearchFunc(top, sc, func(a threeCandidate, t float64) int {
@@ -60,7 +96,7 @@ func (d *FinderDetector) three(f *video.Frame, v *geomLuma, normal, inverted []*
 			return 1
 		})
 		top = slices.Insert(top, i, threeCandidate{c, k, sc})
-		top = top[:min(len(top), threeCandidates)]
+		top = top[:1]
 	}
 	sized := func(cs ...*detectCluster) bool {
 		for i, a := range cs {
@@ -92,18 +128,10 @@ func (d *FinderDetector) three(f *video.Frame, v *geomLuma, normal, inverted []*
 			}
 		}
 	}
-	for _, t := range top {
-		var q Quad
-		for j, c := range t.q {
-			q.Centres[j] = Point(c.at)
-		}
-		q.Module = t.q[t.missing].chord
-		if q, ok := d.confirmThree(f, v, q, t.missing); ok {
-			d.hidden = t.missing
-			return q, true
-		}
+	if len(top) == 0 {
+		return threeCandidate{}, false
 	}
-	return Quad{}, false
+	return top[0], true
 }
 
 // threePredict predicts the centre of hidden corner k from the other three centres and their
@@ -169,11 +197,12 @@ func threeSearch(v *geomLuma, q Quad, k int) (Quad, bool) {
 // anchors and the three finders puts it, twice. Finally the header must decode with the moved
 // quad, enough anchors must be located (confirmation.enough), at least threeMinQuadrant of them in
 // the quarter of the grid nearest the hidden finder, and each visible finder must agree with the
-// anchors and the other two (confirmation.agrees).
-func (d *FinderDetector) confirmThree(f *video.Frame, v *geomLuma, q Quad, k int) (Quad, bool) {
+// anchors and the other two (confirmation.disagree). When that last check fails it also returns the
+// corners of the visible finders that disagree.
+func (d *FinderDetector) confirmThree(f *video.Frame, v *geomLuma, q Quad, k int) (Quad, bool, []int) {
 	q, ok := threeSearch(v, q, k)
 	if !ok {
-		return Quad{}, false
+		return Quad{}, false, nil
 	}
 	var found []int
 	for j := range 4 {
@@ -184,17 +213,20 @@ func (d *FinderDetector) confirmThree(f *video.Frame, v *geomLuma, q Quad, k int
 	for range 2 {
 		st, ok := firstEnough(d.locate(f, v, q, found))
 		if !ok {
-			return Quad{}, false
+			return Quad{}, false, nil
 		}
 		p, _, ok := st.predict(k, found, v.w, v.h)
 		if !ok {
-			return Quad{}, false
+			return Quad{}, false, nil
 		}
 		q.Centres[k] = Point(p)
 	}
 	st, ok := firstEnough(d.locate(f, v, q, found))
-	if !ok || !st.agrees(found, v.w, v.h) {
-		return Quad{}, false
+	if !ok {
+		return Quad{}, false, nil
+	}
+	if bad := st.disagree(found, v.w, v.h); len(bad) > 0 {
+		return Quad{}, false, bad
 	}
 	mid := st.src[0].add(st.src[3]).mul(0.5)
 	near := 0
@@ -204,7 +236,7 @@ func (d *FinderDetector) confirmThree(f *video.Frame, v *geomLuma, q Quad, k int
 		}
 	}
 	if near < threeMinQuadrant {
-		return Quad{}, false
+		return Quad{}, false, nil
 	}
-	return q, true
+	return q, true, nil
 }

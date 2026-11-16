@@ -161,14 +161,9 @@ func (st *confirmation) predict(k int, with []int, w, h int) (gpt, float64, bool
 	return p, math.Sqrt(math.Abs(ex.cross(ey))), geomFinite(p)
 }
 
-// agrees reports whether each finder listed in check lies within the smaller of confirmFinderTol
-// cells and confirmFinderTolModule modules of where the located anchors and the other finders
-// listed in check put it.
-func (st *confirmation) agrees(check []int, w, h int) bool {
-	return len(st.disagree(check, w, h)) == 0
-}
-
-// disagree returns the finders listed in check that do not agree (see agrees).
+// disagree returns the finders listed in check that do not agree: a finder agrees when it lies
+// within the smaller of confirmFinderTol cells and confirmFinderTolModule modules of where the
+// located anchors and the other finders listed in check put it.
 func (st *confirmation) disagree(check []int, w, h int) []int {
 	var out []int
 	for _, k := range check {

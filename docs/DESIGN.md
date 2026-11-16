@@ -560,15 +560,23 @@ For each capture:
    path runs on the last scan only and tries three candidate quads, built without the four finders of
    a rejected four-finder quad whose header decoded a grid failing the 1.5-pixel gate; a gate
    failure thus counts against its own quad, not against another code in the same capture. A
-   finder that disagreed with the anchors is not left out: it may be a real finder damaged by an
-   overlapping decoy, and the three-finder quad checks each visible finder against the anchors
-   again. Measured on 816 decoy cases (`TestDecoyMatrix`, a long test: a 480 x 270 code with every
-   finder visible and a copy of one finder, with or without its separator, of either polarity,
-   0 to 16 cells inward from it horizontally, vertically or diagonally), 20 are not located and
-   none gives a wrong quad, against 30 not located when such finders were left out. A known
-   limit, accepted by the designer as a net improvement: 18 of the 20 were located before, all
-   by a decoy moved horizontally inward from a top finder: of normal polarity 1 to 6 cells from
-   the top-left finder, inverted 7 cells from the top-left and 7 or 8 cells from the top-right.
+   finder that disagreed with the anchors in the four-finder check stays available: it may be a
+   real finder damaged by an overlapping decoy. A finder is left out only within the three-finder
+   path, after a candidate built on it was rejected because it disagreed with the anchors, so that
+   quads built on a decoy beside a real finder do not take all three tries. Measured on two decoy
+   studies, long tests on a 480 x 270 code that never give a wrong quad (designer's rule,
+   2026-11-15: keep this only if neither study gets worse than before):
+
+   | Study | Cases | Not located: finders excluded after the four-finder check (round 2) | none excluded (round 3) | this rule |
+   | --- | --- | --- | --- | --- |
+   | `TestDecoyMatrix`: every finder visible, a copy of one finder (with or without its separator, either polarity) 0 to 16 cells inward horizontally, vertically or diagonally | 816 | 30 | 20 | 18 |
+   | `TestDecoyMatrixReview`: a copy with its separator (either polarity) 1 to 8 cells left, right, up or down, the real finder covered or visible | 512 | 24 | 30 | 10 |
+
+   A known limit, left to M5: the cases still not located are decoys of normal polarity 4 to 6
+   cells diagonally or vertically inward at the bottom-left and top-right, 7 or 8 cells right of a
+   covered top-left finder or below a covered top-right one, and 10 cells right of the top-left
+   finder or diagonally in from the top-right; and inverted decoys 7 or 8 cells beside a top
+   finder. All fail safe, not located.
    The measured limit below (the table of codes located, at commit 2ec594f) predates this change.
    The hidden centre is an estimate. The tests judge
    quads by the designer's line: a visible finder more than half a module from the truth makes the
@@ -1689,3 +1697,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 Geometry, review of PR #38: section 10 step 1 says layouts are cached by grid with at most two distinct grids per capture on the three-finder path too, and gives that path's cost limits (last scan only, two candidates, skipped after a gate failure) and their effect below the reliable sizes; the table of codes located is re-measured at 12933bb with its cell-centre errors. Step 3: a finder stays in the global fit while within a quarter cell of the anchors' model, instead of leaving it once eight anchors are found. Step 4: the glare decision is local (area, or two area neighbours for a rim), with the measured rates, and the perfect-frame cost is about 1.75% of black-and-white cells, also in section 18's M3 row. The fewer codes located below the reliable sizes (harsh at 1080p: 184 to 169 and 181 to 158 of 200) is recorded as an accepted limit |
 | 2026-11-15 | M2 Geometry, review round 2 of PR #38, designer ruling (2026-11-15): section 10 step 4 and section 18's M3 row state the glare rule's cost on perfect black-and-white frames as measured over 30 codes (seeds 30 to 39 on three grids), 1.46-2.80% with a mean of about 2.1%, and the tests' ceiling as 3.5%; the earlier 2% came from one seed. Section 10 step 1: a rejected quad excludes only its own finders from the three-finder path (all four after a gate failure, the disagreeing ones otherwise), three candidates are tried, the gate-edge header cost is updated, and the table of codes located is re-measured at 2ec594f; the accepted limit below the reliable sizes comes from running the three-finder path on the last scan only |
 | 2026-11-15 | M2 Geometry, review round 3 of PR #38: section 10 step 1 no longer leaves out of the three-finder path the finders that disagreed with the anchors (a real finder damaged by an overlapping decoy was excluded, and the code not located); only the four finders of a quad whose header failed the 1.5-pixel gate are. Designer ruling (2026-11-15), a net improvement recorded as a known limit: over 816 decoy cases (`TestDecoyMatrix`) not located fell from 30 to 20 with no wrong quad, and the 18 newly not located (decoys moved horizontally inward from a top finder) are named; the table of codes located predates the change. Section 17 gives the race step's figures after PR #39's review round 2 on macos-26-intel (vision 187 s under race, race step 15 min 53 s, 4 min 07 s under its timeout) |
+| 2026-11-15 | M2 Geometry, review round 4 of PR #38, designer's rule (2026-11-15): section 10 step 1 leaves a finder that disagreed with the anchors out only within the three-finder path, after a candidate built on it was rejected, instead of after the four-finder check (round 2) or never (round 3), and gives both decoy studies' figures (`TestDecoyMatrix`, 816 cases: 30, 20 and 18 not located; `TestDecoyMatrixReview`, 512 cases: 24, 30 and 10; never a wrong quad) with the remaining cases as a known limit for M5. This replaces the round-3 row's "net improvement" and its list of 18 cases |
