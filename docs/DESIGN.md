@@ -708,11 +708,12 @@ For each capture:
    are lost; fringes of amplitude 24 without a patch lose 0.02% of credited cells. Glare and fringes of
    amplitude 24 together remain a residual: stripe cancellation answers the patch's broad bump with
    waves across the capture, 6% (`tripod`) to 26% (`handheld`) of the lifted cells keep soft bits, and
-   0.1% to 0.5% of the distant cells are lost. Through the geometry pipeline the miss rate was 0.073 to
-   0.076 on `tripod` (0.036 to 0.037 on `handheld`), against 0.05 at true positions, bounded at 0.10
-   and revisited with S2. Since the sampler marks clipped cells unknown (PR #38) and the rule counts
-   them among the neighbours that read white, it is 0.037 to 0.038 on `tripod` and 0.012 to 0.013 on
-   `handheld`; the bound stays 0.10 until the next review decides whether to tighten it. A missed glare cell is wrong data stated with confidence. The share of a
+   0.1% to 0.5% of the distant cells are lost. Through the geometry pipeline the sampler and the equaliser together
+   miss 0.037 to 0.038 of the cells under the patch on `tripod` and 0.012 to 0.013 on `handheld`,
+   bounded at 0.06 on both (designer's decision of 2026-11-16). That needs the rule to count the cells
+   the sampler marks unknown because they clipped (PR #38) among the neighbours that read white: the
+   sampler's flag had hidden the patch's core from the rule, and the `tripod` miss rate rose to 0.138
+   until it did. Before PR #38 the pipeline missed 0.073 to 0.076 on `tripod`. A missed glare cell is wrong data stated with confidence. The share of a
    cell's footprint near the top of the code range belongs to the sampler.
 6. **Cancel stripes.** Subtract each cell's decided level, take a 2-D Fourier transform of what remains,
    remove peaks standing above the noise, and re-estimate. Moire and backlight flicker are a few plane
@@ -1493,7 +1494,7 @@ How the parameters are read, and the values every preset shares:
 | Camera at twice the display rate, any phase offset | One pass succeeds for every offset |
 | Camera equal to the display rate | At 30 fps both, 4 ms exposure and 8 ms readout: succeeds within 4 loop passes |
 | Dropped frames, bursts, mid-loop start | With parity 20, whose budget is 16.7% of frames: succeeds at 14.7% random loss; at 18.7% reports which blocks are short and writes nothing |
-| Glare patches, overlays | `normal` succeeds with a patch over 5% of the code; `robust` with 20% |
+| Glare patches, overlays | `normal` succeeds with a patch over 5% of the code; `robust` with 20%. M2 measured the cells under a patch over 5% of the code that keep soft bits (section 10, step 5): at true positions 0% to 4.6%, bounded at 0.05; through the geometry pipeline, where the sampler's clipping flag and the equaliser's rule act together, 0.037 to 0.038 on `tripod` and 0.012 to 0.013 on `handheld`, bounded at 0.06 |
 | Two partial recordings | Each alone fails; together they succeed |
 | Whole system | SHA-256 round trip for every row of the matrix below; identical raw frame hashes on every platform |
 
