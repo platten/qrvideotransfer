@@ -1629,15 +1629,15 @@ by GoReleaser).
   package unchanged since the cache was saved, and a cached race pass reuses one old run's luck for
   the nondeterministic tests (`internal/fec/conv`'s parallel test, `internal/fec/rs`'s subprocess
   test). That costs 0-3 minutes per run on macos-26-intel, nothing when nothing would have been
-  cached. The `check` job's limit is 60 minutes, two race steps at 20 each plus 20 for every other
+  cached. The `check` job's limit is 70 minutes, two race steps at 20 each plus 30 for every other
   step (`tools/dev` `fixedStepsBudget`, checked by a test against all four race steps): the split's
-  own arithmetic, not an allowance for slow hosts. The 20 comes from macos-26-intel, the slowest
-  runner: in run 43797784643, which retested every package with no cache restored, its non-race steps
-  took 16 min 54 s, which leaves about 3 minutes of margin (run 43788575833 showed about 12 minutes,
-  but its coverage step restored cached results for four quick packages). On the
-  slow host of run 43774194055 the non-race steps took 23 min 09 s, so there the two race steps would
-  share about 37 minutes instead of 40; a host that slow is a runner fault (spike S1, section 14),
-  and the limits are not sized for it. The `internal/video` race step does not run alone after an
+  own arithmetic, not an allowance for slow hosts. The 30 comes from macos-26-intel, the slowest
+  runner: its non-race steps took 21 min 55 s in run 43811766030 and 20 min 13 s in run 43958754789
+  (three packages restored from the cache). The earlier budget of 20 was exceeded in both runs, and
+  trimming vision's always-on statistics alone did not bring the steps back under it; 30 leaves
+  roughly 8 to 10 minutes of margin. Earlier, run 43797784643, with no cache restored, took 16 min
+  54 s; the slow host of run 43774194055 took 23 min 09 s, and a host that slow is a runner fault
+  (spike S1, section 14), for which the limits are not sized. The `internal/video` race step does not run alone after an
   earlier failure skipped the other packages' step.
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.

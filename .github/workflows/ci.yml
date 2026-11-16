@@ -66,8 +66,8 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-2025, windows-11-arm]
     runs-on: ${{ matrix.os }}
-    # 2 race steps x 20 minutes + 20 for the rest (tools/dev fixedStepsBudget, DESIGN.md section 17).
-    timeout-minutes: 60
+    # 2 race steps x 20 minutes + 30 for the rest (tools/dev fixedStepsBudget, DESIGN.md section 17).
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -448,15 +448,15 @@ func selectRuns(runs [][]string, part string) ([][]string, error) {
 }
 
 // fixedStepsBudget is the time, in minutes, that the check job's limit allows for every step but
-// the two race steps a runner runs. With those at their limits (2 x 20) it gives the job's 60
+// the two race steps a runner runs. With those at their limits (2 x 20) it gives the job's 70
 // minutes: the split's own arithmetic, not an allowance for slow hosts (DESIGN.md section 17).
-// Source: on macos-26-intel, the slowest runner, the non-race steps took 16 min 54 s in run
-// 43797784643, which retested every package with no cache restored; 20 leaves about 3 minutes of
-// margin (run 43788575833 showed about 12 minutes, but its coverage step restored cached results
-// for four quick packages). On the slow host of run 43774194055 they took 23 min 09 s, so
-// there the two race steps would share about 37 minutes; such a host is a runner fault, and the
-// limits are not sized for it.
-const fixedStepsBudget = 20
+// Source: on macos-26-intel, the slowest runner, the non-race steps took 21 min 55 s in run
+// 43811766030 and 20 min 13 s in run 43958754789 (three packages restored from the cache). The
+// earlier budget of 20 was exceeded in both runs, and trimming vision's always-on statistics did
+// not bring the steps back under it, so the budget is 30, which leaves roughly 8 to 10 minutes of
+// margin. (Earlier, run 43797784643 took 16 min 54 s with no cache restored, and the slow host of
+// run 43774194055 23 min 09 s; such a host is a runner fault, and the limits are not sized for it.)
+const fixedStepsBudget = 30
 
 // checkJobLimits returns, from ci.yml, the check job's timeout-minutes and the timeout-minutes of
 // each of its race steps, in order.
