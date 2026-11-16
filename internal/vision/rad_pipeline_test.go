@@ -163,9 +163,9 @@ func TestPipelinePhase(t *testing.T) {
 // TestPipelineHonesty measures honest confidence (DESIGN.md section 15) through the geometry
 // pipeline, judged as TestHonestConfidence judges it: each case alone, and pooled over the variants
 // as a whole and split into clean and partly mixed cells. Gray4 on `tripod` and `handheld` with a
-// 480 x 270 grid and the 4K cameras, the preset and gamma error +0.3, 3 captures each (fixed seeds);
-// the long version adds white balance -0.10 and +0.10, gamma error -0.3 and vignetting 0.25 with 6
-// captures each. Statistical: skipped under the race detector.
+// 480 x 270 grid and the 4K cameras, the preset, gamma error +0.3 and (tripod only) white balance
+// -0.10, 3 captures each (fixed seeds); the long version runs both presets under those and white
+// balance +0.10, gamma error -0.3 and vignetting 0.25 with 6 captures each. Statistical: skipped under the race detector.
 func TestPipelineHonesty(t *testing.T) {
 	raceSkipStatistics(t)
 	t.Parallel()
@@ -177,11 +177,15 @@ func TestPipelineHonesty(t *testing.T) {
 	variants := []variant{
 		{"preset", func(*channel.Config) {}},
 		{"gamma +0.3", func(c *channel.Config) { c.Display.GammaError += 0.3 }},
+		{"white balance -0.10", func(c *channel.Config) { c.Sensor.WhiteBalance = -0.10 }},
 	}
+	// In CI handheld runs the first two; tripod all three, so that its pooled bucket 1, where the
+	// partly mixed cells' residual is tightest (8.7 times against 12), holds the 10,000 bits judged.
+	ciVariants := map[string]int{"tripod": 3, "handheld": 2}
 	if longTests() {
 		ncap = 6
+		ciVariants = map[string]int{"tripod": 6, "handheld": 6}
 		variants = append(variants,
-			variant{"white balance -0.10", func(c *channel.Config) { c.Sensor.WhiteBalance = -0.10 }},
 			variant{"gamma -0.3", func(c *channel.Config) { c.Display.GammaError -= 0.3 }},
 			variant{"white balance +0.10", func(c *channel.Config) { c.Sensor.WhiteBalance = 0.10 }},
 			variant{"vignetting 0.25", func(c *channel.Config) { c.Optics.Vignette = 0.25 }})
@@ -189,7 +193,7 @@ func TestPipelineHonesty(t *testing.T) {
 	s := newRadSession(t, 480, 270, 4, 2, 8, 0x42, false)
 	for pi, name := range []string{"tripod", "handheld"} {
 		total, totalClean, totalMixed := &calTable{}, &calTable{}, &calTable{}
-		for vi, v := range variants {
+		for vi, v := range variants[:ciVariants[name]] {
 			t.Run(fmt.Sprintf("%s/%s", name, v.name), func(t *testing.T) {
 				c := preset(t, name, 3840, 2160)
 				v.edit(&c)
