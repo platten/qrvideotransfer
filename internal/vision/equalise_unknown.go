@@ -34,8 +34,9 @@ const (
 // that skip marks (those the phase field does not credit) never trip the brightness margin: they had
 // no stripes removed, so a fringe can lift them above white, and a region grown from them would
 // spread into credited cells. They still count among the neighbours that read white, since a glare
-// patch's core spoils the anchors there and is mostly not credited. It returns how many it
-// marked.
+// patch's core spoils the anchors there and is mostly not credited. Cells the sampler marked
+// saturated (clipped) are already unknown but count as neighbours too, by the level they read. It
+// returns how many it marked.
 func flagUnknown(obs []modem.Obs, l *frame.Layout, f *Field, c *modem.Constellation, skip []bool) int {
 	cells := l.DataCells()
 	n := min(len(obs), len(cells))
@@ -51,7 +52,9 @@ func flagUnknown(obs []modem.Obs, l *frame.Layout, f *Field, c *modem.Constellat
 	state := make([]uint8, gx*gy)
 	lat := f.lattice()
 	for i := range n {
-		if !usable(obs[i]) {
+		o := obs[i]
+		clipped := o.Saturated && !math.IsNaN(float64(o.Y)) && !math.IsInf(float64(o.Y), 0)
+		if !usable(o) && !clipped {
 			continue
 		}
 		cl := cells[i]
@@ -60,6 +63,14 @@ func flagUnknown(obs []modem.Obs, l *frame.Layout, f *Field, c *modem.Constellat
 		g := int(cl.Y)*gx + int(cl.X)
 		margin := math.Max(whiteSigmas*math.Sqrt(float64(st.Variance[hi])), whiteFloor)
 		switch {
+		case clipped:
+			// The sampler already made it unknown; a clipped light cell still counts among the
+			// neighbours that read white (a glare patch's core), a clipped dark one counts as seen.
+			if decide(o, &st, np) == hi {
+				state[g] = top
+			} else {
+				state[g] = other
+			}
 		case !skipped(skip, i) && float64(obs[i].Y) > float64(st.Centre[hi][0])+margin:
 			state[g] = bright
 		case decide(obs[i], &st, np) == hi:

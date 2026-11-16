@@ -708,9 +708,11 @@ For each capture:
    are lost; fringes of amplitude 24 without a patch lose 0.02% of credited cells. Glare and fringes of
    amplitude 24 together remain a residual: stripe cancellation answers the patch's broad bump with
    waves across the capture, 6% (`tripod`) to 26% (`handheld`) of the lifted cells keep soft bits, and
-   0.1% to 0.5% of the distant cells are lost. Through the geometry pipeline the miss rate is 0.073 to
-   0.076 on `tripod` (0.036 to 0.037 on `handheld`), against 0.05 at true positions; it is bounded at
-   0.10 and revisited with S2. A missed glare cell is wrong data stated with confidence. The share of a
+   0.1% to 0.5% of the distant cells are lost. Through the geometry pipeline the miss rate was 0.073 to
+   0.076 on `tripod` (0.036 to 0.037 on `handheld`), against 0.05 at true positions, bounded at 0.10
+   and revisited with S2. Since the sampler marks clipped cells unknown (PR #38) and the rule counts
+   them among the neighbours that read white, it is 0.037 to 0.038 on `tripod` and 0.012 to 0.013 on
+   `handheld`; the bound stays 0.10 until the next review decides whether to tighten it. A missed glare cell is wrong data stated with confidence. The share of a
    cell's footprint near the top of the code range belongs to the sampler.
 6. **Cancel stripes.** Subtract each cell's decided level, take a 2-D Fourier transform of what remains,
    remove peaks standing above the noise, and re-estimate. Moire and backlight flicker are a few plane
@@ -1791,3 +1793,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Designer's standing ruling of 2026-11-15: section 15 asserts no lower edge on underconfidence anywhere (bench and pipeline, every preset and modulation), only the upper bound against overconfidence, and records the long versions' underconfidence (`handheld` down to 0.13 times, `tripod` clean cells down to 0.035 times, through the pipeline 0.02 times) as lost capacity whose calibration is a likely gain for the S2 analysis; section 10 step 7 likewise |
 | 2026-11-15 | Round 3 of the review of PR #31: section 15 states that the pipeline honesty test runs the preset and two variants in CI and the preset and five in the long version |
 | 2026-11-16 | Round 5 of the review of PR #38, made in PR #31 by the orchestrator's leave: section 10 step 1's known limit names normal decoys 6 to 8 cells below the top-right finder, covered or visible (it said 7 or 8 below a covered one) |
+| 2026-11-16 | Merge of main (PR #38) into PR #31: section 10 step 5 gives the glare miss rate through the pipeline now that the sampler marks clipped cells unknown and the glare rule counts them as neighbours (`tripod` 0.037 to 0.038, `handheld` 0.012 to 0.013; bound unchanged at 0.10) |
