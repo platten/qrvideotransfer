@@ -13,8 +13,8 @@ import (
 
 func TestCompileJobs(t *testing.T) {
 	jobs := compileJobs("noasm,nounsafe")
-	if len(jobs) != 12 {
-		t.Fatalf("got %d compile jobs, want 6 targets x 2 tag sets", len(jobs))
+	if len(jobs) != 18 {
+		t.Fatalf("got %d compile jobs, want 6 targets x 3 tag sets (none, release, release + HEVC fast path)", len(jobs))
 	}
 	seen := map[string]bool{}
 	for _, j := range jobs {
@@ -23,12 +23,13 @@ func TestCompileJobs(t *testing.T) {
 		}
 		seen[j.name] = true
 	}
-	for _, want := range []string{"linux/amd64", "windows/arm64 noasm,nounsafe", "darwin/arm64", "darwin/amd64 noasm,nounsafe"} {
+	for _, want := range []string{"linux/amd64", "windows/arm64 noasm,nounsafe", "darwin/arm64", "darwin/amd64 noasm,nounsafe",
+		"windows/amd64 noasm,nounsafe,unsandboxedhevc", "linux/arm64 noasm,nounsafe,unsandboxedhevc"} {
 		if !seen[want] {
 			t.Errorf("no compile job %q (have %v)", want, seen)
 		}
 	}
-	if j := compileJobs("")[0]; len(compileJobs("")) != 6 || !slices.Contains(j.env, "GOOS=linux") {
+	if j := compileJobs("")[0]; len(compileJobs("")) != 12 || !slices.Contains(j.env, "GOOS=linux") {
 		t.Errorf("without release tags: %d jobs, first %+v", len(compileJobs("")), j)
 	}
 }
@@ -437,6 +438,47 @@ func TestInterruptStopsPackages(t *testing.T) {
 	// An interrupted run fails whatever the mode, -strict or not (review of PR #42, N1).
 	if o.strict || err == nil || !strings.Contains(err.Error(), "interrupted") {
 		t.Errorf("an interrupted routine run returned %v (strict %v), want an error", err, o.strict)
+	}
+}
+
+// TestFastPathTests: the Windows and linux/arm64 steps also run internal/video with the HEVC fast
+// path's tag, as CI's "HEVC fast-path tests" step does on every runner; windows-2025 failed there
+// in CI run 43903238445 while the local run had not built that tag set.
+func TestFastPathTests(t *testing.T) {
+	d, calls := fakeDeps(t, module+"/internal/frame", module+"/internal/video")
+	var builds []string
+	d.run = func(_ context.Context, env []string, name string, args ...string) error {
+		builds = append(builds, strings.Join(env, " ")+" "+strings.Join(args, " "))
+		return nil
+	}
+	o := fullWithout("compile", "lint", "race")
+	if _, err := runPlatforms(t.Context(), o, d); err != nil {
+		t.Fatal(err)
+	}
+	fast := map[string]int{}
+	for _, c := range *calls {
+		if strings.Contains(c, "fastpath") {
+			switch {
+			case strings.Contains(c, "video.test.exe"):
+				fast["windows video"]++
+			case strings.Contains(c, "video.test"):
+				fast["arm64 video"]++
+			default:
+				fast["other"]++
+			}
+		}
+	}
+	if fast["windows video"] != 1 || fast["arm64 video"] != 1 || fast["other"] != 0 {
+		t.Errorf("fast-path runs %v; calls:\n%s", fast, strings.Join(*calls, "\n"))
+	}
+	found := 0
+	for _, b := range builds {
+		if strings.Contains(b, "-tags=noasm,nounsafe,unsandboxedhevc") && strings.HasSuffix(b, "./internal/video/...") {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("fast-path builds: %d, want one for windows/amd64 and one for linux/arm64:\n%s", found, strings.Join(builds, "\n"))
 	}
 }
 
