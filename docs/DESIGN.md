@@ -1670,7 +1670,7 @@ by GoReleaser).
   opened; and a pull request gets one CI run at the end, a second only when a CI runner finds what
   the local checks cannot. Before every push, besides `test`, `cover`, `lint`, `test -race` and
   `build -all`, the developer runs `go run ./tools/dev platforms`. That routine run leaves out the
-  linux/arm64 step (about 12 minutes on the machine below). Once per pull request, immediately
+  linux/arm64 step (about 10 minutes on the machine below). Once per pull request, immediately
   before the push that opens it, `go run ./tools/dev platforms -full` runs every step and fails if
   any step could not run (`-strict` does the latter alone; `-skip` leaves named steps out and refuses
   unknown names). A step that could not run is reported as NOT RUN with its reason, never as a pass.
@@ -1705,10 +1705,11 @@ by GoReleaser).
     tree, and removes the temporary directories; directories that an earlier run left behind more
     than six hours ago are removed at the start.
   - The task prints, per package, the time, the tests passed and the tests skipped. On the
-    developer machine of spike S1 (16 threads, WSL2) a `-full` run took 44 min 05 s with the build
-    cache warm: compile 26 s, lint 28 s, race builds 13 s, Windows 11 min 04 s (plain and race), and
-    linux/arm64 under emulation 31 min 55 s, of which `internal/vision` took 23 min 35 s. A first run
-    with a cold build cache took 49 min 40 s (compile 51 s, lint 45 s, race builds 1 min 23 s).
+    developer machine of spike S1 (16 threads, WSL2) a `-full` run took 35 min 44 s with the build
+    cache warm: compile 15 s, lint 19 s, race builds 7 s, Windows 9 min 03 s (plain and race), and
+    linux/arm64 under emulation 26 min 00 s, of which `internal/vision` took 19 min 01 s; the routine
+    run is the same without linux/arm64, about 10 minutes. A first run with a cold build cache took
+    49 min 40 s (compile 51 s, lint 45 s, race builds 1 min 23 s).
   - **Not covered locally**, accepted as CI-only, so a CI run can still find something: running
     anything on macOS (amd64 or arm64), running the windows/arm64 binaries, native arm64 timing on
     the arm runners, race runs on linux/arm64 and darwin, and `internal/video`'s race tests on
