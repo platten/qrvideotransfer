@@ -197,21 +197,18 @@ func (st *confirmation) disagree(check []int, w, h int) []int {
 // not depend on the anchors next to any one finder being readable. Each distinct decoded grid is
 // tried (locate).
 //
-// When it reports false it leaves in d.gateFailed whether a decoded grid failed the gate, and in
-// d.disagree the corners whose finders disagreed with the anchors, so that the three-finder path
-// can leave out the finders of that quad.
+// When it reports false it leaves in d.gateFailed whether a decoded grid failed the gate, so that
+// the three-finder path can leave out the finders of that quad.
 func (d *FinderDetector) confirms(f *video.Frame, v *geomLuma, q Quad) bool {
 	all := []int{0, 1, 2, 3}
-	d.gateFailed, d.disagree = false, d.disagree[:0]
+	d.gateFailed = false
 	for _, st := range d.locate(f, v, q, all) {
 		if !st.enough() {
 			continue
 		}
-		bad := st.disagree(all, v.w, v.h)
-		if len(bad) == 0 {
+		if len(st.disagree(all, v.w, v.h)) == 0 {
 			return true
 		}
-		d.disagree = append(d.disagree, bad...)
 	}
 	return false
 }

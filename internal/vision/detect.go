@@ -41,7 +41,6 @@ type FinderDetector struct {
 	layouts    []*frame.Layout // of the grids decoded lately, at most confirmMaxLayouts
 	grids      [][2]int        // distinct grids used during this Detect
 	gateFailed bool            // the last confirmed quad decoded a grid that failed the 1.5-pixel gate
-	disagree   []int           // the last confirmed quad's corners that disagreed with its anchors
 	hidden     int             // the corner the last located quad predicted, or -1 with four in view
 }
 
@@ -370,9 +369,10 @@ func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int, three bool) 
 	// Data cells can mimic a finder at the finder's own scale (on a grid of 135 rows or fewer a finder
 	// module is at most one cell), so the best quads are confirmed by their header, best first. A
 	// quad whose header does not decode is not reported: a wrong quad would feed wrong cells on.
-	// A rejected quad's finders that decoded a grid failing the 1.5-pixel gate, and its finders that
-	// disagreed with the anchors, are left out of the three-finder path: the first are a hostile or
-	// foreign code's, the second decoys.
+	// A rejected quad whose header decoded a grid failing the 1.5-pixel gate has its four finders left
+	// out of the three-finder path: they are a hostile or foreign code's. A finder that disagreed
+	// with the anchors is not left out: it may be a real finder damaged by an overlapping decoy, and
+	// the three-finder path checks every finder against the anchors again.
 	excluded := map[*detectCluster]bool{}
 	for _, t := range top {
 		if q := quad(t.q); d.confirms(f, v, q) {
@@ -382,9 +382,6 @@ func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int, three bool) 
 			for _, c := range t.q {
 				excluded[c] = true
 			}
-		}
-		for _, k := range d.disagree {
-			excluded[t.q[k]] = true
 		}
 	}
 	if !three { // three finders are tried on the last scan only

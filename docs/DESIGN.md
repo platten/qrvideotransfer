@@ -557,10 +557,12 @@ For each capture:
    (header, anchors, each visible finder agreeing within the tolerance), with at least four anchors located
    in the quarter of the grid nearest the hidden finder. A quad is never accepted on three finders
    alone; with two hidden, nothing is located. To bound the cost on hostile frames the three-finder
-   path runs on the last scan only and tries three candidate quads, built without the finders of
-   a rejected four-finder quad that decoded a grid failing the 1.5-pixel gate (all four) or that
-   disagreed with its anchors (decoys); a gate failure thus counts against its own quad, not
-   against another code in the same capture. The hidden centre is an estimate. The tests judge
+   path runs on the last scan only and tries three candidate quads, built without the four finders of
+   a rejected four-finder quad whose header decoded a grid failing the 1.5-pixel gate; a gate
+   failure thus counts against its own quad, not against another code in the same capture. A
+   finder that disagreed with the anchors is not left out: it may be a real finder damaged by an
+   overlapping decoy, and the three-finder quad checks each visible finder against the anchors
+   again. The hidden centre is an estimate. The tests judge
    quads by the designer's line: a visible finder more than half a module from the truth makes the
    quad wrong; only the hidden finder may be up to one module off, and only when the header reads,
    the mesh fits and the capture's cell-centre error is at most 0.15 cell, which makes it imprecise
@@ -1518,8 +1520,10 @@ by GoReleaser).
   boundary, with one or two poses or captures each and its concurrency tests in full, while its
   statistical assertions run only in the non-race test step (`raceEnabled`, `raceSize` and
   `raceSkipStatistics` in its tests); its budget under race is about 3 minutes on a developer
-  machine. With it, on macos-26-intel, `internal/vision` took 125 s under race, down from 959 s, which
-  had pushed the race step past its timeout, and the race step 13 min 26 s.
+  machine. With it, on macos-26-intel (run 43774194055), `internal/vision` took 187 s under race, down
+  from 959 s, which had pushed the race step past its timeout, and the race step 15 min 53 s,
+  4 min 07 s under its timeout; most of the step is `internal/video`, which runs alone after the
+  other packages.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
@@ -1676,3 +1680,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 Geometry, round 3 of PR #30: section 7 rule 1 records the deferral of its index inference to M5 as a designer ruling (2026-11-15); rule 9 no longer cites a bound that M2 does not apply; section 18's M5 row adds that inference and mirrored recordings. Section 10 step 1: a visible finder must agree within the smaller of one cell and half a module, Fit drops the finders from its global model once eight anchors are located, a capture's headers are kept whole and each distinct grid is tried (up to two layouts), and the confirmation gives up after 64 anchors with fewer than eight found. The table of codes located is re-measured at adfba68 and states its commit; handheld's smallest reliable size becomes 4.0 (3.6 gave 199 located and 1 wrong under the stricter tolerance), also in section 11 condition 2 |
 | 2026-11-15 | M2 Geometry, review of PR #38: section 10 step 1 says layouts are cached by grid with at most two distinct grids per capture on the three-finder path too, and gives that path's cost limits (last scan only, two candidates, skipped after a gate failure) and their effect below the reliable sizes; the table of codes located is re-measured at 12933bb with its cell-centre errors. Step 3: a finder stays in the global fit while within a quarter cell of the anchors' model, instead of leaving it once eight anchors are found. Step 4: the glare decision is local (area, or two area neighbours for a rim), with the measured rates, and the perfect-frame cost is about 1.75% of black-and-white cells, also in section 18's M3 row. The fewer codes located below the reliable sizes (harsh at 1080p: 184 to 169 and 181 to 158 of 200) is recorded as an accepted limit |
 | 2026-11-15 | M2 Geometry, review round 2 of PR #38, designer ruling (2026-11-15): section 10 step 4 and section 18's M3 row state the glare rule's cost on perfect black-and-white frames as measured over 30 codes (seeds 30 to 39 on three grids), 1.46-2.80% with a mean of about 2.1%, and the tests' ceiling as 3.5%; the earlier 2% came from one seed. Section 10 step 1: a rejected quad excludes only its own finders from the three-finder path (all four after a gate failure, the disagreeing ones otherwise), three candidates are tried, the gate-edge header cost is updated, and the table of codes located is re-measured at 2ec594f; the accepted limit below the reliable sizes comes from running the three-finder path on the last scan only |
+| 2026-11-15 | M2 Geometry, review round 3 of PR #38: section 10 step 1 no longer leaves out of the three-finder path the finders that disagreed with the anchors (a real finder damaged by an overlapping decoy was excluded, and the code not located); only the four finders of a quad whose header failed the 1.5-pixel gate are. Section 17 gives the race step's figures after PR #39's review round 2 on macos-26-intel (vision 187 s under race, race step 15 min 53 s, 4 min 07 s under its timeout) |
