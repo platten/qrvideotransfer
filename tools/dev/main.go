@@ -441,6 +441,10 @@ func selectRuns(runs [][]string, part string) ([][]string, error) {
 	return nil, fmt.Errorf("-part %q: want others or isolated", part)
 }
 
+const fixedStepsBudget = 0
+
+func checkJobLimits(b []byte) (job, race int) { return 0, 0 }
+
 // packages lists the module's packages, with the given build tags.
 func packages(tags string) ([]string, error) {
 	args := []string{"list"}

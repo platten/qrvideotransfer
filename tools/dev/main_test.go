@@ -132,8 +132,14 @@ func TestSelectRuns(t *testing.T) {
 		{"isolated", runs[1:]},
 	} {
 		got, err := selectRuns(runs, c.part)
-		if err != nil || len(got) != len(c.want) || !slices.Equal(got[0], c.want[0]) {
+		if err != nil || len(got) != len(c.want) {
 			t.Errorf("selectRuns(%q) = %q, %v; want %q", c.part, got, err, c.want)
+			continue
+		}
+		for i := range got {
+			if !slices.Equal(got[i], c.want[i]) {
+				t.Errorf("selectRuns(%q) run %d = %q, want %q", c.part, i, got[i], c.want[i])
+			}
 		}
 	}
 	if _, err := selectRuns(runs, "video"); err == nil {
@@ -172,6 +178,36 @@ func TestRaceStepsSplit(t *testing.T) {
 	if strings.Contains(s, "run: scripts/test.sh -race\n") || strings.Contains(s, "run: scripts/test.ps1 -race\n") {
 		t.Error("ci.yml still runs the race tests in one step")
 	}
+	// A failure among the other packages must not skip internal/video's race result.
+	for _, want := range []string{
+		"if: ${{ !cancelled() && runner.os != 'Windows' }}\n        timeout-minutes: 20\n        shell: bash\n        run: scripts/test.sh -race -part isolated\n",
+		"if: ${{ !cancelled() && matrix.os == 'windows-2025' }}\n        timeout-minutes: 20\n        shell: pwsh\n        run: scripts/test.ps1 -race -part isolated\n",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("an isolated race step lacks the !cancelled() condition: want %q", want)
+		}
+	}
+}
+
+// TestCheckJobLimit: the check job's limit covers the two race steps at their limits plus the
+// budget for every other step, so the split is not undone by the job limit (DESIGN.md section 17).
+func TestCheckJobLimit(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, race := checkJobLimits(b)
+	if race != 40 {
+		t.Errorf("the Unix race steps' limits sum to %d minutes, want 2 x 20", race)
+	}
+	if job < race+fixedStepsBudget {
+		t.Errorf("the check job's limit is %d minutes, want at least %d (race steps) + %d (other steps)", job, race, fixedStepsBudget)
+	}
+	wf := "jobs:\n  check:\n    timeout-minutes: 50\n    steps:\n      - name: Race tests, other packages (Unix)\n        timeout-minutes: 20\n" +
+		"      - name: Race tests, internal/video (Unix)\n        timeout-minutes: 15\n      - name: Lint\n        timeout-minutes: 9\n  other:\n    timeout-minutes: 5\n"
+	if job, race := checkJobLimits([]byte(wf)); job != 50 || race != 35 {
+		t.Errorf("checkJobLimits = %d, %d; want 50, 35", job, race)
+	}
 }
 
 // TestMergeProfiles: two coverage profiles become one, with a single mode line.
@@ -198,7 +234,7 @@ func TestTestCommand(t *testing.T) {
 		wantEnv, want string
 	}{
 		{nil, "CGO_ENABLED=0", "test -tags=noasm,nounsafe ./..."},
-		{[]string{"-race"}, "CGO_ENABLED=1", "test -tags=noasm,nounsafe -race -timeout=18m ./..."},
+		{[]string{"-race"}, "CGO_ENABLED=1", "test -tags=noasm,nounsafe -race -timeout=18m -count=1 ./..."},
 		{[]string{"-untagged"}, "CGO_ENABLED=0", "test ./..."},
 		{[]string{"-long", "-short", "--", "-count=1"}, "CGO_ENABLED=0 QRVT_LONG_TESTS=1", "test -tags=noasm,nounsafe -short -count=1 ./..."},
 	}
