@@ -78,3 +78,51 @@ func TestThreeFindersBesideDecoy(t *testing.T) {
 		}
 	}
 }
+
+// TestThreeFindersOverlappingDecoy: a 480 x 270 code at 4 pixels per cell with every finder
+// visible, and a copy of one finder with its separator (16 cells square), of either polarity,
+// painted 4 or 5 cells inward along the diagonal, so that it overlaps the real finder's rings. The
+// real finder is damaged, not hidden, and disagrees with the anchors; it is not excluded from the
+// three-finder path (only the finders of a quad whose header failed the 1.5-pixel gate are), so
+// for each corner, offset and polarity the code is located, every centre within a module of the
+// truth.
+func TestThreeFindersOverlappingDecoy(t *testing.T) {
+	c := geomNewCode(t, 480, 270, 4, 2, 1, 45)
+	want := geomPlainQuad(c)
+	plain := geomPlain(c, 0)
+	for k, corner := range []frame.Corner{frame.TopLeft, frame.TopRight, frame.BottomLeft, frame.BottomRight} {
+		sep := c.layout.Separator(corner).Pixels(c.pitch)
+		for _, off := range []int{4, 5} {
+			dx, dy := off*c.pitch, off*c.pitch
+			if corner == frame.TopRight || corner == frame.BottomRight {
+				dx = -dx
+			}
+			if corner == frame.BottomLeft || corner == frame.BottomRight {
+				dy = -dy
+			}
+			for _, inverted := range []bool{false, true} {
+				f := geomPlain(c, 0)
+				for y := sep.Min.Y; y < sep.Max.Y; y++ {
+					for x := sep.Min.X; x < sep.Max.X; x++ {
+						v := plain.Y[y*plain.W+x]
+						if inverted {
+							v = 16 + 235 - v
+						}
+						f.Y[(y+dy)*f.W+x+dx] = v
+					}
+				}
+				var d FinderDetector
+				q, ok := d.Detect(f, nil)
+				if !ok {
+					t.Errorf("corner %d, %d cells, inverted %v: not located", k, off, inverted)
+					continue
+				}
+				for j := range 4 {
+					if e := geomDist(q.Centres[j], want.Centres[j]); e > want.Module {
+						t.Errorf("corner %d, %d cells, inverted %v: centre %d at %v, want %v", k, off, inverted, j, q.Centres[j], want.Centres[j])
+					}
+				}
+			}
+		}
+	}
+}
