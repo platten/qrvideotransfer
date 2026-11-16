@@ -13,11 +13,11 @@ import (
 // capture without it. Cells the patch turns near-white (changed by 20 code values or more, and at
 // 225 or above) must come back saturated (at most 3% missed), and cells it leaves within 1 code
 // value must not (at most 0.1% flagged). Cells on the patch's soft edge, brightened but not
-// clipped, are counted apart: telling them from data is the equaliser's part.
+// clipped, are counted apart: telling them from data is the equaliser's part. Under -race, one
+// 720p pose of a 212 x 120 grid (geomRaceGlareCode).
 func TestSampleGlareFlagged(t *testing.T) {
 	n := raceSize(2, 1)
-	c := geomNewCode(t, 480, 270, 4, 2, 1, 31)
-	clean := geomConfig(t, "handheld", 0, 0)
+	c, clean := geomRaceGlareCode(t, 1, 31)
 	glared := clean
 	glared.Optics.Glare = 0.05
 	cells := c.layout.DataCells()
@@ -63,8 +63,14 @@ func TestSampleGlareFlagged(t *testing.T) {
 	missRate, falseRate := float64(missed)/float64(max(1, under)), float64(falseFlags)/float64(max(1, outside))
 	t.Logf("under the patch %d near-white cells, %.2f%% not flagged; %d brightened cells on its soft edge; outside %d cells, %.3f%% flagged",
 		under, 100*missRate, partial, outside, 100*falseRate)
-	if under == 0 || missRate > 0.03 {
-		t.Errorf("%.2f%% of %d glared cells not flagged, want at most 3%%", 100*missRate, under)
+	// Under -race, one 720p capture is a smoke check: at most 10% missed. The 3% is asserted at 4K in
+	// the non-race step.
+	maxMiss := 0.03
+	if raceEnabled {
+		maxMiss = 0.10
+	}
+	if under == 0 || missRate > maxMiss {
+		t.Errorf("%.2f%% of %d glared cells not flagged, want at most %.0f%%", 100*missRate, under, 100*maxMiss)
 	}
 	if falseRate > 0.001 {
 		t.Errorf("%.3f%% of %d unglared cells flagged, want at most 0.1%%", 100*falseRate, outside)

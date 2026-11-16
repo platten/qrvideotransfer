@@ -1,6 +1,10 @@
 package vision
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/platten/qrvideotransfer/internal/channel"
+)
 
 // The race budget of internal/vision.
 //
@@ -34,4 +38,13 @@ func raceSkipStatistics(t *testing.T) {
 	if raceEnabled {
 		t.Skip("statistical: asserted in the non-race test step")
 	}
+}
+
+// geomRaceGlareCode returns the code and handheld configuration of a glare test: a 480 x 270 grid
+// filmed at 4K, or under the race detector a 212 x 120 grid filmed at 1280 x 720, since a 4K
+// simulated capture costs too much there. n frames, seeded with seed.
+func geomRaceGlareCode(t *testing.T, n int, seed uint64) (*geomCode, channel.Config) {
+	t.Helper()
+	c := geomNewCode(t, raceSize(480, 212), raceSize(270, 120), 4, 2, n, seed)
+	return c, geomConfig(t, "handheld", raceSize(0, 1280), raceSize(0, 720))
 }
