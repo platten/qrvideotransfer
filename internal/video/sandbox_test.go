@@ -200,9 +200,10 @@ func TestSandboxWrite(t *testing.T) {
 // too large: an 8192 x 8192 source took over 30 s to fill on windows-2025 under load, with no output,
 // and was stopped as a stall before it reached the allocation.
 // Not parallel, and its memory is returned to the system when it ends: since PR #28 it uses the
-// shipped allocator, which reserves the whole 512 MiB in this process (measured: about 500 MiB more
-// resident while it runs than the 17 MiB of the old grow-on-demand allocator), and the sandbox tests
-// running beside it had their reservations take 30 s and were stopped (CI run 43693218308).
+// shipped allocator, which reserves the whole 512 MiB in this process (measured locally against the
+// old grow-on-demand allocator: Go heap +514 MiB against +17 MiB, resident memory +486 MiB against
+// +0 MiB). It ran beside the sandbox tests whose reservations took 30 s and were stopped as stalls
+// (CI run 43693218308); the cause of those 30 s was not established.
 func TestMemoryCeiling(t *testing.T) {
 	t.Cleanup(debug.FreeOSMemory)
 	e := engineFor(t)

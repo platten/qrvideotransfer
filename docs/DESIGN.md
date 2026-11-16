@@ -986,7 +986,9 @@ Costs a user should expect:
   standard input closes, which happens when the parent exits or dies, and runs with GOMAXPROCS of at
   least 2 so that the goroutine watching the pipe can run while the engine occupies a core; on Windows
   it is also placed in a kill-on-close Job Object: it is created suspended and resumed only once it is
-  in the job, so it never runs outside it (if it cannot be assigned it runs without one). That exit is best effort: with close-on-cancel off
+  in the job, so it never runs outside it (if it cannot be assigned it runs without one); on Linux it
+  is started with SIGKILL as its parent-death signal, from a thread held until it has been waited
+  for (the signal fires when the starting thread exits). That exit is best effort: with close-on-cancel off
   a spinning guest never returns to Go, and it also blocks Go's stop-the-world garbage collection, so
   while it spins the worker's own timers and goroutines cannot be trusted. The parent's kill is the
   control. Loading and compiling the engine, which on a first run
@@ -1477,9 +1479,30 @@ by GoReleaser).
   `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
   tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
   others. Every job and every long step has a timeout. A newer push to a pull request cancels that
-  pull request's older `ci` and `codeql` runs; runs on main, tags and schedules are never cancelled
-  (the workflow policy test allows `cancel-in-progress` only as `false` or the pull-request
-  condition). The test, race and coverage tasks run
+  pull request's older `ci` and `codeql` runs; their runs on main, and codeql's weekly runs, have a
+  group of their own (the commit SHA) and are never cancelled. The workflow policy test allows
+  `cancel-in-progress` only as a bare `false` or the pull-request condition, in block or flow style,
+  and with the latter requires a group holding both the pull request number and the commit SHA.
+  **Documents-only pull requests**: a first `changes` job lists the files a pull request changes
+  against its merge base, with their status (full history fetched; renames counted as a deletion
+  and an addition). If every change adds or modifies a file on an allow-list of files that no test,
+  build, script, workflow or release configuration reads (`tools/dev/changes.go`: `docs/FORMAT.md`,
+  `docs/SECURITY.md`, `docs/IMPLEMENTATION_PROMPT.md`, and the Markdown files directly in
+  `docs/spikes/`), the six-runner checks, release snapshot, setup scripts and short fuzzing are
+  skipped; the workflow and licence checks and CodeQL still run. Every other event, every deletion,
+  and any other changed file runs everything: code, tests, fixtures, golden files, build and release
+  configuration, LICENSE, NOTICE, README, `docs/DESIGN.md` (whose preset tables `internal/channel`'s
+  tests read), and any Go file, `go.mod`, `go.sum`, `.gitattributes` or `testdata/` path wherever it
+  sits. Only a pull request into the default branch can skip: a stacked one, whose base is another
+  branch, runs everything, because a later retarget to main would otherwise leave its green result
+  standing for code never tested. That rule alone closes the retarget hole, so the `pull_request`
+  trigger keeps its default types: with `edited`, every title or body edit would cost a full run. A
+  test keeps the allow-list honest by failing if a Go string literal or `//go:embed` pattern reaches
+  a listed file or the spike directory, if any Go file sits under `docs/`, or if a workflow, script
+  or the GoReleaser configuration names a listed path. An aggregate `ci result` job waits for every
+  job and fails on any failure or cancellation, on a `code` output other than `true` or `false`, or
+  on a skipped job unless `code` is `false`; it is the check to require from `ci.yml`, because a
+  skipped matrix job does not report under its expanded names. The test, race and coverage tasks run
   `internal/video` on its own, after the other packages have finished, not in parallel with them:
   the worker cap and the watchdog's stop latency are properties of one process on a machine that
   other test binaries are not oversubscribing, and the package's tests assert wall-clock bounds
@@ -1488,6 +1511,12 @@ by GoReleaser).
   `isolatedRuns`). The cost, accepted by the owner, on the slowest runner (macos-26-intel): the
   coverage step went from 4 min 08 s to 7 min 13 s and the race step from 10 min 51 s to 13 min 18 s,
   5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout.
+  Under the race detector `internal/vision` runs a smoke subset: every code path and goroutine
+  boundary, with one or two poses or captures each and its concurrency tests in full, while its
+  statistical assertions run only in the non-race test step (`raceEnabled`, `raceSize` and
+  `raceSkipStatistics` in its tests); its budget under race is about 3 minutes on a developer
+  machine. With it, on macos-26-intel, `internal/vision` took 125 s under race, down from 959 s, which
+  had pushed the race step past its timeout, and the race step 13 min 26 s.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
@@ -1630,11 +1659,15 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Stream G, CI budget: section 17 says a newer push to a pull request cancels its older `ci` and `codeql` runs, that runs on main, tags and schedules are never cancelled, and that the workflow policy test enforces this |
 | 2026-11-15 | Reservation stall fix: section 12 starts the stall clock when an instance's 512 MiB of linear memory has been reserved, on the worker and in-process paths; `EngineLoadLimit` now bounds the phase until the reservation (from a worker's start, or from an in-process instance's turn, after which the instance is cancelled); the worker reports the reservation in its progress message, clamped to the message's arrival. Prompted by two false stalls on macos-26-intel (CI run 43693218308) |
 | 2026-11-15 | Reservation stall fix, round 2: section 12 says the worker reports its reservation from the goroutine that made it, before any guest code runs, not in its periodic progress report, which a spinning guest can hold back for good by blocking the garbage collection the reservation starts (CI run 43704037510) |
+| 2026-11-15 | Worker parent-death signal, review of PR #37: section 12 says that on Linux the worker is started with SIGKILL as its parent-death signal, from a thread held until it has been waited for |
 | 2026-11-15 | M2 Geometry: section 10, steps 1 to 4, records what was built: the midrange binarisation, diagonal and full-resolution checks and quad rules of the detector, its one finer rescan when the 1280-pixel scan finds no quad (measured: 3 of 1,000 poses at 25 degrees of tilt), and that it assumes a capture that is not mirrored; radial distortion with k1 chosen by slot contrast for the header, the finder references, and which pairs are tried; the order, refinement, outlier rule and node spacing of the mesh and its cell coordinates; and what the sampler calls saturated |
 | 2026-11-15 | M2 Geometry, designer ruling on PR #30: section 6 and section 10's distortion table no longer claim that mirroring is handled; a decoder assumes the capture is not mirrored (FORMAT.md section 4.1), and mirrored recordings are left to M5. Section 10 step 1 records the accepted departure from "at most 1280 pixels wide" (one rescan one step finer when no quad is found) with its evidence: 997 of 1,000 simulated 4K poses at up to 25 degrees of tilt found by the 1280-pixel scan alone, 1,000 with the rescan |
 | 2026-11-15 | M2 Geometry, review of PR #30: section 10 step 1 gives the detector's threshold at about half the light in linear terms and flanks of a quarter module (blur in linear light thinned the outer dark ring, and finders of 4 to 6 pixels per module were missed), says that a quad is reported only when its header decodes (data cells gave wrong quads on a 240 x 135 grid), and records the measured limit: found in every pose at 4.0 camera pixels per untilted module under the handheld blur. Step 3 states when the fit fails (no anchor, or under a quarter of those inside the capture, located) |
 | 2026-11-15 | M2 Geometry, review of PR #30, measured limits: section 10 step 1 adds the anchor check on a confirmed quad (one copy decoded with one finder wrong) and the table of finders found against camera pixels per cell for each preset, with the limit (3.6 handheld, 4.4 HLG, not reached for harsh at 1080p); section 11 condition 2 says what the geometry needs against the planning point of 5 |
 | 2026-11-15 | M2 Geometry, review round 2 of PR #30: section 7 rule 1 defers the inference of an undecoded frame index to M5 (a tracked quad could carry the header from a neighbouring capture); in M2 a capture whose four copies all fail is skipped. Section 10 step 1 replaces the confirmation rule (one of the two anchors next to each finder, which rejected 17 of 200 real harsh captures) with a leave-one-out check of each finder against the located anchors, bounds the decoded grid by the image (1.5 pixels per cell, one layout per capture); step 4 records that limited-range glare escapes the saturation flag until the follow-up PR. The table of finders found is re-measured with the new rule |
+| 2026-11-15 | Stream G: section 17 adds the documents-only skip (allow-list, `changes` job, aggregate `ci result` check), scopes the never-cancelled sentence to the ci and codeql runs on main and codeql's schedule, and states the stricter `cancel-in-progress` policy (flow style, quoted keys, group with the pull request number and SHA) |
+| 2026-11-15 | Stream G, review of PR #35: section 17 narrows the documents-only allow-list to the Markdown files directly in `docs/spikes/`, makes Go files, module files, `.gitattributes`, `testdata/` paths and every deletion count as code, runs everything for a stacked pull request (base not the default branch, which closes the retarget hole; the trigger stays without `edited`), adds `//go:embed` to the allow-list guard, and has `ci result` require a `code` output of exactly `true` or `false` |
+| 2026-11-15 | M2 Geometry, race budget (PR #39): section 17 says that `internal/vision` runs a smoke subset under the race detector, with its statistical assertions only in the non-race step and a budget of about 3 minutes on a developer machine, and gives the macos-26-intel figures (vision 125 s under race, down from 959 s; race step 13 min 26 s) |
 | 2026-11-15 | M2 radiometry and phase: section 7 rule 2 divides an anchor's linearised quadrants by their own total rather than by its white (fringes made clean anchors look mixed), interpolates bilinearly with missing anchors predicted linearly, and gives the measured weight error; section 10 step 5 fits only the cells the phase field counts (blends made clean cells' soft bits up to 18 times underconfident), step 6 gives stripe cancellation as built, step 7 widens a cell's variances by its phase weight and settles the log-variance term (omitted; honest without it) and the 1/12 floor (never binds); section 15 states the Poisson reading of the honesty test and the measured results of the radiometry and phase rows, of which phase weight error at most 0.05 is not met and its test is left failing |
 | 2026-11-15 | Owner's decision of 2026-11-15 on M2's phase field: section 15 replaces "phase weight error at most 0.05" with no wrong credit, a credited cell's true weight at least 0.80, a per-preset yield of clean cells (measured less 0.02) and a regression bound of 0.09 inner and 0.16 in the pockets, and lists the five estimators measured; section 7 rules 2 and 3 and section 10 step 8 record the accepted error, the yield and that per-cell estimation is not built, to be revisited in M5 only if the S2 or G1 recordings show the discarded cells matter |
 | 2026-11-15 | Review of PR #31: section 10 step 7 widens the variances per plane used and averaged (the code had divided by three planes for grey modulations, a third of what the step said), takes 0.02 off the share of another frame for the phase field's reading of clean cells, justifies the size against the partly mixed cells' table, and states the log-variance figures per modulation (Gray4 1.43 nats, RGB8 3.41); section 15 bounds the point estimate of pooled buckets where 100 errors are expected and asserts the partly mixed cells' table, and says which phase-field figures CI exercises |
