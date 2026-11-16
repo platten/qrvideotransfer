@@ -1444,11 +1444,9 @@ by GoReleaser).
   other test binaries are not oversubscribing, and the package's tests assert wall-clock bounds
   (`EngineProbeTime`, stall stops) that held alone and failed on 4-vCPU runners when the other
   packages' test binaries ran beside it. CI tests them under that condition (`tools/dev`,
-  `isolatedRuns`). The cost, accepted by the owner, on the slowest runner (macos-26-intel): the
-  coverage step went from 4 min 08 s to 7 min 13 s and the race step from 10 min 51 s to 13 min 18 s,
-  5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout (figures
-  from PR #26's runs, which were not identified, so whether they restored cached results was not
-  checked).
+  `isolatedRuns`). The cost, accepted by the owner, is longer coverage and race steps on the slowest
+  runner (macos-26-intel); the figures first given here could not be tied to a run that retested the
+  packages and are dropped.
   Under the race detector `internal/vision` runs a smoke subset: every code path and goroutine
   boundary, with one or two poses or captures each and its concurrency tests in full, while its
   statistical assertions run only in the non-race test step (`raceEnabled`, `raceSize` and
@@ -1465,8 +1463,14 @@ by GoReleaser).
   the nondeterministic tests (`internal/fec/conv`'s parallel test, `internal/fec/rs`'s subprocess
   test). That costs 0-3 minutes per run on macos-26-intel, nothing when nothing would have been
   cached. The `check` job's limit is 60 minutes, two race steps at 20 each plus 20 for every other
-  step (`tools/dev` `fixedStepsBudget`, checked by a test): the split's own arithmetic, not an
-  allowance for slow hosts, and a single slow run is still a runner fault (spike S1, section 14).
+  step (`tools/dev` `fixedStepsBudget`, checked by a test against all four race steps): the split's
+  own arithmetic, not an allowance for slow hosts. The 20 comes from macos-26-intel, the slowest
+  runner: its non-race steps took about 12 minutes (721 s) in run 43788575833, whose coverage step
+  restored cached results for four quick packages, and 20 leaves about 8 minutes of margin. On the
+  slow host of run 43774194055 the non-race steps took 23 min 09 s, so there the two race steps would
+  share about 37 minutes instead of 40; a host that slow is a runner fault (spike S1, section 14),
+  and the limits are not sized for it. The `internal/video` race step does not run alone after an
+  earlier failure skipped the other packages' step.
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
@@ -1620,4 +1624,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Stream G: section 17 adds the documents-only skip (allow-list, `changes` job, aggregate `ci result` check), scopes the never-cancelled sentence to the ci and codeql runs on main and codeql's schedule, and states the stricter `cancel-in-progress` policy (flow style, quoted keys, group with the pull request number and SHA) |
 | 2026-11-15 | Stream G, review of PR #35: section 17 narrows the documents-only allow-list to the Markdown files directly in `docs/spikes/`, makes Go files, module files, `.gitattributes`, `testdata/` paths and every deletion count as code, runs everything for a stacked pull request (base not the default branch, which closes the retarget hole; the trigger stays without `edited`), adds `//go:embed` to the allow-list guard, and has `ci result` require a `code` output of exactly `true` or `false` |
 | 2026-11-15 | M2 Geometry, race budget (PR #39): section 17 says that `internal/vision` runs a smoke subset under the race detector, with its statistical assertions only in the non-race step and a budget of about 3 minutes on a developer machine, and gives the macos-26-intel figures (vision 125 s under race, down from 959 s; race step 13 min 26 s) |
-| 2026-11-16 | Stream G, race step split: section 17 says the race tests run as two CI steps with 20 minutes each, every package but `internal/video` and then `internal/video` alone even after a failure (`tools/dev test -race -part others|isolated`), both with `-count=1` (0-3 minutes per run), after the single step reached 15 min 53 s of its 20 on macos-26-intel in a retested run; the `check` job's limit is 60 minutes by the split's arithmetic, not for slow hosts; the cached 13 min 26 s is marked, the PR #26 figures are marked unchecked, and race-step timings are quoted only from retested runs |
+| 2026-11-16 | Stream G, race step split: section 17 says the race tests run as two CI steps with 20 minutes each, every package but `internal/video` and then `internal/video` alone even after a failure (`tools/dev test -race -part others|isolated`), both with `-count=1` (0-3 minutes per run), after the single step reached 15 min 53 s of its 20 on macos-26-intel in a retested run; the `check` job's limit is 60 minutes by the split's arithmetic, not for slow hosts; the job limit's 20 minutes for the other steps come from run 43788575833 (about 12 minutes) with 8 minutes of margin, and a slow host such as run 43774194055's (23 min 09 s) is a runner fault; the cached 13 min 26 s is marked, the PR #26 figures, which could not be tied to a retested run, are dropped, and race-step timings are quoted only from retested runs |
