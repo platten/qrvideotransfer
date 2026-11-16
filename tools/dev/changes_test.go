@@ -67,6 +67,15 @@ func TestCodeChanged(t *testing.T) {
 		{"pull_request", mod("docs/spikes/testdata/x.md"), true},
 		{"pull_request", mod("docs/spikes/.gitattributes"), true},
 		{"pull_request", mod("docs/spikes/S1.png"), true},
+		// Change-log entries, one file each (docs/changes/<document>/), are documents.
+		{"pull_request", []fileChange{{"A", "docs/changes/FORMAT/2026-11-15-g-changelog-files.md"}}, false},
+		{"pull_request", append(mod("docs/SECURITY.md"), fileChange{"A", "docs/changes/SECURITY/2026-11-15-x.md"}), false},
+		{"pull_request", append(mod("docs/DESIGN.md"), fileChange{"A", "docs/changes/DESIGN/2026-11-15-x.md"}), true},
+		{"pull_request", mod("docs/changes/README.md"), true},
+		{"pull_request", mod("docs/changes/DESIGN/sub/x.md"), true},
+		{"pull_request", mod("docs/changes/DESIGN/x.go"), true},
+		{"pull_request", mod("docs/changes/DESIGN/x.txt"), true},
+		{"pull_request", []fileChange{{"D", "docs/changes/DESIGN/2026-11-15-x.md"}}, true},
 		{"pull_request", mod("docs/x_test.go"), true},
 		// L1: a deletion, or any status other than an addition or modification, is code.
 		{"pull_request", []fileChange{{"D", "docs/SECURITY.md"}}, true},
@@ -151,9 +160,10 @@ func TestDocsOnlyAllowListExists(t *testing.T) {
 
 // TestDocsOnlyAllowListUnread guards the allow-list. A test or build that reads an allow-listed
 // file must run when it changes, so the test fails when:
-//   - a Go string literal names an allow-listed file by repository path or base name, or names the
-//     spike directory;
-//   - a Go file holds both the literals "docs" and "spikes" (a directory-level reader);
+//   - a Go string literal names an allow-listed file by repository path or base name, or names a
+//     directory an entry covers (docs/spikes, docs/changes);
+//   - a Go file holds the literal "docs" and the last element of such a directory ("spikes",
+//     "changes"): a directory-level reader;
 //   - a //go:embed pattern resolves to an allow-listed file or a directory that holds one;
 //   - any Go file sits under docs/;
 //   - a workflow, script or the GoReleaser configuration contains an allow-listed path outside a
@@ -176,8 +186,9 @@ func TestDocsOnlyAllowListUnread(t *testing.T) {
 			}
 			return nil
 		}
-		// The allow-list's own definition and tests name its entries.
-		if rel == "tools/dev/changes.go" || rel == "tools/dev/changes_test.go" {
+		// The allow-list's own definition and tests name its entries, and the changelog task, which
+		// only a person runs, writes and prints the entries.
+		if rel == "tools/dev/changes.go" || rel == "tools/dev/changes_test.go" || rel == "tools/dev/changelog.go" || rel == "tools/dev/changelog_test.go" {
 			return nil
 		}
 		switch {
@@ -196,7 +207,7 @@ func TestDocsOnlyAllowListUnread(t *testing.T) {
 			// base name ("SECURITY.md section 9.6") without reading them.
 			for i, l := range lines(b) {
 				code := stripComment(l)
-				for _, f := range append([]string{"docs/spikes"}, files...) {
+				for _, f := range append(allowListDirs(), files...) {
 					if strings.Contains(code, f) {
 						hits = append(hits, rel+":"+strconv.Itoa(i+1)+" names "+f)
 					}
@@ -214,7 +225,7 @@ func TestDocsOnlyAllowListUnread(t *testing.T) {
 }
 
 func TestDocsOnlyGuardCatchesReaders(t *testing.T) {
-	files := []string{"docs/FORMAT.md", "docs/SECURITY.md", "docs/spikes/S1.md"}
+	files := []string{"docs/FORMAT.md", "docs/SECURITY.md", "docs/spikes/S1.md", "docs/changes/DESIGN/2026-11-15-x.md"}
 	caught := []struct{ rel, src string }{
 		{"tools/x/a.go", `package x; var p = "../../docs/FORMAT.md"`},
 		{"tools/x/a.go", `package x; var p = "docs/spikes/S1.md"`},
@@ -222,6 +233,9 @@ func TestDocsOnlyGuardCatchesReaders(t *testing.T) {
 		{"tools/x/a.go", `package x; var p = "S1.md"`},
 		{"tools/x/a.go", `package x; var p = "../docs/spikes"`},
 		{"tools/x/a.go", `package x; var p = filepath.Join(root, "docs", "spikes")`},
+		{"tools/x/a.go", `package x; var p = "../../docs/changes"`},
+		{"tools/x/a.go", `package x; var p = filepath.Join(root, "docs", "changes", "DESIGN")`},
+		{"internal/x/a.go", "package x\n\n//go:embed ../../docs/changes\nvar s embed.FS\n"},
 		// Review of PR #35, L2: embedded files.
 		{"internal/x/a.go", "package x\n\n//go:embed ../../docs/spikes/S1.md\nvar s string\n"},
 		{"internal/x/a.go", "package x\n\n//go:embed ../../docs/spikes\nvar s embed.FS\n"},
@@ -261,7 +275,8 @@ func goReaders(rel string, src []byte, files []string) []string {
 	var s scanner.Scanner
 	fset := token.NewFileSet()
 	s.Init(fset.AddFile(rel, -1, len(src)), src, nil, scanner.ScanComments)
-	var docs, spikes bool
+	dirs := allowListDirs()
+	seen := map[string]bool{}
 	for {
 		pos, tok, lit := s.Scan()
 		if tok == token.EOF {
@@ -274,9 +289,11 @@ func goReaders(rel string, src []byte, files []string) []string {
 			if err != nil {
 				continue
 			}
-			docs, spikes = docs || v == "docs", spikes || v == "spikes"
-			if strings.Contains(v, "docs/spikes") {
-				hits = append(hits, where+" names docs/spikes")
+			seen[v] = true
+			for _, d := range dirs {
+				if strings.Contains(v, d) {
+					hits = append(hits, where+" names "+d)
+				}
 			}
 			for _, f := range files {
 				if strings.Contains(v, f) || v == path.Base(f) {
@@ -299,8 +316,22 @@ func goReaders(rel string, src []byte, files []string) []string {
 			}
 		}
 	}
-	if docs && spikes {
-		hits = append(hits, rel+": the literals \"docs\" and \"spikes\" may join into the spike directory")
+	for _, d := range dirs {
+		if seen["docs"] && seen[path.Base(d)] {
+			hits = append(hits, rel+": the literals \"docs\" and \""+path.Base(d)+"\" may join into "+d)
+		}
 	}
 	return hits
+}
+
+// allowListDirs returns the directories that the allow-list's pattern entries cover, up to their
+// first wildcard element: docs/spikes and docs/changes.
+func allowListDirs() []string {
+	var dirs []string
+	for _, e := range docsOnlyAllowList {
+		if i := strings.Index(e, "*"); i >= 0 {
+			dirs = append(dirs, strings.TrimSuffix(e[:i], "/"))
+		}
+	}
+	return dirs
 }

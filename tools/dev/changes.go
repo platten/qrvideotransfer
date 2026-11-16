@@ -18,7 +18,8 @@ import (
 // docsOnlyAllowList holds the only files whose change cannot affect a test or a build: no test,
 // build, script, workflow or release configuration reads them, which TestDocsOnlyAllowListUnread
 // checks. Entries are path.Match patterns, so `docs/spikes/*.md` covers the Markdown files directly
-// in that directory and nothing below it. docs/DESIGN.md is absent on purpose, because
+// in that directory and nothing below it, and `docs/changes/*/*.md` the change-log entries, one
+// file each in a directory per document (changelog.go). docs/DESIGN.md is absent on purpose, because
 // internal/channel's tests read its preset tables; so are LICENSE, NOTICE and README.md, which
 // go into the release archives. A file that a test or build starts reading must leave this list.
 var docsOnlyAllowList = []string{
@@ -26,6 +27,7 @@ var docsOnlyAllowList = []string{
 	"docs/IMPLEMENTATION_PROMPT.md",
 	"docs/SECURITY.md",
 	"docs/spikes/*.md",
+	"docs/changes/*/*.md",
 }
 
 // fileChange is one line of `git diff --name-status`: a status letter and a path.
