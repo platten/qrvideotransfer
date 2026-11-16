@@ -42,8 +42,10 @@ Read these before anything else. They are the specification; this prompt is the 
 | `docs/SECURITY.md` | The threat model, limits and security tests |
 
 Those documents are a draft written before any measurement. When something you measure contradicts
-them, the measurement wins: change the document in the same pull request as the code, and add a line to
-its change log. Do not quietly build something different from what the documents say.
+them, the measurement wins: change the document in the same pull request as the code, and add an entry
+to its change log: a new file in `docs/changes/<document>/`, never a row in a shared table
+(`go run ./tools/dev changelog add`). Do not quietly build something different from what the
+documents say.
 
 ## 2. Ground rules, and why
 
@@ -59,6 +61,7 @@ its change log. Do not quietly build something different from what the documents
 | Everything read from a video is validated before it sizes an allocation or names a file | SECURITY.md section 1 |
 | Concise code. A doc comment on every package and exported name. No abstraction beyond the frozen interfaces until a second use exists | The owner asked for maintainability through brevity and documentation |
 | Conventional commit messages | release-please derives the changelog and version from them |
+| Before applying a finding about a measurement (a CI timing, a baseline run, a ratio), check it against the tree the run tested: a pull_request run tests the merge commit of the head into the base at the time of the run, not the head alone. Timings come only from runs that retested the package, never from `(cached)` results | A baseline "correction" in spike S1 section 14.6 compared a run against the wrong tree (2026-11-15) |
 
 ## 3. Facts you can rely on
 
@@ -361,7 +364,8 @@ documents describe what was actually built, and the release candidate tag is pre
 
 ## Change log
 
-| Date | Change |
-| --- | --- |
-| 2026-11-14 | The owner made the GitHub repository public (Authorisations, stream G note); the owner swapped the last two milestones: M7 is now the final security pass and M8 documentation and release, which gains a delta security review of everything merged after M7 before the release candidate is prepared |
-| 2026-11-15 | M2 Geometry, round 3 of PR #30: the M5 section adds inferring the frame index of a capture whose header copies all fail (deferred from M2 by designer ruling, DESIGN section 7 rule 1) and mirrored recordings (FORMAT section 4.1) |
+Each change to this document is one file in `docs/changes/IMPLEMENTATION_PROMPT/`, named
+`YYYY-MM-DD-<topic>.md` (the date in UTC); read in name order (by topic within a day), the files are
+the log, starting with `2026-11-14-table.md`, the table of the entries up to 2026-11-15. Add an
+entry with `go run ./tools/dev changelog add IMPLEMENTATION_PROMPT <topic> "<text>"` and read the
+log with `go run ./tools/dev changelog show IMPLEMENTATION_PROMPT` (DESIGN.md section 17).

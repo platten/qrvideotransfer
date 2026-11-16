@@ -3,7 +3,7 @@
 //
 //	go run ./tools/dev <task> [flags] [-- extra go test arguments]
 //
-// Tasks: install-tools, check-tools, build, test, cover, lint, fuzz, licenses, vulncheck, changes,
+// Tasks: install-tools, check-tools, build, test, cover, lint, fuzz, licenses, vulncheck, changes, changelog,
 // check-workflows, release-snapshot and sign-windows. Run a task with -h for its flags. Builds and
 // ordinary tests run with CGO_ENABLED=0; the race detector needs cgo.
 package main
@@ -44,6 +44,7 @@ var tasks = map[string]func(args []string) error{
 	"fuzz":             fuzz,
 	"licenses":         licenses,
 	"changes":          changes,
+	"changelog":        changelog,
 	"vulncheck":        vulncheck,
 	"check-workflows":  checkWorkflows,
 	"release-snapshot": releaseSnapshot,
@@ -448,9 +449,10 @@ func selectRuns(runs [][]string, part string) ([][]string, error) {
 // fixedStepsBudget is the time, in minutes, that the check job's limit allows for every step but
 // the two race steps a runner runs. With those at their limits (2 x 20) it gives the job's 60
 // minutes: the split's own arithmetic, not an allowance for slow hosts (DESIGN.md section 17).
-// Source: on macos-26-intel, the slowest runner, the non-race steps took about 12 minutes (721 s)
-// in run 43788575833, whose coverage step restored cached results for four quick packages; 20
-// leaves about 8 minutes of margin. On the slow host of run 43774194055 they took 23 min 09 s, so
+// Source: on macos-26-intel, the slowest runner, the non-race steps took 16 min 54 s in run
+// 43797784643, which retested every package with no cache restored; 20 leaves about 3 minutes of
+// margin (run 43788575833 showed about 12 minutes, but its coverage step restored cached results
+// for four quick packages). On the slow host of run 43774194055 they took 23 min 09 s, so
 // there the two race steps would share about 37 minutes; such a host is a runner fault, and the
 // limits are not sized for it.
 const fixedStepsBudget = 20

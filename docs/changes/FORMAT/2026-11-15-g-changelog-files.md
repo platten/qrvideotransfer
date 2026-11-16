@@ -1,0 +1,1 @@
+Stream G: the change log of section 15 moved unchanged to `docs/changes/FORMAT/2026-11-13-table.md`; each later change is a file of its own in `docs/changes/FORMAT/` (DESIGN.md section 17), dated in UTC and ordered by topic within a day.

@@ -1,0 +1,1 @@
+M2 Geometry, round 3 of PR #30: the M5 section adds inferring the frame index of a capture whose header copies all fail (deferred from M2 by designer ruling, DESIGN section 7 rule 1) and mirrored recordings (FORMAT section 4.1)

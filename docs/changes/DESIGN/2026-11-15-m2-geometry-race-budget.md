@@ -1,0 +1,1 @@
+M2 Geometry, race budget (PR #39): section 17 says that `internal/vision` runs a smoke subset under the race detector, with its statistical assertions only in the non-race step and a budget of about 3 minutes on a developer machine, and gives the macos-26-intel figures (vision 125 s under race, down from 959 s; race step 13 min 26 s)

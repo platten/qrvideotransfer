@@ -1,0 +1,1 @@
+Stream G, review of PR #41 round 3: section 17 gives the source of the 20 minutes for the non-race steps as run 43797784643, which retested every package with no cache: 16 min 54 s on macos-26-intel, about 3 minutes of margin rather than 8 (the 12 minutes of run 43788575833 came with four packages cached).
