@@ -137,11 +137,12 @@ type platformJob struct {
 	tags string
 }
 
-// compileJobs returns one job per target without build tags and, when tags is set, one more per
-// target with them; a job is named "goos/goarch", followed by its tags.
+// compileJobs returns one job per target for each tag set: none, the release tags (when set), and
+// the release tags with the HEVC fast path's (fuzzTags), which CI's fast-path step builds; a job
+// is named "goos/goarch", followed by its tags.
 func compileJobs(tags string) []platformJob {
 	var jobs []platformJob
-	for _, set := range slices.Compact([]string{"", tags}) {
+	for _, set := range slices.Compact([]string{"", tags, fuzzTags(tags)}) {
 		for _, t := range targets {
 			name := strings.TrimSpace(t[0] + "/" + t[1] + " " + set)
 			jobs = append(jobs, platformJob{name, []string{"CGO_ENABLED=0", "GOOS=" + t[0], "GOARCH=" + t[1]}, set})
@@ -335,6 +336,11 @@ func goTagArgs(tags string) []string {
 
 // buildTests builds the test binary of every package into dir.
 func buildTests(ctx context.Context, d platformDeps, env []string, tags, ldflags, dir string, race bool) error {
+	return buildTestsOf(ctx, d, env, tags, ldflags, dir, race, "./...")
+}
+
+// buildTestsOf builds the test binaries of the packages pattern names into dir.
+func buildTestsOf(ctx context.Context, d platformDeps, env []string, tags, ldflags, dir string, race bool, pattern string) error {
 	args := append([]string{"test", "-c", "-o", dir + string(os.PathSeparator)}, goTagArgs(tags)...)
 	if race {
 		args = append(args, "-race")
@@ -342,7 +348,21 @@ func buildTests(ctx context.Context, d platformDeps, env []string, tags, ldflags
 	if ldflags != "" {
 		args = append(args, "-ldflags="+ldflags)
 	}
-	return d.run(ctx, env, "go", append(args, "./...")...)
+	return d.run(ctx, env, "go", append(args, pattern)...)
+}
+
+// fastPathRun builds internal/video's test binary with the HEVC fast path's tag set and runs it,
+// as CI's "HEVC fast-path tests" step does on every runner.
+func fastPathRun(ctx context.Context, r *platformReport, d platformDeps, label string, env []string, dir, root string, windows bool, runEnv []string, dirs map[string]string, timeout time.Duration) {
+	rel, ok := dirs[isolated]
+	if !ok {
+		return
+	}
+	if err := buildTestsOf(ctx, d, env, fuzzTags(d.tags), "", dir, false, "./internal/video/..."); err != nil {
+		r.add(kindFail, "%s fast-path test build: %v", label, err)
+		return
+	}
+	runBinaries(ctx, r, d, label+" fast path ("+fuzzTags(d.tags)+")", dir, root, windows, runEnv, map[string]string{isolated: rel}, timeout)
 }
 
 // runPlatforms runs the steps that opts leaves in.
@@ -595,6 +615,7 @@ func platformsWindows(ctx context.Context, r *platformReport, d platformDeps, o 
 		return
 	}
 	runBinaries(ctx, r, d, "windows/amd64", plain, root, true, nil, dirs, o.timeout)
+	fastPathRun(ctx, r, d, "windows/amd64", []string{"CGO_ENABLED=0", "GOOS=windows", "GOARCH=amd64"}, filepath.Join(root, ".bin-fastpath"), root, true, nil, dirs, o.timeout)
 	raceBin := filepath.Join(d.tempRoot, "race-windows-amd64")
 	if !race || !d.exists(raceBin) {
 		r.add(kindNotRun, "windows/amd64 race: no race binaries (the race step builds them, with zig)")
@@ -635,12 +656,16 @@ func platformsArm64(ctx context.Context, r *platformReport, d platformDeps, o pl
 		r.add(kindFail, "arm64: %v", err)
 		return
 	}
+	env := []string{"CGO_ENABLED=0", "GOOS=linux", "GOARCH=arm64"}
+	fast := filepath.Join(d.tempRoot, "arm64-fastpath")
 	if mode == "native" {
 		runBinaries(ctx, r, d, "linux/arm64 (native)", bin, wd, false, nil, dirs, o.timeout)
+		fastPathRun(ctx, r, d, "linux/arm64 (native)", env, fast, wd, false, nil, dirs, o.timeout)
 		return
 	}
 	r.add(kindInfo, "arm64: %s", emulationNotice)
 	runBinaries(ctx, r, d, "linux/arm64 (emulated)", bin, wd, false, []string{emulatedEnv}, dirs, o.emulatedTimeout)
+	fastPathRun(ctx, r, d, "linux/arm64 (emulated)", env, fast, wd, false, []string{emulatedEnv}, dirs, o.emulatedTimeout)
 }
 
 // commandWithCancel returns a command bound to ctx. When ctx ends, a Windows test binary run

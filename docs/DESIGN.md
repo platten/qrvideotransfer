@@ -1675,8 +1675,9 @@ by GoReleaser).
   any step could not run, and it takes no `-skip` (`-strict` fails on steps that could not run
   alone; `-skip` leaves named steps out of a routine run and refuses unknown names). A step that
   could not run is reported as NOT RUN with its reason, never as a pass.
-  - *compile*: `go vet` and `go test -c` of every package for all six targets, with and without the
-    release build tags, `CGO_ENABLED=0`. This catches build-constraint files, signature changes and
+  - *compile*: `go vet` and `go test -c` of every package for all six targets, `CGO_ENABLED=0`, with
+    no tags, the release build tags, and the release tags with the HEVC fast path's
+    `unsandboxedhevc` (the set of CI's "HEVC fast-path tests" step). This catches build-constraint files, signature changes and
     code that compiles only on some systems.
   - *lint*: golangci-lint with `GOOS` linux, darwin and windows, each with and without the tags.
   - *race*: race-enabled test binaries built with zig 0.17.1 as the C cross-compiler (`CC="zig cc
@@ -1690,14 +1691,18 @@ by GoReleaser).
     its package directory in a copy of the module's files (tracked, and untracked but not ignored;
     never `recordings/`) under the Windows user's `%TEMP%`. They run through `cmd.exe` with full
     Windows paths, so that tests which start themselves again (engine workers, Job Objects) find
-    their binary. The Windows-only tests run there (Job Object, sparse files, path rules);
+    their binary. `internal/video` also runs a third time, built with the HEVC fast path's tag set,
+    as CI's fast-path step does: run 1 of the pull request that added this task failed in that step
+    on windows-2025, which the local run had not built (a timing check in `TestReservationLoadLimit`
+    read 9 µs under its 2 s bound, between wall-clock readings and the monotonic timer; the test now
+    allows 50 ms). The Windows-only tests run there (Job Object, sparse files, path rules);
     `internal/video`'s race tests do not, because its race-enabled engine workers cannot allocate
     ThreadSanitizer memory under the zig-linked race runtime; the task reports them as CI-ONLY,
     which `-full` accepts. Outside WSL the step reports NOT RUN.
   - *arm64*: the linux/arm64 test binaries run natively on an arm64 Linux host, else under user-mode
     emulation through an enabled binfmt entry for aarch64 (`qemu-user-static`, installed by
     `scripts/setup.sh --cross` where the script has usable root rights), with `QRVT_EMULATED=1` and
-    a 90-minute limit per test binary. qemu without binfmt is reported as NOT RUN, because tests
+    a 90-minute limit per test binary; `internal/video` runs with the fast-path tag set too. qemu without binfmt is reported as NOT RUN, because tests
     that start their own binary again need binfmt. Under emulation `internal/video`'s
     `TestHostileFiles` logs instead of asserting its 60 s bound per hostile file (`nostsd.mp4` took
     65 s); the step prints that list and every bound it logged. Every other test asserts as it

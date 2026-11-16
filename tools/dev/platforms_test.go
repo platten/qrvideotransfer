@@ -319,6 +319,9 @@ func TestWindowsRaceExcludesVideo(t *testing.T) {
 	}
 	var plainVideo, raceVideo, raceFrame int
 	for _, c := range *calls {
+		if strings.Contains(c, "fastpath") {
+			continue // the fast-path run, counted by TestFastPathTests
+		}
 		race := strings.Contains(c, "race-windows-amd64")
 		switch {
 		case strings.Contains(c, "video.test.exe") && race:
@@ -363,8 +366,9 @@ func TestArm64EmulationNotice(t *testing.T) {
 	if strings.Contains(s, "platforms: x logged") {
 		t.Errorf("a quoted marker was surfaced as a logged bound:\n%s", s)
 	}
-	if len(*calls) != 1 || !strings.Contains((*calls)[0], emulatedEnv) {
-		t.Errorf("the emulated run's environment: %q", *calls)
+	// The package's run and its fast-path run, both emulated.
+	if len(*calls) != 2 || !strings.Contains((*calls)[0], emulatedEnv) || !strings.Contains((*calls)[1], emulatedEnv) {
+		t.Errorf("the emulated runs' environment: %q", *calls)
 	}
 }
 
@@ -451,7 +455,7 @@ func TestFastPathTests(t *testing.T) {
 		builds = append(builds, strings.Join(env, " ")+" "+strings.Join(args, " "))
 		return nil
 	}
-	o := fullWithout("compile", "lint", "race")
+	o := fullWithout("compile", "lint")
 	if _, err := runPlatforms(t.Context(), o, d); err != nil {
 		t.Fatal(err)
 	}
