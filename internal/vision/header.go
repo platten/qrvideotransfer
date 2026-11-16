@@ -24,7 +24,9 @@ var _ HeaderReader = SlotReader{}
 
 // Read reads the four header copies of the code whose finders are q. It decodes each copy alone,
 // then the sums of pairs of copies that did not decode, then, if nothing decoded, the sum of all
-// four, and returns one header per distinct frame index, in the order found.
+// four, and returns each distinct header once, in the order found: normally one per frame index,
+// but two copies decoding the same index with different fields (a false CRC pass, or crafted
+// content) are both returned, so that a conflicting header cannot hide the true one.
 func (SlotReader) Read(f *video.Frame, q Quad) ([]frame.Header, bool) {
 	soft, ok := copySoft(f, q)
 	if !ok {
@@ -41,7 +43,7 @@ func (SlotReader) Read(f *video.Frame, q Quad) ([]frame.Header, bool) {
 			sum[s] = int8(max(-127, min(127, t)))
 		}
 		h, ok := frame.DecodeHeader(sum[:])
-		if ok && !slices.ContainsFunc(out, func(o frame.Header) bool { return o.FrameIndex == h.FrameIndex }) {
+		if ok && !slices.Contains(out, h) {
 			out = append(out, h)
 		}
 		return ok
@@ -77,15 +79,21 @@ func copySoft(f *video.Frame, q Quad) ([4][frame.HeaderSlots]int8, bool) {
 	if !ok {
 		return soft, false
 	}
+	return modelSoft(&v, &m, -1)
+}
+
+// modelSoft returns the soft bits of the four copies sampled through model m (see copySoft).
+func modelSoft(v *geomLuma, m *geomModel, skip int) ([4][frame.HeaderSlots]int8, bool) {
+	var soft [4][frame.HeaderSlots]int8
 	var raw [4][frame.HeaderSlots]float32
-	refs, ok := headerRefs(&v, &m)
+	refs, ok := headerRefs(v, m)
 	if !ok {
 		return soft, false
 	}
-	headerSample(&v, &m, &raw)
+	headerSample(v, m, &raw, skip)
 	for c := range 4 {
 		black, white := refs[c][0], refs[c][1]
-		if white-black < headerMinContrast {
+		if c == skip || white-black < headerMinContrast {
 			continue
 		}
 		for s, val := range raw[c] {
@@ -94,6 +102,27 @@ func copySoft(f *video.Frame, q Quad) ([4][frame.HeaderSlots]int8, bool) {
 		}
 	}
 	return soft, true
+}
+
+// headerDecodesAt reports whether any copy other than skip decodes alone through the model of the
+// finder centres dst with the lens's k1: a cheap test, one lens and no pairs.
+func headerDecodesAt(v *geomLuma, dst []gpt, k1 float64, skip int) bool {
+	m, _, ok := geomFitModel(headerFractions[:], dst, geomNewLens(v.w, v.h, k1))
+	if !ok {
+		return false
+	}
+	soft, ok := modelSoft(v, &m, skip)
+	if !ok {
+		return false
+	}
+	for c := range 4 {
+		if c != skip {
+			if _, ok := frame.DecodeHeader(soft[c][:]); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // headerFractions are the finder centres in finder-rectangle fractions, by corner.
@@ -111,33 +140,42 @@ func headerModel(v *geomLuma, q Quad) (geomModel, bool) {
 	}
 	var best geomModel
 	bestScore, found := -1.0, false
-	var raw [4][frame.HeaderSlots]float32
 	for i := range headerK1Steps {
 		k1 := headerK1Top * float64(i) / float64(headerK1Steps-1)
-		m, _, ok := geomFitModel(headerFractions[:], dst, geomNewLens(v.w, v.h, k1))
-		if !ok {
-			continue
-		}
-		refs, ok := headerRefs(v, &m)
-		if !ok {
-			continue
-		}
-		headerSample(v, &m, &raw)
-		score := 0.0
-		for c := range 4 {
-			black, white := refs[c][0], refs[c][1]
-			if white-black < headerMinContrast {
-				continue
-			}
-			for _, val := range raw[c] {
-				score += math.Min(1, math.Abs(float64(2*(val-black)/(white-black)-1)))
-			}
-		}
-		if score > bestScore {
+		m, score, _, ok := headerScore(v, dst, k1, -1)
+		if ok && score > bestScore {
 			best, bestScore, found = m, score, true
 		}
 	}
 	return best, found
+}
+
+// headerScore fits the fraction-to-capture model of the finder centres dst with the lens's k1 and
+// returns it with the slots' total contrast and the number of slots counted: the sum, over the slots of every copy other than skip
+// whose finder shows its black and white, of |2t - 1| capped at 1, t being the slot's level
+// between them.
+func headerScore(v *geomLuma, dst []gpt, k1 float64, skip int) (m geomModel, score float64, n int, ok bool) {
+	m, _, ok = geomFitModel(headerFractions[:], dst, geomNewLens(v.w, v.h, k1))
+	if !ok {
+		return m, 0, 0, false
+	}
+	refs, ok := headerRefs(v, &m)
+	if !ok {
+		return m, 0, 0, false
+	}
+	var raw [4][frame.HeaderSlots]float32
+	headerSample(v, &m, &raw, skip)
+	for c := range 4 {
+		black, white := refs[c][0], refs[c][1]
+		if c == skip || white-black < headerMinContrast {
+			continue
+		}
+		for _, val := range raw[c] {
+			score += math.Min(1, math.Abs(float64(2*(val-black)/(white-black)-1)))
+			n++
+		}
+	}
+	return m, score, n, true
 }
 
 // headerAxes returns the half-axes of a footprint of fx by fy fractions at fraction p.
@@ -147,9 +185,12 @@ func headerAxes(m *geomModel, p gpt, fx, fy float64) (gpt, gpt) {
 	return ex, ey
 }
 
-// headerSample samples every slot of every copy into raw.
-func headerSample(v *geomLuma, m *geomModel, raw *[4][frame.HeaderSlots]float32) {
+// headerSample samples every slot of every copy other than skip into raw.
+func headerSample(v *geomLuma, m *geomModel, raw *[4][frame.HeaderSlots]float32, skip int) {
 	for c := range 4 {
+		if c == skip {
+			continue
+		}
 		for s := range frame.HeaderSlots {
 			p := gpt(frame.HeaderSlot(c, s/4, s%4))
 			ex, ey := headerAxes(m, p, 0.25/231, 0.25/126) // central half of a slot

@@ -22,6 +22,10 @@ const (
 	rectifyOutlier   = 0.35 // largest deviation of a corner from its neighbours' displacement, cells
 	rectifyLatticeX  = 32   // anchor pitch, cells (FORMAT.md section 5.2)
 	rectifyLatticeY  = 30
+	// rectifyAnchorsOnly is the number of located anchors from which a finder must agree with the
+	// anchors, within rectifyFinderKeep cells, to stay in the global model's fit.
+	rectifyAnchorsOnly = 8
+	rectifyFinderKeep  = 0.25
 )
 
 // MeshFitter is the Rectifier of docs/DESIGN.md section 10, step 3. The zero value is ready to use
@@ -87,15 +91,29 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 		obs[i].Anchor = a
 		cells[i] = gpt{float64(a.X + 2), float64(a.Y + 2)}
 	}
-	rectifyLocate(&v, &model, src, cells, obs, contrast*rectifyMinSaddle)
+	rectifyLocate(&v, &model, src, cells, obs, contrast*rectifyMinSaddle, 0)
 
-	// Refit with the corners, reject outliers, refit.
+	// Refit with the corners, reject outliers, refit. Once rectifyAnchorsOnly anchors are located,
+	// a finder stays in the refit only while it lies within rectifyFinderKeep cells of where the
+	// anchors alone put it: a finder off by a fraction of a module would otherwise pull the mesh's
+	// corner with the weight of an anchor, while an accurate one still steadies the corner.
 	for range 2 {
 		var s, d []gpt
-		s, d = append(s, src...), append(d, dst...)
 		for i := range obs {
 			if obs[i].Found {
 				s, d = append(s, cells[i]), append(d, gpt(obs[i].Corner))
+			}
+		}
+		if len(s) < rectifyAnchorsOnly {
+			s, d = append(s, src...), append(d, dst...)
+		} else if m0, _, ok := geomFitModelK1(s, d, v.w, v.h); ok {
+			for k, c := range src {
+				ex := m0.at(c.add(gpt{0.5, 0})).sub(m0.at(c.sub(gpt{0.5, 0})))
+				ey := m0.at(c.add(gpt{0, 0.5})).sub(m0.at(c.sub(gpt{0, 0.5})))
+				cell := math.Sqrt(math.Abs(ex.cross(ey)))
+				if m0.at(c).sub(dst[k]).norm() <= rectifyFinderKeep*cell {
+					s, d = append(s, c), append(d, dst[k])
+				}
 			}
 		}
 		if len(s) >= 8 {
@@ -129,8 +147,10 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 	return mesh, obs, nil
 }
 
-// rectifyLocate locates the anchors' saddles, nearest the finders first.
-func rectifyLocate(v *geomLuma, model *geomModel, finders, cells []gpt, obs []AnchorObs, minContrast float32) {
+// rectifyLocate locates the anchors' saddles, nearest the finders first. With giveUp > 0 it stops
+// once giveUp anchors have been tried and fewer than eight located: the quad is then not a code's,
+// and the rest of a large hostile grid is not searched.
+func rectifyLocate(v *geomLuma, model *geomModel, finders, cells []gpt, obs []AnchorObs, minContrast float32, giveUp int) {
 	order := make([]int, len(cells))
 	near := make([]float64, len(cells))
 	for i, c := range cells {
@@ -150,7 +170,10 @@ func rectifyLocate(v *geomLuma, model *geomModel, finders, cells []gpt, obs []An
 		return 0
 	})
 	var located []int
-	for _, i := range order {
+	for tried, i := range order {
+		if giveUp > 0 && tried >= giveUp && len(located) < 8 {
+			return
+		}
 		c := cells[i]
 		pred := model.at(c)
 		// Displacement of the located anchors within two lattice steps, weighted by inverse distance.
@@ -382,7 +405,8 @@ func rectifyMeasure(v *geomLuma, m *Mesh, o *AnchorObs) {
 		c := gpt(m.At(x, y))
 		hx := gpt(m.At(x+h, y)).sub(gpt(m.At(x-h, y))).mul(0.5)
 		hy := gpt(m.At(x, y+h)).sub(gpt(m.At(x, y-h))).mul(0.5)
-		return v.footprint(c, hx, hy)
+		o, _ := v.footprint(c, hx, hy)
+		return o
 	}
 	avg := func(a, b modem.Obs) modem.Obs {
 		return modem.Obs{Y: (a.Y + b.Y) / 2, Cb: (a.Cb + b.Cb) / 2, Cr: (a.Cr + b.Cr) / 2, Saturated: a.Saturated || b.Saturated}

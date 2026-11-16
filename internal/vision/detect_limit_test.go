@@ -11,10 +11,11 @@ import (
 	"github.com/platten/qrvideotransfer/internal/channel"
 )
 
-// geomDetectRate films n poses of the code with cfg and counts the quads found with every centre
-// within half a module of the truth, the wrong quads, and the smallest true finder module seen,
-// in camera pixels.
-func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64) (found, wrong int, minMod float64) {
+// geomDetectRate films n poses of the code with cfg and counts the quads located (exact or
+// imprecise, as geomJudge judges them, the header's frame and the mesh's centre error checked only
+// when it matters), of those the imprecise ones, the wrong ones, and the smallest true finder
+// module seen, in camera pixels.
+func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64) (found, imprecise, wrong int, minMod float64) {
 	t.Helper()
 	var mu sync.Mutex
 	var filmErr error
@@ -29,12 +30,25 @@ func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed u
 		}
 		var d FinderDetector
 		q, ok := d.Detect(p.f, nil)
-		want, mod := geomFinderTruth(c, p.tr)
-		good := ok
-		for k := range 4 {
-			if ok && geomDist(q.Centres[k], want[k]) > mod[k]/2 {
-				good = false
+		_, mod := geomFinderTruth(c, p.tr)
+		good, inexact := false, false
+		if ok {
+			// Judge first as if the capture were usable; check that only for an imprecise quad.
+			v := geomJudge(c, p.tr, q, d.hidden, true, true, 0)
+			if v == geomImprecise {
+				hs, hok := SlotReader{}.Read(p.f, q)
+				m, _, err := MeshFitter{}.Fit(p.f, q, c.layout)
+				rms := math.Inf(1)
+				if err == nil {
+					rms, _ = channel.CentreError(p.tr, func(gx, gy int) (float64, float64, bool) {
+						pt := m.At(float64(gx)+0.5, float64(gy)+0.5)
+						return pt.X, pt.Y, geomMeasured(gx, gy)
+					})
+				}
+				hok = hok && int(hs[0].FrameIndex) < len(c.headers) && hs[0] == c.headers[hs[0].FrameIndex]
+				v = geomJudge(c, p.tr, q, d.hidden, hok, err == nil, rms)
 			}
+			good, inexact = v != geomWrong, v == geomImprecise
 		}
 		mu.Lock()
 		defer mu.Unlock()
@@ -44,6 +58,9 @@ func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed u
 		switch {
 		case good:
 			found++
+			if inexact {
+				imprecise++
+			}
 		case ok:
 			wrong++
 		}
@@ -51,7 +68,7 @@ func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed u
 	if filmErr != nil {
 		t.Fatal(filmErr)
 	}
-	return found, wrong, minMod
+	return found, imprecise, wrong, minMod
 }
 
 // geomModuleCode is the code of the module-size tests: a 240 x 135 grid, whose finder module is
@@ -88,10 +105,11 @@ func TestDetectModuleLimit(t *testing.T) {
 		preset string
 		fill   float64
 	}{{"handheld", geomModuleLimit / 8}, {"handheld", 0.6}, {"iphone-hdr", geomModuleLimitHLG / 8}} {
-		found, wrong, minMod := geomDetectRate(t, c, geomModuleConfig(t, tc.preset, tc.fill), n, 6000)
-		t.Logf("%s fill %.2f: found %d of %d, wrong %d; smallest true module %.2f px", tc.preset, tc.fill, found, n, wrong, minMod)
-		if found != n || wrong != 0 {
-			t.Errorf("%s fill %.2f: found %d of %d, %d wrong", tc.preset, tc.fill, found, n, wrong)
+		found, imprecise, wrong, minMod := geomDetectRate(t, c, geomModuleConfig(t, tc.preset, tc.fill), n, 6000)
+		t.Logf("%s fill %.2f: found %d of %d (%d imprecise), wrong %d; smallest true module %.2f px",
+			tc.preset, tc.fill, found, n, imprecise, wrong, minMod)
+		if found != n || wrong != 0 || float64(imprecise) > geomMaxImprecise*float64(found) {
+			t.Errorf("%s fill %.2f: found %d of %d, %d imprecise, %d wrong", tc.preset, tc.fill, found, n, imprecise, wrong)
 		}
 	}
 }

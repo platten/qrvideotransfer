@@ -264,6 +264,10 @@ recordings, stripe cancellation and 10-bit recordings against them. Replace the 
 DESIGN.md section 11 and the simulator presets in section 15 with what was measured, and update the
 defaults.
 
+Infer the frame index of a capture whose four header copies fail from the last index and the phase
+markers, carrying the quad from tracking (deferred from M2, DESIGN §7 rule 1). Decode mirrored
+recordings, which the detector assumes away in M2 (FORMAT §4.1).
+
 ### M6. Scale and HDR output (3 agents)
 
 - Sliced parallel encode and decode; resuming with `--state-dir`; and the memory bounds of DESIGN.md
@@ -360,3 +364,4 @@ documents describe what was actually built, and the release candidate tag is pre
 | Date | Change |
 | --- | --- |
 | 2026-11-14 | The owner made the GitHub repository public (Authorisations, stream G note); the owner swapped the last two milestones: M7 is now the final security pass and M8 documentation and release, which gains a delta security review of everything merged after M7 before the release candidate is prepared |
+| 2026-11-15 | M2 Geometry, round 3 of PR #30: the M5 section adds inferring the frame index of a capture whose header copies all fail (deferred from M2 by designer ruling, DESIGN section 7 rule 1) and mirrored recordings (FORMAT section 4.1) |
