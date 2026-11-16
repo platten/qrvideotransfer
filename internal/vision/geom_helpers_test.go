@@ -124,6 +124,43 @@ type geomShot struct {
 	tr *channel.Truth
 }
 
+// geomVerdict is the judgement of a located quad against the truth.
+type geomVerdict int
+
+// Verdicts.
+const (
+	geomExact     geomVerdict = iota // every centre within half a module of the truth
+	geomImprecise                    // the hidden finder's estimate over half a module off but within one, and the capture usable
+	geomWrong                        // anything else
+)
+
+// geomMaxImprecise is the largest share of located quads that may be imprecise.
+const geomMaxImprecise = 0.03
+
+// geomJudge judges quad q, located with finder hidden predicted (-1 when all four were found), by
+// the line the designer drew: a visible finder more than half a module from the truth makes the
+// quad wrong. Only the hidden finder may be up to one module off, and then only when the header
+// reads, the mesh fits and the capture's cell-centre error rms is at most 0.15 cell; such a quad is
+// imprecise. Anything else is wrong.
+func geomJudge(c *geomCode, tr *channel.Truth, q Quad, hidden int, headerOK, meshOK bool, rms float64) geomVerdict {
+	want, mod := geomFinderTruth(c, tr)
+	verdict := geomExact
+	for k := range 4 {
+		e := geomDist(q.Centres[k], want[k]) / mod[k]
+		switch {
+		case e <= 0.5:
+		case k == hidden && e <= 1:
+			verdict = geomImprecise
+		default:
+			return geomWrong
+		}
+	}
+	if verdict == geomImprecise && !(headerOK && meshOK && rms <= 0.15) {
+		return geomWrong
+	}
+	return verdict
+}
+
 // geomPose films pose i of a set of n: one capture of the code with cfg, with seed seed+i and a
 // display time drawn from it. When the capture is dropped it films again with seed+i+n, and so on.
 func geomPose(c *geomCode, cfg channel.Config, n, i int, seed uint64) (geomShot, error) {

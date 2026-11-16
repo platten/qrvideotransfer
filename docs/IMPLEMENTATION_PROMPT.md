@@ -267,6 +267,10 @@ recordings, stripe cancellation and 10-bit recordings against them. Replace the 
 DESIGN.md section 11 and the simulator presets in section 15 with what was measured, and update the
 defaults.
 
+Infer the frame index of a capture whose four header copies fail from the last index and the phase
+markers, carrying the quad from tracking (deferred from M2, DESIGN §7 rule 1). Decode mirrored
+recordings, which the detector assumes away in M2 (FORMAT §4.1).
+
 ### M6. Scale and HDR output (3 agents)
 
 - Sliced parallel encode and decode; resuming with `--state-dir`; and the memory bounds of DESIGN.md
