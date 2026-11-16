@@ -203,20 +203,20 @@ jobs:
         with:
           persist-credentials: false
 
-      # apt (Ubuntu) or Homebrew (macOS) installs ffmpeg with libx265; Go and wasmtime come from
-      # their release archives with pinned SHA-256.
-      - name: scripts/setup.sh --yes --spike
+      # apt (Ubuntu) or Homebrew (macOS) installs ffmpeg with libx265, and apt qemu-user-static;
+      # Go, wasmtime and zig come from their release archives with pinned SHA-256.
+      - name: scripts/setup.sh --yes --spike --cross
         if: runner.os != 'Windows'
         timeout-minutes: 35
         shell: bash
-        run: scripts/setup.sh --yes --spike
+        run: scripts/setup.sh --yes --spike --cross
 
-      # winget installs ffmpeg (Gyan.FFmpeg); Go and wasmtime come from their release archives.
-      - name: scripts/setup.ps1 -Yes -Spike
+      # winget installs ffmpeg (Gyan.FFmpeg); Go, wasmtime and zig come from their release archives.
+      - name: scripts/setup.ps1 -Yes -Spike -Cross
         if: runner.os == 'Windows'
         timeout-minutes: 35
         shell: pwsh
-        run: scripts/setup.ps1 -Yes -Spike
+        run: scripts/setup.ps1 -Yes -Spike -Cross
 
       - name: Check the installed versions (Unix)
         if: runner.os != 'Windows'
@@ -230,6 +230,10 @@ jobs:
           go run ./tools/dev check-tools # Go, git and every tool pinned in tools/dev, by version
           ffmpeg -hide_banner -encoders | grep -q libx265
           wasmtime --version | grep -q ' 50\.0\.1'
+          test "$(zig version)" = 0.17.1
+          if [ "$RUNNER_OS" = Linux ]; then
+            command -v qemu-aarch64-static || command -v qemu-aarch64 || test -e /proc/sys/fs/binfmt_misc/qemu-aarch64
+          fi
 
       - name: Check the installed versions (Windows)
         if: runner.os == 'Windows'
@@ -239,6 +243,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $p = Join-Path $env:LOCALAPPDATA 'Programs'
           $env:PATH = (Join-Path $p 'go1.27.4\go\bin') + ';' + (Join-Path $p 'wasmtime-v50.0.1-x86_64-windows') + ';' +
+            (Join-Path $p 'zig-x86_64-windows-0.17.1') + ';' +
             [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'User')
           if ((go env GOVERSION) -ne 'go1.27.4') { throw "go is $(go env GOVERSION)" }
           $env:PATH = (Join-Path (go env GOPATH) 'bin') + ';' + $env:PATH
@@ -246,10 +251,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'check-tools failed' }
           if (-not ((ffmpeg -hide_banner -encoders 2>$null) -match 'libx265')) { throw 'ffmpeg has no libx265' }
           if (-not ((wasmtime --version) -match ' 50\.0\.1')) { throw 'wrong wasmtime' }
+          if ((zig version) -ne '0.17.1') { throw "zig is $(zig version)" }
 
   # Runs scripts/setup.sh --yes in Fedora and Arch Linux containers (images pinned by digest), which
   # have neither Go nor git, so the dnf and pacman paths install git and the script downloads Go.
   # Without --spike: ffmpeg with libx265 on Fedora needs RPM Fusion, which the script only advises.
+  # With --cross, so that the dnf and pacman names of qemu-user-static are exercised too.
   # The digests are refreshed by hand at the start of each milestone, and for Fedora also when a new
   # release comes out (spring and autumn); the tag beside each digest names what it was taken from.
   # The checkout is mounted read-only and the container runs with no-new-privileges.
@@ -272,16 +279,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: scripts/setup.sh --yes, then check the installed versions
+      - name: scripts/setup.sh --yes --cross, then check the installed versions
         timeout-minutes: 25
         shell: bash
         run: |
           docker run --rm --security-opt no-new-privileges -v "$PWD:/src:ro" -w /src -e GOFLAGS=-buildvcs=false "$IMAGE" sh -euc '
-            scripts/setup.sh --yes
-            export PATH="$HOME/.local/go1.27.4/bin:$PATH"
+            scripts/setup.sh --yes --cross
+            export PATH="$HOME/.local/go1.27.4/bin:$HOME/.local/bin:$PATH"
             test "$(go env GOVERSION)" = go1.27.4
             export PATH="$(go env GOPATH)/bin:$PATH"
             go run ./tools/dev check-tools
+            test "$(zig version)" = 0.17.1
+            command -v qemu-aarch64-static || command -v qemu-aarch64 || test -e /proc/sys/fs/binfmt_misc/qemu-aarch64
           '
         env:
           IMAGE: ${{ matrix.image }}

@@ -45,6 +45,7 @@ var tasks = map[string]func(args []string) error{
 	"licenses":         licenses,
 	"changes":          changes,
 	"changelog":        changelog,
+	"platforms":        platforms,
 	"vulncheck":        vulncheck,
 	"check-workflows":  checkWorkflows,
 	"release-snapshot": releaseSnapshot,

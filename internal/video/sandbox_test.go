@@ -577,7 +577,11 @@ func TestHostileFiles(t *testing.T) {
 			continue
 		}
 		if el := time.Since(start); el > 60*time.Second {
-			t.Errorf("%s: %v", name, el)
+			if emulated() {
+				t.Logf("%s: %v, over the 60 s bound, logged rather than asserted under emulation", name, el)
+			} else {
+				t.Errorf("%s: %v", name, el)
+			}
 		}
 		// The playlist must be refused by the format whitelist, as ffprobe opens it, not by a bound.
 		// (Wall time is no measure of that: it includes waiting for a slot behind the parallel tests,
