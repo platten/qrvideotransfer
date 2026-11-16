@@ -90,10 +90,10 @@ func TestReservationLoadLimit(t *testing.T) {
 	if !errors.As(err, &le) || le.Limit != "EngineLoadLimit" || !strings.Contains(err.Error(), "wall ") {
 		t.Fatalf("got %v", err)
 	}
-	// readyAt and cancelledAt are wall-clock readings (UnixNano) while the load timer runs on the
-	// monotonic clock, so on Windows the measured gap can come in microseconds under the limit
-	// (1.9999913 s on windows-2025, CI run 43903238445): allow 50 ms.
-	if d := time.Duration(m.cancelledAt.Load() - m.readyAt.Load()); d < loadLimit-50*time.Millisecond || d > loadLimit+time.Second {
+	// readyAt and cancelledAt are monotonic offsets from meterBase, like the load timer, so the gap
+	// cannot come in under the limit (it did by microseconds with wall-clock readings on
+	// windows-2025, CI run 43903238445).
+	if d := time.Duration(m.cancelledAt.Load() - m.readyAt.Load()); d < loadLimit || d > loadLimit+time.Second {
 		t.Errorf("cancelled %v after its turn, limit %v", d, loadLimit)
 	}
 }

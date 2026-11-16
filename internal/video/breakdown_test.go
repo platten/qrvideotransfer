@@ -17,15 +17,15 @@ func TestBreakdown(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	m := &meter{}
-	m.start.Store(now.Add(-63 * time.Second).UnixNano())
-	m.readyAt.Store(now.Add(-62 * time.Second).UnixNano())
-	m.memAt.Store(now.Add(-61700 * time.Millisecond).UnixNano())
-	m.openAt.Store(now.Add(-61950 * time.Millisecond).UnixNano())
-	m.firstIn.Store(now.Add(-61900 * time.Millisecond).UnixNano())
+	m.start.Store(meterStamp(now.Add(-63 * time.Second)))
+	m.readyAt.Store(meterStamp(now.Add(-62 * time.Second)))
+	m.memAt.Store(meterStamp(now.Add(-61700 * time.Millisecond)))
+	m.openAt.Store(meterStamp(now.Add(-61950 * time.Millisecond)))
+	m.firstIn.Store(meterStamp(now.Add(-61900 * time.Millisecond)))
 	m.inCalls.Store(12)
 	m.inBytes.Store(1234567)
-	m.progressAt.Store(now.Add(-30 * time.Second).UnixNano())
-	m.cancelledAt.Store(now.Add(-200 * time.Millisecond).UnixNano())
+	m.progressAt.Store(meterStamp(now.Add(-30 * time.Second)))
+	m.cancelledAt.Store(meterStamp(now.Add(-200 * time.Millisecond)))
 	b := m.breakdown(now)
 	if !strings.Contains(b, "stopped 0.2 s after its cancellation") {
 		t.Errorf("breakdown %q lacks the stop latency", b)
@@ -111,5 +111,24 @@ func TestConcatReportsCancel(t *testing.T) {
 	err := b.Concat(ctxDoneLate{context.Background()}, []string{run}, filepath.Join(dir, "out.mp4"), 12)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("got %v", err)
+	}
+}
+
+// TestMeterStamps: meter times are monotonic offsets from meterBase, never 0 (which means not yet),
+// and convert back to the times they stamped, monotonic reading included (review of PR #42, F1).
+func TestMeterStamps(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	for _, at := range []time.Time{meterBase, now, now.Add(-time.Hour), now.Add(time.Minute)} {
+		v := meterStamp(at)
+		if v == 0 {
+			t.Fatalf("stamp of %v is 0", at)
+		}
+		if d := meterTime(v).Sub(at); d < -time.Nanosecond || d > time.Nanosecond {
+			t.Errorf("stamp of %v comes back %v off", at, d)
+		}
+	}
+	if a, b := meterStamp(now), meterStamp(now.Add(time.Second)); time.Duration(b-a) != time.Second {
+		t.Errorf("a second apart: %v", time.Duration(b-a))
 	}
 }
