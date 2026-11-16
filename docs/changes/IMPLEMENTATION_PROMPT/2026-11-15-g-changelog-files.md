@@ -1,0 +1,1 @@
+Stream G: section 1 says a document change adds an entry file in `docs/changes/<document>/` rather than a table row; the change log moved unchanged to `docs/changes/IMPLEMENTATION_PROMPT/2026-11-14-table.md`.

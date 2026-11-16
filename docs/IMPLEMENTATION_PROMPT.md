@@ -42,8 +42,10 @@ Read these before anything else. They are the specification; this prompt is the 
 | `docs/SECURITY.md` | The threat model, limits and security tests |
 
 Those documents are a draft written before any measurement. When something you measure contradicts
-them, the measurement wins: change the document in the same pull request as the code, and add a line to
-its change log. Do not quietly build something different from what the documents say.
+them, the measurement wins: change the document in the same pull request as the code, and add an entry
+to its change log: a new file in `docs/changes/<document>/`, never a row in a shared table
+(`go run ./tools/dev changelog add`). Do not quietly build something different from what the
+documents say.
 
 ## 2. Ground rules, and why
 
@@ -357,6 +359,8 @@ documents describe what was actually built, and the release candidate tag is pre
 
 ## Change log
 
-| Date | Change |
-| --- | --- |
-| 2026-11-14 | The owner made the GitHub repository public (Authorisations, stream G note); the owner swapped the last two milestones: M7 is now the final security pass and M8 documentation and release, which gains a delta security review of everything merged after M7 before the release candidate is prepared |
+Each change to this document is one file in `docs/changes/IMPLEMENTATION_PROMPT/`, named
+`YYYY-MM-DD-<topic>.md`; read in name order, the files are the log, starting with
+`2026-11-14-table.md`, the table of the entries up to 2026-11-15. Add an entry with `go run
+./tools/dev changelog add IMPLEMENTATION_PROMPT <topic> "<text>"` and read the log with `go run
+./tools/dev changelog show IMPLEMENTATION_PROMPT` (DESIGN.md section 17).

@@ -1,0 +1,1 @@
+Stream G: each change-log entry is a file of its own in `docs/changes/<document>/` (section 17, "Change logs"); the earlier table moved unchanged to `docs/changes/DESIGN/2026-11-13-table.md`, and the change-log section now points there. Section 17 adds the entries to the documents-only allow-list.

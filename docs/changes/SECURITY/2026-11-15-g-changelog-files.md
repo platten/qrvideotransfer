@@ -1,0 +1,1 @@
+Stream G: the change log moved unchanged to `docs/changes/SECURITY/2026-11-13-table.md`; each later change is a file of its own in `docs/changes/SECURITY/` (DESIGN.md section 17).
