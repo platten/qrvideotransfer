@@ -1,9 +1,7 @@
 package vision
 
 import (
-	"runtime"
 	"testing"
-	"time"
 
 	"github.com/platten/qrvideotransfer/internal/frame"
 )
@@ -48,22 +46,24 @@ func TestConfirmsDecoy(t *testing.T) {
 	}
 }
 
-// TestConfirmsOneLayout: within one Detect at most one layout is built; a second grid is refused.
+// TestConfirmsOneLayout: within one Detect at most confirmMaxLayouts distinct grids are used; one
+// more is refused, a grid already used is not, and layouts are cached by grid.
 func TestConfirmsOneLayout(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 4, 2, 1, 27)
 	f := geomPlain(c, 0)
 	v, _ := geomView(f)
-	other, err := frame.NewLayout(240, 135)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := FinderDetector{layout: other, built: true}
+	d := FinderDetector{grids: [][2]int{{240, 135}, {300, 180}}}
 	if d.confirms(f, &v, geomPlainQuad(c)) {
-		t.Error("a second layout was built in one Detect")
+		t.Error("a grid beyond the cap was used in one Detect")
 	}
-	d.built = false
-	if !d.confirms(f, &v, geomPlainQuad(c)) || d.layout.GridX() != 212 {
-		t.Error("true quad not confirmed with a fresh layout")
+	d.grids = [][2]int{{240, 135}, {212, 120}}
+	if !d.confirms(f, &v, geomPlainQuad(c)) {
+		t.Error("true quad not confirmed with its grid among those used")
+	}
+	cached := d.layouts[len(d.layouts)-1]
+	d.grids = nil
+	if !d.confirms(f, &v, geomPlainQuad(c)) || d.layouts[len(d.layouts)-1] != cached {
+		t.Error("the layout was not reused from the cache")
 	}
 }
 
@@ -137,34 +137,13 @@ func geomFakeGrid(t *testing.T, c *geomCode, gridX, gridY int) []uint16 {
 }
 
 // TestDetectHostileGrid: a frame whose header claims a 2047 x 2047 grid, alternating with 2047 x
-// 2046 from call to call, is never located, and each Detect stays within 300 ms and 16 MB of
-// allocation for an 848 x 480 frame (a 2047 x 2047 layout alone allocates about 22 MB).
+// 2046 from call to call, is never located; each Detect allocates at most 16 MB for an 848 x 480
+// frame (a 2047 x 2047 layout alone allocates about 22 MB) and takes at most twice as long as
+// locating the real code in the same process. The grid fails the 1.5-pixel gate, so the
+// three-finder path is not tried either.
 func TestDetectHostileGrid(t *testing.T) {
+	raceSkipStatistics(t) // a cost ratio: race instrumentation distorts it unevenly
 	c := geomNewCode(t, 212, 120, 4, 2, 1, 26)
 	a, b := geomFakeGrid(t, c, 2047, 2047), geomFakeGrid(t, c, 2047, 2046)
-	f := geomPlain(c, 0)
-	var d FinderDetector
-	var before, after runtime.MemStats
-	const n = 6
-	runtime.ReadMemStats(&before)
-	start := time.Now()
-	for i := range n {
-		f.Y = a
-		if i%2 == 1 {
-			f.Y = b
-		}
-		if _, ok := d.Detect(f, nil); ok {
-			t.Fatalf("call %d: located a code whose header claims a 2047-cell grid", i)
-		}
-	}
-	el := time.Since(start) / n
-	runtime.ReadMemStats(&after)
-	alloc := (after.TotalAlloc - before.TotalAlloc) / n
-	t.Logf("per Detect: %v, %.1f MB allocated", el, float64(alloc)/(1<<20))
-	if alloc > 16<<20 {
-		t.Errorf("%.1f MB allocated per Detect, want at most 16", float64(alloc)/(1<<20))
-	}
-	if el > 300*time.Millisecond && !raceEnabled {
-		t.Errorf("%v per Detect, want at most 300 ms", el)
-	}
+	geomCostRatio(t, "2047-cell header", geomPlain(c, 0), geomPlain(c, 0), [][]uint16{a, b}, 2, 16<<20)
 }

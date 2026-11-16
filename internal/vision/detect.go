@@ -31,15 +31,17 @@ const (
 // use. It keeps scratch buffers between calls, so it is not safe for concurrent use: give each
 // worker its own.
 type FinderDetector struct {
-	small    []uint16 // downscaled brightness, code values
-	lo, hi   []uint16 // local minimum and maximum of small
-	tmp      []uint16
-	queue    []int
-	dark     []bool // small below its local midrange
-	sw, sh   int
-	clusters []detectCluster
-	layout   *frame.Layout // of the last decoded header's grid
-	built    bool          // a layout was built during this Detect
+	small      []uint16 // downscaled brightness, code values
+	lo, hi     []uint16 // local minimum and maximum of small
+	tmp        []uint16
+	queue      []int
+	dark       []bool // small below its local midrange
+	sw, sh     int
+	clusters   []detectCluster
+	layouts    []*frame.Layout // of the grids decoded lately, at most confirmMaxLayouts
+	grids      [][2]int        // distinct grids used during this Detect
+	gateFailed bool            // the last confirmed quad decoded a grid that failed the 1.5-pixel gate
+	hidden     int             // the corner the last located quad predicted, or -1 with four in view
 }
 
 var _ Detector = (*FinderDetector)(nil)
@@ -67,7 +69,7 @@ func (c *detectCluster) mod() float64 { return c.module / float64(c.hits) }
 // capture. When the whole capture yields no quad and it was downscaled, it scans once more one
 // step finer.
 func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
-	d.built = false
+	d.grids, d.gateFailed, d.hidden = d.grids[:0], false, -1
 	v, ok := geomView(f)
 	if !ok {
 		return Quad{}, false
@@ -84,13 +86,13 @@ func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
 			x, y := int(c.X/float64(s)), int(c.Y/float64(s))
 			d.scan(x-r, y-r, x+r, y+r)
 		}
-		if q, ok := d.choose(f, &v, s); ok {
+		if q, ok := d.choose(f, &v, s, false); ok {
 			return q, true
 		}
 	}
 	d.clusters = d.clusters[:0]
 	d.scan(0, 0, d.sw, d.sh)
-	if q, ok := d.choose(f, &v, s); ok || s == 1 {
+	if q, ok := d.choose(f, &v, s, s == 1); ok || s == 1 {
 		return q, ok
 	}
 	// A far finder at 25 degrees of tilt can measure under 3 pixels per module after downscaling;
@@ -99,7 +101,7 @@ func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
 	d.downscale(&v, s)
 	d.clusters = d.clusters[:0]
 	d.scan(0, 0, d.sw, d.sh)
-	return d.choose(f, &v, s)
+	return d.choose(f, &v, s, true)
 }
 
 // downscale box-filters the brightness by s into d.small and marks the pixels darker than
@@ -301,8 +303,9 @@ func (d *FinderDetector) add(p gpt, m float64, inv bool) {
 	}
 }
 
-// choose picks the best quad among the clusters and refines it at full resolution.
-func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int) (Quad, bool) {
+// choose picks the best quad among the clusters and refines it at full resolution; with three set
+// it falls back to locating from three finders.
+func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int, three bool) (Quad, bool) {
 	var normal, inverted []*detectCluster
 	for i := range d.clusters {
 		c := &d.clusters[i]
@@ -355,9 +358,6 @@ func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int) (Quad, bool)
 			}
 		}
 	}
-	if len(top) == 0 {
-		return Quad{}, false
-	}
 	quad := func(best [4]*detectCluster) Quad {
 		var q Quad
 		for k, c := range best {
@@ -369,12 +369,26 @@ func (d *FinderDetector) choose(f *video.Frame, v *geomLuma, s int) (Quad, bool)
 	// Data cells can mimic a finder at the finder's own scale (on a grid of 135 rows or fewer a finder
 	// module is at most one cell), so the best quads are confirmed by their header, best first. A
 	// quad whose header does not decode is not reported: a wrong quad would feed wrong cells on.
+	// A rejected quad whose header decoded a grid failing the 1.5-pixel gate has its four finders left
+	// out of the three-finder path: they are a hostile or foreign code's. A finder that disagreed
+	// with the anchors here is not left out: it may be a real finder damaged by an overlapping decoy.
+	// The three-finder path leaves a finder out only after one of its own candidates built on it was
+	// rejected (three).
+	excluded := map[*detectCluster]bool{}
 	for _, t := range top {
 		if q := quad(t.q); d.confirms(f, v, q) {
 			return q, true
 		}
+		if d.gateFailed {
+			for _, c := range t.q {
+				excluded[c] = true
+			}
+		}
 	}
-	return Quad{}, false
+	if !three { // three finders are tried on the last scan only
+		return Quad{}, false
+	}
+	return d.three(f, v, normal, inverted, excluded)
 }
 
 // detectVerify refines the candidates at full resolution, most hits first, and keeps up to n that
@@ -472,7 +486,7 @@ func detectRefine(v *geomLuma, c gpt, m float64, inv bool) (gpt, float64, bool) 
 				}
 				mid := (i1 - i0 + o1 - o0) / 4 // along u, relative to p
 				axis[a].at += p.dot(u) + mid
-				axis[a].mod += ((i0+i1)/3 + (o0+o1)/5) / 2
+				axis[a].mod += (i0 + i1 + o0 + o1) / 8 // spans of 3 and 5 modules; blur moves them oppositely
 				axis[a].n++
 			}
 		}
