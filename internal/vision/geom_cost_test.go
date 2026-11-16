@@ -1,6 +1,7 @@
 package vision
 
 import (
+	"math"
 	"runtime"
 	"testing"
 	"time"
@@ -20,6 +21,38 @@ func geomDetectOnce(t *testing.T, d *FinderDetector, f *video.Frame, y []uint16,
 		t.Fatalf("located %v, want %v", ok, !hostile)
 	}
 	return el
+}
+
+// TestGeomPairRatios: each hostile run is set against the mean of the real-code runs either side
+// of it, and the median of those ratios is taken. A burst of load on a few hostile runs or on a few
+// real-code runs moves the extremes, not the median; a steady ratio comes back exactly.
+func TestGeomPairRatios(t *testing.T) {
+	ms := func(v ...float64) []time.Duration {
+		d := make([]time.Duration, len(v))
+		for i, x := range v {
+			d[i] = time.Duration(x * float64(time.Millisecond))
+		}
+		return d
+	}
+	for _, k := range []struct {
+		real, hostile []time.Duration
+		lo, med, hi   float64
+	}{
+		// Steady: every ratio 12.
+		{ms(25, 25, 25, 25, 25, 25), ms(300, 300, 300, 300, 300), 12, 12, 12},
+		// Neighbours differ: 300 against the mean of 20 and 30 is 12.
+		{ms(20, 30, 20, 30), ms(300, 300, 300), 12, 12, 12},
+		// One hostile run slowed by load (600) and one real-code run sped up by a quiet moment (15,
+		// so its two neighbours read 300/20 = 15): the median stays 12.
+		{ms(25, 25, 25, 25, 25, 25, 15, 25), ms(300, 600, 300, 300, 300, 300, 300), 12, 12, 24},
+		// One real-code run slowed (75): its neighbours read 300/50 = 6; the median stays 12.
+		{ms(25, 25, 75, 25, 25, 25), ms(300, 300, 300, 300, 300), 6, 12, 12},
+	} {
+		lo, med, hi := geomPairRatios(k.real, k.hostile)
+		if math.Abs(lo-k.lo) > 1e-9 || math.Abs(med-k.med) > 1e-9 || math.Abs(hi-k.hi) > 1e-9 {
+			t.Errorf("real %v, hostile %v: ratios %.3f / %.3f / %.3f, want %.3f / %.3f / %.3f", k.real, k.hostile, lo, med, hi, k.lo, k.med, k.hi)
+		}
+	}
 }
 
 // geomCostRounds is how many interleaved reference and hostile runs geomCostRatio times.
