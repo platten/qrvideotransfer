@@ -1,0 +1,1 @@
+Stream G: section 17 says race-step timings are quoted only from runs in which the packages were retested, never from a run that shows them as `(cached)`, because the task runner does not pass `-count=1` and a merge-only run can restore results from Go's test cache.

@@ -1446,7 +1446,10 @@ by GoReleaser).
   packages' test binaries ran beside it. CI tests them under that condition (`tools/dev`,
   `isolatedRuns`). The cost, accepted by the owner, on the slowest runner (macos-26-intel): the
   coverage step went from 4 min 08 s to 7 min 13 s and the race step from 10 min 51 s to 13 min 18 s,
-  5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout.
+  5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout. Race-step
+  timings are quoted only from runs in which the packages were retested, never from a run whose output
+  shows them as `(cached)`: the task runner does not pass `-count=1`, so a run of a merge that changed
+  no Go code can restore results from Go's test cache.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
