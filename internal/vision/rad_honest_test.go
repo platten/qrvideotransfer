@@ -23,8 +23,9 @@ const minBucket = 10000
 // one variant cannot hide under the partly mixed cells' reach (the long version's whole tripod
 // tables reach 5.4 times through those cells, so they cannot keep 2 themselves). Above 2 it is a
 // regression bound on a residual the designer accepted on 2026-11-15 and that is revisited with S2:
-// through the pipeline, tripod's partly mixed cells are 9.8 times the stated rate in pooled bucket 1
-// (4.6 times in bucket 2) and the whole pooled bucket 1 8.7 times.
+// through the pipeline, in pooled bucket 1, tripod's partly mixed cells are 9.76 times the stated
+// rate and the whole table 8.69 times at CI size (partly mixed bucket 2: 4.6 times); in the long
+// version 11.08 and 10.25 times, a margin of only 1.08 under 12.
 var overCeil = map[string]float64{"tripod": 12, "handheld": 2}
 
 // pointExpected is the expected error count from which a bucket's observed rate itself must lie

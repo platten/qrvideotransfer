@@ -180,7 +180,8 @@ func TestPipelineHonesty(t *testing.T) {
 		{"white balance -0.10", func(c *channel.Config) { c.Sensor.WhiteBalance = -0.10 }},
 	}
 	// CI keeps main's size so that every bucket it judged is still judged, tripod's pooled bucket 1
-	// above all, where the partly mixed cells' residual is tightest (8.7 times against 12).
+	// above all, where the residual is tightest: at CI size the whole table is 8.7 times the stated
+	// rate and its partly mixed cells 9.76 times, against 12.
 	if longTests() {
 		ncap = 6
 		variants = append(variants,
