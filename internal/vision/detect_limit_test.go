@@ -81,11 +81,9 @@ const (
 // handheld at geomModuleLimit (fill 0.5) and at 4.8 pixels per cell (fill 0.6, the case of the
 // PR #30 review), and iphone-hdr at geomModuleLimitHLG.
 func TestDetectModuleLimit(t *testing.T) {
+	raceSkipStatistics(t)
 	c := geomModuleCode(t)
 	n := 24
-	if geomRace {
-		n = 6
-	}
 	for _, tc := range []struct {
 		preset string
 		fill   float64
@@ -104,6 +102,7 @@ func TestDetectModuleLimit(t *testing.T) {
 // finders found (a quad counts only when its header decodes), wrong quads and headers, and the
 // cell-centre error. It only logs; it runs with QRVT_LONG_TESTS=1.
 func TestDetectModuleSweep(t *testing.T) {
+	raceSkipStatistics(t)
 	if !geomLong() {
 		t.Skip("set QRVT_LONG_TESTS=1")
 	}

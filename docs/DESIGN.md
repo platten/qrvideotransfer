@@ -1446,10 +1446,16 @@ by GoReleaser).
   packages' test binaries ran beside it. CI tests them under that condition (`tools/dev`,
   `isolatedRuns`). The cost, accepted by the owner, on the slowest runner (macos-26-intel): the
   coverage step went from 4 min 08 s to 7 min 13 s and the race step from 10 min 51 s to 13 min 18 s,
-  5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout. Race-step
-  timings are quoted only from runs in which the packages were retested, never from a run whose output
-  shows them as `(cached)`: the task runner does not pass `-count=1`, so a run of a merge that changed
-  no Go code can restore results from Go's test cache.
+  5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout.
+  Under the race detector `internal/vision` runs a smoke subset: every code path and goroutine
+  boundary, with one or two poses or captures each and its concurrency tests in full, while its
+  statistical assertions run only in the non-race test step (`raceEnabled`, `raceSize` and
+  `raceSkipStatistics` in its tests); its budget under race is about 3 minutes on a developer
+  machine. With it, on macos-26-intel, `internal/vision` took 125 s under race, down from 959 s, which
+  had pushed the race step past its timeout, and the race step 13 min 26 s.
+  Race-step timings are quoted only from runs in which the packages were retested, never from a run
+  whose output shows them as `(cached)`: the task runner does not pass `-count=1`, so a run of a
+  merge that changed no Go code can restore results from Go's test cache.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression

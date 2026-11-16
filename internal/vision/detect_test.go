@@ -39,7 +39,8 @@ func TestDetectRotated(t *testing.T) {
 		w, h int
 		fill float64
 	}{{1280, 720, 0.5}, {1280, 1280, 0.8}} {
-		for _, roll := range []float64{90, 180, 270, 33} {
+		rolls := []float64{33, 90, 180, 270} // under -race: one oblique and one right-angle roll
+		for _, roll := range rolls[:raceSize(len(rolls), 2)] {
 			cfg := geomConfig(t, "ideal", size.w, size.h)
 			cfg.Geometry.Roll = roll
 			cfg.Geometry.Fill = size.fill
@@ -65,7 +66,7 @@ func TestDetectRotated(t *testing.T) {
 func TestDetectTracking(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 4, 2, 4, 3)
 	cfg := geomConfig(t, "handheld", 1280, 720)
-	fs, _ := geomFilm(t, c, cfg, 0, 6, 9)
+	fs, _ := geomFilm(t, c, cfg, 0, raceSize(6, 2), 9)
 	var d FinderDetector
 	var prev *Quad
 	for i, f := range fs {
