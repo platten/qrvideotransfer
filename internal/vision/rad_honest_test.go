@@ -191,12 +191,15 @@ func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (
 // TestHonestConfidence is the honest-confidence assertion of DESIGN.md section 15 on `tripod` and
 // `handheld`, under gamma, white-balance and vignetting changes, for Gray4, Gray2 and RGB8. The CI
 // version films a 212 x 120 grid at 4 pixels per cell with a 1600 x 900 camera (6.8 and 6.0 camera
-// pixels per cell), 6 captures per case (8 frames shown at 30 fps, camera 60 fps, fixed seeds): about
-// 180,000 to 230,000 credited Gray4 bits per case. Every case is judged alone and then pooled over
-// the variants of a modulation and preset. The long version films a 480 x 270 grid with the
-// presets' own 4K cameras, 12 captures per case. Statistical: skipped under the race detector.
+// pixels per cell), 3 captures per case (8 frames shown at 30 fps, camera 60 fps, fixed seeds):
+// Gray4, the default mode, under the preset and all five variants, about 90,000 to 115,000
+// credited bits per case; Gray2 and RGB8 under the preset alone. Every case is judged alone and
+// then pooled over the variants of a modulation and preset. The long version films a 480 x 270 grid
+// with the presets' own 4K cameras, every modulation under every variant, 12 captures per case.
+// Statistical: skipped under the race detector.
 func TestHonestConfidence(t *testing.T) {
 	raceSkipStatistics(t)
+	t.Parallel()
 	grid, pitch, cw, ch, ncap := [2]int{212, 120}, 4, 1600, 900, 6
 	if longTests() {
 		grid, pitch, cw, ch, ncap = [2]int{480, 270}, 4, 3840, 2160, 12
@@ -216,13 +219,22 @@ func TestHonestConfidence(t *testing.T) {
 	mods := []uint8{2, 1, 3}
 	for _, mod := range mods {
 		s := newRadSession(t, grid[0], grid[1], pitch, mod, 8, 0x40+uint64(mod), false)
+		vs, n := variants, ncap
+		if !longTests() {
+			// CI: Gray4, the default mode, under every variant with 3 captures; Gray2 and RGB8 on the
+			// preset alone with 3 captures. The long version runs every modulation and variant.
+			n = 3
+			if mod != 2 {
+				vs = variants[:1]
+			}
+		}
 		for pi, name := range []string{"tripod", "handheld"} {
 			total, totalClean, totalMixed := &calTable{}, &calTable{}, &calTable{}
-			for vi, v := range variants {
+			for vi, v := range vs {
 				t.Run(fmt.Sprintf("%s/%s/%s", s.mod.Name(), name, v.name), func(t *testing.T) {
 					c := preset(t, name, cw, ch)
 					v.edit(&c)
-					caps := s.shoot(t, c, time.Second/30, ncap, uint64(1000*pi+10*vi)+uint64(mod))
+					caps := s.shoot(t, c, time.Second/30, n, uint64(1000*pi+10*vi)+uint64(mod))
 					tab, clean, mixed, cells := s.calibrate(t, caps, false)
 					if cells == 0 {
 						t.Fatal("no cell credited")

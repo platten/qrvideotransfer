@@ -11,14 +11,15 @@ import (
 
 // Limits of the glare assertion. Without fringes the miss rate measured up to 0.046 (Gray2,
 // tripod) and the loss away from the patch up to 0.00007. With fringes of amplitude 24 and stripe
-// cancellation on, the rule misses far more under the patch (0.063 tripod, 0.26 handheld) and loses
-// up to 0.5% of the cells away from it, because the cancellation answers the patch's broad bump with
-// waves across the capture; that combination is a recorded residual (DESIGN.md section 10, step 5),
-// bounded here at its measured value with a margin so that it cannot grow unnoticed.
+// cancellation on, the rule misses 0.0275 under the patch on tripod and 0.0005 on handheld (since the
+// sampler and the rule count clipped cells, PR #38 and #31; 0.063 and 0.26 before), bounded at
+// 0.05, and loses up to 0.5% of the cells away from it, because the cancellation answers the patch's
+// broad bump with waves across the capture; that loss is a recorded residual (DESIGN.md section 10,
+// step 5), bounded here at its measured value with a margin so that it cannot grow unnoticed.
 const (
 	maxGlareMiss       = 0.05  // share of cells under the patch that still give soft bits
 	maxGlareFalse      = 0.002 // share of cells away from the patch made unknown
-	maxGlareMissFringe = 0.30
+	maxGlareMissFringe = 0.05
 	// Through the geometry pipeline the sampler and the equaliser together miss 0.037 to 0.038 of
 	// the cells under the patch on tripod and 0.012 to 0.013 on handheld (designer's decision of
 	// 2026-11-16: bound 0.06 on both). Missed cells are wrong data stated with confidence.
@@ -37,15 +38,21 @@ const (
 // on purpose, was raised by a code value or more. Only cells the phase field credits are counted,
 // each with the soft bits of its own phase. Gray4, Gray2, RGB8 and Gray8 on `tripod` and
 // `handheld`, and Gray4 with fringes of amplitude 24 and stripe cancellation on, where fringes
-// without a patch must cost no credited cell; 212 x 120 grid, 1600 x 900 camera, 4 captures each.
+// without a patch must cost no credited cell; 212 x 120 grid, 1600 x 900 camera, 2 captures each (4 in
+// the long version).
 // Statistical: skipped under the race detector.
 func TestGlareUnknown(t *testing.T) {
 	raceSkipStatistics(t)
+	t.Parallel()
 	type glareCase struct {
 		mod    uint8
 		fringe float64
 	}
 	cases := []glareCase{{2, 0}, {1, 0}, {3, 0}, {4, 0}, {2, 24}}
+	glareCaps := 2 // CI; the long version films 4
+	if longTests() {
+		glareCaps = 4
+	}
 	for _, k := range cases {
 		s := newRadSession(t, 212, 120, 4, k.mod, 8, 0x61+uint64(k.mod), false)
 		for pi, name := range []string{"tripod", "handheld"} {
@@ -53,9 +60,9 @@ func TestGlareUnknown(t *testing.T) {
 				c := preset(t, name, 1600, 900)
 				c.Sensor.Fringe = k.fringe
 				seed := 0x700 + uint64(10*pi) + uint64(k.mod)
-				clean := s.shoot(t, c, time.Second/30, 4, seed)
+				clean := s.shoot(t, c, time.Second/30, glareCaps, seed)
 				c.Optics.Glare = 0.05
-				glare := s.shoot(t, c, time.Second/30, 4, seed)
+				glare := s.shoot(t, c, time.Second/30, glareCaps, seed)
 				spacing := float64(219) / float64(s.mod.Levels()-1)
 				var under, missed, away, falsely, missedBits, missedWrong, quarter, quarterMissed int
 				b := s.mod.BitsPerCell()

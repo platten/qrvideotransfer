@@ -160,12 +160,16 @@ func TestThreeFindersConflictingCopy(t *testing.T) {
 	}
 }
 
-// TestGlareOnFinder: on 6 handheld 4K poses (480 x 270 grid, seeds 21000 to 21005), a glare patch
+// TestGlareOnFinder: on 4 handheld 4K poses (480 x 270 grid, seeds 21000 to 21003), a glare patch
 // of 2% of the code area centred on each finder in turn: every pose located with its header read,
 // no wrong quad or header, and a cell-centre error outside the patch of at most 0.15 cell RMS.
-// Under -race, one 720p pose of a 212 x 120 grid (geomRaceGlareCode).
+// Under -race, one 720p pose of a 212 x 120 grid (geomRaceGlareCode); 6 poses in the long version.
 func TestGlareOnFinder(t *testing.T) {
-	n := raceSize(6, 1)
+	t.Parallel() // no time bound; it runs with the other parallel statistics
+	n := raceSize(4, 1)
+	if geomLong() {
+		n = 6
+	}
 	c, cfg := geomRaceGlareCode(t, 4, 30)
 	cases := geomGlareCases(c)[:4]
 	poses := geomPoses(t, c, cfg, n, 21000)

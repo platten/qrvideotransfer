@@ -80,22 +80,26 @@ func paletteThrough(f *video.Frame, m *Mesh, l *frame.Layout) []modem.Obs {
 // TestPipelinePhase measures the frame-mixing assertions of TestPhaseWeights through the geometry
 // pipeline, against the same limits: no wrong credit, a credited cell's true weight at least
 // minCreditedWeight, per-preset yield at least minYield, and phase weight error within
-// maxInnerErrPipeline and maxPocketErrPipeline. Gray4, 480 x 270 grid, 4K cameras, rolls 0 and 30 in every scan direction for
-// `handheld` and roll 0 for `tripod`, 2 captures each (fixed seeds); the long version runs both
-// presets at rolls 0, 30 and 60 with 8 captures each. It also reports how often the code was not
+// maxInnerErrPipeline and maxPocketErrPipeline. Gray4, 480 x 270 grid, 4K cameras; `tripod` scanning
+// top to bottom and bottom to top at roll 0, `handheld` scanning right to left and left to right at
+// roll 30, 2 captures each (fixed seeds); the long version runs both presets in every scan direction
+// at rolls 0, 30 and 60 with 8 captures each. It also reports how often the code was not
 // found or no mesh fitted. Under the race detector it runs one combination of 2 captures on a 212 x
 // 120 grid with a 1600 x 900 camera, the smoke test of the whole chain through the simulator's
 // goroutines, asserting none of the figures (they are asserted in the non-race step).
 func TestPipelinePhase(t *testing.T) {
 	t.Parallel()
 	ncap := 2
-	rots := []int{0, 90, 180, 270}
-	rolls := map[string][]float64{"tripod": {0}, "handheld": {0, 30}}
+	all4 := []int{0, 90, 180, 270}
+	// CI: two scan directions per preset, tripod untilted in roll and handheld at roll 30.
+	rots := map[string][]int{"tripod": {0, 180}, "handheld": {90, 270}}
+	rolls := map[string][]float64{"tripod": {0}, "handheld": {30}}
 	switch {
 	case longTests():
-		ncap, rolls = 8, map[string][]float64{"tripod": {0, 30, 60}, "handheld": {0, 30, 60}}
+		ncap, rots = 8, map[string][]int{"tripod": all4, "handheld": all4}
+		rolls = map[string][]float64{"tripod": {0, 30, 60}, "handheld": {0, 30, 60}}
 	case raceEnabled:
-		rots, rolls = []int{90}, map[string][]float64{"tripod": {}, "handheld": {30}}
+		rots, rolls = map[string][]int{"handheld": {90}}, map[string][]float64{"handheld": {30}}
 	}
 	// Under the race detector a 4K pose is too slow: the smoke run films a 212 x 120 grid with a
 	// 1600 x 900 camera instead.
@@ -105,7 +109,7 @@ func TestPipelinePhase(t *testing.T) {
 	for pi, name := range []string{"tripod", "handheld"} {
 		var all phaseStats
 		var pipe pipeStats
-		for _, rot := range rots {
+		for _, rot := range rots[name] {
 			for _, roll := range rolls[name] {
 				t.Run(fmt.Sprintf("%s/scan%d/roll%.0f", name, rot, roll), func(t *testing.T) {
 					c := preset(t, name, cw, ch)
@@ -159,9 +163,9 @@ func TestPipelinePhase(t *testing.T) {
 // TestPipelineHonesty measures honest confidence (DESIGN.md section 15) through the geometry
 // pipeline, judged as TestHonestConfidence judges it: each case alone, and pooled over the variants
 // as a whole and split into clean and partly mixed cells. Gray4 on `tripod` and `handheld` with a
-// 480 x 270 grid and the 4K cameras, the preset, gamma error +0.3 and white balance -0.10, 3 captures
-// each (fixed seeds); the long version adds gamma error -0.3, white balance +0.10 and vignetting 0.25
-// with 6 captures each. Statistical: skipped under the race detector.
+// 480 x 270 grid and the 4K cameras, the preset and gamma error +0.3, 3 captures each (fixed seeds);
+// the long version adds white balance -0.10 and +0.10, gamma error -0.3 and vignetting 0.25 with 6
+// captures each. Statistical: skipped under the race detector.
 func TestPipelineHonesty(t *testing.T) {
 	raceSkipStatistics(t)
 	t.Parallel()
@@ -173,11 +177,11 @@ func TestPipelineHonesty(t *testing.T) {
 	variants := []variant{
 		{"preset", func(*channel.Config) {}},
 		{"gamma +0.3", func(c *channel.Config) { c.Display.GammaError += 0.3 }},
-		{"white balance -0.10", func(c *channel.Config) { c.Sensor.WhiteBalance = -0.10 }},
 	}
 	if longTests() {
 		ncap = 6
 		variants = append(variants,
+			variant{"white balance -0.10", func(c *channel.Config) { c.Sensor.WhiteBalance = -0.10 }},
 			variant{"gamma -0.3", func(c *channel.Config) { c.Display.GammaError -= 0.3 }},
 			variant{"white balance +0.10", func(c *channel.Config) { c.Sensor.WhiteBalance = 0.10 }},
 			variant{"vignetting 0.25", func(c *channel.Config) { c.Optics.Vignette = 0.25 }})

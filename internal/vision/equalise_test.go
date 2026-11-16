@@ -112,6 +112,7 @@ func checkField(t *testing.T, s *synth, f *Field, tolC, sigma float64) {
 }
 
 func TestFitRecoversLevels(t *testing.T) {
+	t.Parallel()
 	for _, mod := range []uint8{1, 2, 3} {
 		s := newSynth(t, 480, 270, mod, 4, 6, uint64(mod))
 		f := (&TileEqualiser{Mod: s.c}).Fit(s.obs, s.palette, s.l, s.anchors)

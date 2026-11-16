@@ -152,8 +152,8 @@ const (
 
 // minYield gives the yield floor per preset for the CI version (index 0) and the long version.
 var minYield = map[string][2]float64{
-	"tripod":   {0.96, 0.96}, // measured 0.9857 and 0.9863
-	"handheld": {0.96, 0.97}, // measured 0.9898 (CI, with its roll-60 case) and 0.9904
+	"tripod":   {0.96, 0.96}, // measured 0.9843 and 0.9863
+	"handheld": {0.96, 0.97}, // measured 0.9930 (CI, with its roll-60 case) and 0.9904
 }
 
 // TestPhaseWeights asserts DESIGN.md section 15 for frame mixing on `tripod` and `handheld` with
@@ -163,9 +163,10 @@ var minYield = map[string][2]float64{
 // weight is at least minCreditedWeight; per preset, the share of truly clean cells credited is at
 // least minYield; and as a regression check the phase weight error is at most maxInnerErr at inner
 // cells and maxPocketErr at pocket cells (see phaseStats).
-// The CI version runs the four directions with rolls 0 and 30 degrees, and handheld scanning left
-// to right also at roll 60, 2 captures each (about 234,000 cells per case); the long version all
-// directions with rolls 0, 30 and 60, 8 captures each. Statistical: skipped under the race detector.
+// The CI version runs handheld in every scan direction (rolls 30, 0, 30 and, scanning left to right,
+// 60) and tripod scanning top to bottom and bottom to top (rolls 0 and 30), 2 captures each (about
+// 234,000 cells per case); the long version both presets in every direction at rolls 0, 30 and 60,
+// 8 captures each. Statistical: skipped under the race detector.
 func TestPhaseWeights(t *testing.T) {
 	raceSkipStatistics(t)
 	t.Parallel()
@@ -178,12 +179,16 @@ func TestPhaseWeights(t *testing.T) {
 	s := newRadSession(t, 480, 270, 4, 2, 8, 0x77, false)
 	for pi, name := range []string{"tripod", "handheld"} {
 		var all phaseStats
-		for _, rot := range rots {
+		for ri, rot := range rots {
 			rr := rolls
-			if !longTests() && name == "handheld" && rot == 270 {
-				// The long version's worst case (inner error, smallest credited weight) runs in
-				// CI too.
-				rr = append(rr[:len(rr):len(rr)], 60)
+			if !longTests() {
+				// CI: handheld in every scan direction, including the long version's worst case
+				// (scanning left to right at roll 60); tripod top to bottom and bottom to top.
+				ci := map[string][4][]float64{
+					"tripod":   {{0}, nil, {30}, nil},
+					"handheld": {{30}, {0}, {30}, {60}},
+				}
+				rr = ci[name][ri]
 			}
 			for _, roll := range rr {
 				t.Run(fmt.Sprintf("%s/scan%d/roll%.0f", name, rot, roll), func(t *testing.T) {
@@ -235,6 +240,7 @@ func TestPhaseWeights(t *testing.T) {
 // TestExposureTooLong: with an exposure of three display frames no cell is clean, so the capture
 // is unusable (DESIGN.md section 7, rule 10); with the preset's exposure it is usable.
 func TestExposureTooLong(t *testing.T) {
+	t.Parallel()
 	s := newRadSession(t, 212, 120, 4, 2, 8, 0x78, false)
 	for _, k := range []struct {
 		exposure time.Duration
