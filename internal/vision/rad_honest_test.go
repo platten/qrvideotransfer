@@ -18,8 +18,10 @@ const calBuckets = 10
 const minBucket = 10000
 
 // overCeil is, per preset, the largest observed error rate relative to the stated one accepted for
-// credited cells that hold some of another frame, and through the geometry pipeline for the tables
-// that include them; at true positions the whole tables and the clean ones keep 2. Above 2 it is a
+// credited cells that hold some of another frame and for the whole tables that include them (each
+// case and pooled); clean cells keep 2, each case alone and pooled, so a regression of clean cells in
+// one variant cannot hide under the partly mixed cells' reach (the long version's whole tripod
+// tables reach 5.4 times through those cells, so they cannot keep 2 themselves). Above 2 it is a
 // regression bound on a residual the designer accepted on 2026-11-15 and that is revisited with S2:
 // through the pipeline, tripod's partly mixed cells are 9.8 times the stated rate in pooled bucket 1
 // (4.6 times in bucket 2) and the whole pooled bucket 1 8.7 times.
@@ -226,8 +228,11 @@ func TestHonestConfidence(t *testing.T) {
 						t.Fatal("no cell credited")
 					}
 					t.Logf("%d captures, %d credited cells\n%s", len(caps), cells, tab)
-					for _, e := range tab.check() {
+					for _, e := range tab.judge(false, overCeil[name]) {
 						t.Error(e)
+					}
+					for _, e := range clean.check() {
+						t.Errorf("clean cells: %s", e)
 					}
 					total.merge(tab)
 					totalMixed.merge(mixed)
@@ -237,7 +242,7 @@ func TestHonestConfidence(t *testing.T) {
 			// Pooled over the variants, the buckets are larger and the test stricter.
 			t.Logf("%s %s, all variants:\n%sunderconfident (logged, not asserted): all cells%s clean cells%s partly mixed cells%s",
 				s.mod.Name(), name, total, total.under(), totalClean.under(), totalMixed.under())
-			for _, e := range total.checkPooled() {
+			for _, e := range total.judge(true, overCeil[name]) {
 				t.Errorf("%s %s pooled: %s", s.mod.Name(), name, e)
 			}
 			// Clean cells and the credited cells that hold some of another frame (where the
