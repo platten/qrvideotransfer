@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -199,7 +200,17 @@ func runBinaries(r *platformReport, label, runner, bindir, root, suffix string, 
 		npkg++
 		args := []string{"-test.v", "-test.count=1", "-test.timeout=" + timeout.String()}
 		name := bin
-		if runner != "" {
+		if suffix == ".exe" {
+			// Through cmd.exe with the full Windows path, so that the binary's os.Args[0] is a
+			// path: tests that start themselves again (worker processes) exec it, and WSL interop
+			// would otherwise pass the bare file name, which Windows looks up on PATH only.
+			win, err := exec.Command("wslpath", "-w", bin).Output()
+			if err != nil {
+				r.fail(fmt.Errorf("wslpath -w %s: %w", bin, err))
+				return
+			}
+			name, args = "cmd.exe", append([]string{"/d", "/c", strings.TrimSpace(string(win))}, args...)
+		} else if runner != "" {
 			name, args = runner, append([]string{bin}, args...)
 		}
 		cmd := exec.Command(name, args...)
@@ -214,7 +225,7 @@ func runBinaries(r *platformReport, label, runner, bindir, root, suffix string, 
 		status := "ok"
 		if err != nil {
 			status = "FAIL"
-			r.fail(fmt.Errorf("%s %s: %v; failed: %s", label, p, err, strings.Join(res.failed, ", ")))
+			r.fail(fmt.Errorf("%s %s: %w; failed: %s", label, p, err, strings.Join(res.failed, ", ")))
 			fmt.Println(lastLines(string(out), 30))
 		}
 		line := fmt.Sprintf("%s %s %s: %s, %d passed", label, status, p, d, len(res.passed))
@@ -430,7 +441,14 @@ func platformsWindows(r *platformReport, tags, tmp, zig string, timeout time.Dur
 		r.add("windows/amd64 race: not run: no race binaries (the race step needs zig)")
 		return
 	}
-	runBinaries(r, "windows/amd64 race", "", race, root, ".exe", nil, dirs, timeout)
+	// internal/video's race binary starts engine workers, each a race-enabled copy of itself that
+	// reserves the engine's 512 MiB; under the zig-linked race runtime their ThreadSanitizer cannot
+	// allocate its own memory then ("failed to allocate 0x40000000"), so the package's race tests
+	// stay with CI's windows-2025 race step.
+	raceDirs := maps.Clone(dirs)
+	delete(raceDirs, isolated)
+	r.add("windows/amd64 race: not run: %s (its engine workers' ThreadSanitizer cannot allocate memory under the zig-linked race runtime; CI's windows-2025 race step runs it)", isolated)
+	runBinaries(r, "windows/amd64 race", "", race, root, ".exe", nil, raceDirs, timeout)
 }
 
 // platformsArm64 runs the linux/arm64 test binaries under user-mode emulation, from the
