@@ -28,8 +28,9 @@ const minBucket = 10000
 // version 11.08 and 10.25 times, a margin of only 1.08 under 12.
 var overCeil = map[string]float64{"tripod": 12, "handheld": 2}
 
-// pointExpected is the expected error count from which a bucket's observed rate itself must lie
-// within half and twice the stated rate.
+// pointExpected is the expected error count from which, in the pooled tables, a bucket's observed
+// rate itself must be at most its upper bound (twice the stated rate, or overCeil); no lower edge is
+// asserted.
 const pointExpected = 100
 
 // calTable accumulates soft bits by stated confidence: bucket j holds |s| in
@@ -296,7 +297,7 @@ func TestCalTable(t *testing.T) {
 		}
 	}
 	// 40 errors where 18 are expected is consistent with twice the stated rate but not below
-	// pointExpected; 400 where 180 are expected is outside the band.
+	// pointExpected; 400 where 180 are expected is above twice the stated rate.
 	for _, k := range []struct {
 		errs int
 		mu   float64
