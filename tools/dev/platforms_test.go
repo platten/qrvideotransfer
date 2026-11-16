@@ -499,8 +499,8 @@ func TestFastPathStopsWhenInterrupted(t *testing.T) {
 	cancel()
 	r := &platformReport{}
 	fastPathRun(ctx, r, d, "linux/arm64", nil, t.TempDir(), t.TempDir(), false, nil, map[string]string{isolated: "internal/video"}, time.Minute)
-	if builds != 0 || len(*calls) != 0 || len(r.summary(false)) != 0 {
-		t.Errorf("interrupted fast path: %d builds, calls %v, summary %v", builds, *calls, r.summary(false))
+	if builds != 0 || len(*calls) != 0 || len(r.entries) != 0 {
+		t.Errorf("interrupted fast path: %d builds, calls %v, entries %v", builds, *calls, r.entries)
 	}
 }
 
