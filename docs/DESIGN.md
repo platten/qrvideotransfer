@@ -582,9 +582,9 @@ For each capture:
 
    A known limit, left to M5: the cases still not located are decoys of normal polarity 4 to 6
    cells diagonally or vertically inward at the bottom-left and top-right, 7 or 8 cells right of a
-   covered top-left finder or below a covered top-right one, and 10 cells right of the top-left
-   finder or diagonally in from the top-right; and inverted decoys 7 or 8 cells beside a top
-   finder. All fail safe, not located.
+   covered top-left finder, 6 to 8 cells below the top-right finder, covered or visible, and 10 cells
+   right of the top-left finder or diagonally in from the top-right; and inverted decoys 7 or 8 cells
+   beside a top finder. All fail safe, not located.
    The measured limit below (the table of codes located, at commit 2ec594f) predates this change.
    The hidden centre is an estimate. The tests judge
    quads by the designer's line: a visible finder more than half a module from the truth makes the
@@ -1790,3 +1790,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 radiometry through the geometry pipeline, with the designer's decisions of 2026-11-15: section 10 steps 5 and 7 and section 15 give the figures measured through the detector, mesh fitter and sampler beside those at true positions, record three residuals for S2 (`tripod` partly mixed cells overconfident, bounded at 12 times; their decoding cost, about 0.7% of codewords at noise 16, which corrects the earlier "no decoding cost"; clean cells underconfident, `handheld`'s not bounded below through the pipeline), the reverted attempt to cap partly mixed cells' soft bits, the pipeline's glare miss bound (0.10, `tripod` 0.073 to 0.076), the pipeline's phase-error regression bounds (0.12 and 0.19, from `handheld` scan270 roll 60), and the 0.002 margin of the 0.80 weight floor |
 | 2026-11-15 | Designer's standing ruling of 2026-11-15: section 15 asserts no lower edge on underconfidence anywhere (bench and pipeline, every preset and modulation), only the upper bound against overconfidence, and records the long versions' underconfidence (`handheld` down to 0.13 times, `tripod` clean cells down to 0.035 times, through the pipeline 0.02 times) as lost capacity whose calibration is a likely gain for the S2 analysis; section 10 step 7 likewise |
 | 2026-11-15 | Round 3 of the review of PR #31: section 15 states that the pipeline honesty test runs the preset and two variants in CI and the preset and five in the long version |
+| 2026-11-16 | Round 5 of the review of PR #38, made in PR #31 by the orchestrator's leave: section 10 step 1's known limit names normal decoys 6 to 8 cells below the top-right finder, covered or visible (it said 7 or 8 below a covered one) |
