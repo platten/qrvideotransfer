@@ -1,0 +1,16 @@
+# Violations: the pull-request condition with a group that is not per pull request and per commit
+# (here per ref, which would cancel one main run with another), and with no group at all.
+name: cancel-group
+on: [push, pull_request]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    concurrency:
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - run: "true"
