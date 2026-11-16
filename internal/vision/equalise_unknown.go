@@ -20,9 +20,10 @@ const (
 	// A cell is implausible when, in the 5 x 5 cells around it, so many of the usable data cells
 	// read as the lightest level (or brighter) that chance would give that many less than once in
 	// 1/chanceTail: scrambling makes every level equally likely, so each cell is the lightest with
-	// probability 1/L, or with the median share over the tiles when several levels clip together. A glare patch lifts every cell it covers to white or beyond. At least minAround
-	// usable cells must be seen. A known limit: with three of four levels clipped (chance 0.75), 25
-	// lit cells of 25 are no longer unlikely enough, and a patch goes unnoticed.
+	// probability 1/L, or with the median share over the tiles when several levels clip together.
+	// A glare patch lifts every cell it covers to white or beyond. At least minAround usable cells
+	// must be seen. A known limit: with three of four levels clipped (chance 0.75), 25 lit cells of
+	// 25 are no longer unlikely enough, and a patch goes unnoticed.
 	chanceTail = 1e-6
 	minAround  = 12
 	// clipShare: a median tile share of lit cells this many times 1/L means another level clips
@@ -85,9 +86,9 @@ func flagUnknown(obs []modem.Obs, l *frame.Layout, f *Field, c *modem.Constellat
 		}
 	}
 	// The chance that a cell reads as the lightest level: 1/L, or the median over the tiles of
-	// their share when that is at least clipShare times larger, as when an overexposed capture clips more than the lightest
-	// level and those levels all read lightest. A patch is local and moves few tiles' shares; the
-	// median follows the capture, not the patch.
+	// their share when that is at least clipShare times larger, as when an overexposed capture
+	// clips more than the lightest level and those levels all read lightest. A patch is local and
+	// moves few tiles' shares; the median follows the capture, not the patch.
 	nt := (gx + TileW - 1) / TileW * ((gy + TileH - 1) / TileH)
 	tileSeen, tileLit := make([]int, nt), make([]int, nt)
 	for g, st := range state {

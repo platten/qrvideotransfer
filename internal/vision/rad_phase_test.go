@@ -142,8 +142,9 @@ func boundaryAngle(s *radSession, rc *radCapture) (float64, bool) {
 // The phase weight error is a regression check at today's accuracy, not the 0.05 first asked for:
 // inner cells measured up to 0.082 and pocket cells up to 0.149. minCreditedWeight is the smallest
 // true weight of a credited cell measured (0.80). minYield is, per preset, the share of truly clean
-// cells that are credited, measured less a margin of 0.02 and rounded down; the CI and long versions differ in
-// captures and rolls, so each has its own figure.
+// cells that are credited, measured at true positions less 0.02 and never under 0.96; the CI and
+// long versions differ in captures and rolls, so each has its own figure. TestPipelinePhase holds
+// the pipeline to the same floors.
 const (
 	maxInnerErr       = 0.09
 	maxPocketErr      = 0.16
@@ -152,8 +153,8 @@ const (
 
 // minYield gives the yield floor per preset for the CI version (index 0) and the long version.
 var minYield = map[string][2]float64{
-	"tripod":   {0.96, 0.96}, // measured 0.9843 and 0.9863
-	"handheld": {0.96, 0.97}, // measured 0.9930 (CI, with its roll-60 case) and 0.9904
+	"tripod":   {0.964, 0.966}, // measured 0.9843 and 0.9863, less 0.02
+	"handheld": {0.973, 0.970}, // measured 0.9930 (CI) and 0.9904, less 0.02
 }
 
 // TestPhaseWeights asserts DESIGN.md section 15 for frame mixing on `tripod` and `handheld` with

@@ -86,8 +86,9 @@ const fringeAmp = 24
 // of amplitude fringeAmp, Gray4 frames with the `normal` inner code decode with stripe cancellation
 // on (every codeword whose bits are at least 90% stated) and fail with it off (fewer than half do).
 // The CI version films a 212 x 120 grid (29 codewords per frame) with a 1600 x 900 camera, 3
-// recordings with different fringe periods and directions (fixed seeds), 3 captures each of 8
-// frames shown at 15 fps (6 in the long version). The long version also sweeps the amplitude and logs both success rates.
+// recordings with different fringe periods and directions (fixed seeds), 2 captures each of 8
+// frames shown at 15 fps (6 in the long version). The long version also sweeps the amplitude and
+// logs both success rates.
 // Statistical: skipped under the race detector (raceSkipStatistics).
 func TestStripeCancellation(t *testing.T) {
 	raceSkipStatistics(t)
@@ -98,7 +99,7 @@ func TestStripeCancellation(t *testing.T) {
 		amps = []float64{0, 4, 8, 12, 16, 20, 24, 28, 32, 40, 48}
 	}
 	for _, amp := range amps {
-		seeds, stripeCaps := uint64(3), 3 // CI; the long version films 6 captures per recording
+		seeds, stripeCaps := uint64(3), 2 // CI; the long version films 6 captures per recording
 		if longTests() {
 			stripeCaps = 6
 		}

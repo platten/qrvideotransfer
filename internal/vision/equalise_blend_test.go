@@ -104,7 +104,7 @@ func iabs(v int) int {
 
 // TestGlareSeveralLevelsClip: when an overexposed capture clips more than the lightest level, the
 // cells that read as the lightest level are more common than one in L everywhere, which is no glare.
-// The glare rule must not erase the cells that did not clip (it erased 4.5% of them with two Gray4
+// The glare rule must not erase the cells that did not clip (it erased 3.9% of them with two Gray4
 // levels clipped and 93% with three), yet still find a patch that lifts everything to white.
 func TestGlareSeveralLevelsClip(t *testing.T) {
 	for _, k := range []struct {
