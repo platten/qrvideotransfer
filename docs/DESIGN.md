@@ -1444,18 +1444,36 @@ by GoReleaser).
   other test binaries are not oversubscribing, and the package's tests assert wall-clock bounds
   (`EngineProbeTime`, stall stops) that held alone and failed on 4-vCPU runners when the other
   packages' test binaries ran beside it. CI tests them under that condition (`tools/dev`,
-  `isolatedRuns`). The cost, accepted by the owner, on the slowest runner (macos-26-intel): the
-  coverage step went from 4 min 08 s to 7 min 13 s and the race step from 10 min 51 s to 13 min 18 s,
-  5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout.
+  `isolatedRuns`). The cost, accepted by the owner, is longer coverage and race steps on the slowest
+  runner (macos-26-intel); the figures first given here could not be tied to a run that retested the
+  packages and are dropped.
   Under the race detector `internal/vision` runs a smoke subset: every code path and goroutine
   boundary, with one or two poses or captures each and its concurrency tests in full, while its
   statistical assertions run only in the non-race test step (`raceEnabled`, `raceSize` and
   `raceSkipStatistics` in its tests); its budget under race is about 3 minutes on a developer
   machine. With it, on macos-26-intel, `internal/vision` took 125 s under race, down from 959 s, which
-  had pushed the race step past its timeout, and the race step 13 min 26 s.
-  Race-step timings are quoted only from runs in which the packages were retested, never from a run
-  whose output shows them as `(cached)`: the task runner does not pass `-count=1`, so a run of a
-  merge that changed no Go code can restore results from Go's test cache.
+  had pushed the race step past its timeout. In a run that retested every package (run 43774194055,
+  no cache restored) the race step took 15 min 53 s, `internal/video` 528 s and `internal/vision`
+  187 s; an earlier 13 min 26 s (run 43769482359) restored cached results for `internal/fec/conv`,
+  `internal/fec/rs` and `internal/modem` and is not comparable. The race tests now run as two CI
+  steps, each with its own 20-minute limit: every package but `internal/video` (`tools/dev test
+  -race -part others`), then `internal/video` alone (`-part isolated`), which runs even when the
+  first step failed. Both pass `-count=1`: setup-go restores Go's test cache across runs, for every
+  package unchanged since the cache was saved, and a cached race pass reuses one old run's luck for
+  the nondeterministic tests (`internal/fec/conv`'s parallel test, `internal/fec/rs`'s subprocess
+  test). That costs 0-3 minutes per run on macos-26-intel, nothing when nothing would have been
+  cached. The `check` job's limit is 60 minutes, two race steps at 20 each plus 20 for every other
+  step (`tools/dev` `fixedStepsBudget`, checked by a test against all four race steps): the split's
+  own arithmetic, not an allowance for slow hosts. The 20 comes from macos-26-intel, the slowest
+  runner: in run 43797784643, which retested every package with no cache restored, its non-race steps
+  took 16 min 54 s, which leaves about 3 minutes of margin (run 43788575833 showed about 12 minutes,
+  but its coverage step restored cached results for four quick packages). On the
+  slow host of run 43774194055 the non-race steps took 23 min 09 s, so there the two race steps would
+  share about 37 minutes instead of 40; a host that slow is a runner fault (spike S1, section 14),
+  and the limits are not sized for it. The `internal/video` race step does not run alone after an
+  earlier failure skipped the other packages' step.
+  Race-step timings are quoted only from runs that retested the packages, never from output that
+  shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
