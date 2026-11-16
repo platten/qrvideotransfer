@@ -128,3 +128,45 @@ func TestThreeFindersOverlappingDecoy(t *testing.T) {
 		}
 	}
 }
+
+// TestThreeFindersDecoyRightOfTopLeft: the weak spot of the round-4 decoy study. A copy of the
+// top-left finder with its separator, of normal polarity, is painted 1 to 6 cells to its right, on
+// a 480 x 270 code at 4 pixels per cell whose top-left finder is visible or covered. Quads built
+// on the decoy must not crowd out the true candidate: the code is located in every case, each
+// visible centre within half a module of the truth and a covered one within a module.
+func TestThreeFindersDecoyRightOfTopLeft(t *testing.T) {
+	c := geomNewCode(t, 480, 270, 4, 2, 1, 45)
+	want := geomPlainQuad(c)
+	plain := geomPlain(c, 0)
+	sep := c.layout.Separator(frame.TopLeft).Pixels(c.pitch)
+	offs := []int{1, 4, 2, 3, 5, 6}
+	for _, covered := range []bool{false, true} {
+		for _, off := range offs[:raceSize(len(offs), 2)] {
+			f := geomPlain(c, 0)
+			if covered {
+				geomPaintDisc(f, want.Centres[0].X, want.Centres[0].Y, 12*float64(c.pitch), 235)
+			}
+			dx := off * c.pitch
+			for y := sep.Min.Y; y < sep.Max.Y; y++ {
+				for x := sep.Min.X; x < sep.Max.X; x++ {
+					f.Y[y*f.W+x+dx] = plain.Y[y*plain.W+x]
+				}
+			}
+			var d FinderDetector
+			q, ok := d.Detect(f, nil)
+			if !ok {
+				t.Errorf("covered %v, decoy %d cells right: not located", covered, off)
+				continue
+			}
+			for j := range 4 {
+				tol := want.Module / 2
+				if covered && j == 0 {
+					tol = want.Module
+				}
+				if e := geomDist(q.Centres[j], want.Centres[j]); e > tol {
+					t.Errorf("covered %v, decoy %d cells right: centre %d at %v, want %v", covered, off, j, q.Centres[j], want.Centres[j])
+				}
+			}
+		}
+	}
+}
