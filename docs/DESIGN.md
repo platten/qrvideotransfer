@@ -1639,6 +1639,17 @@ by GoReleaser).
   54 s; the slow host of run 43774194055 took 23 min 09 s, and a host that slow is a runner fault
   (spike S1, section 14), for which the limits are not sized. The `internal/video` race step does not run alone after an
   earlier failure skipped the other packages' step.
+  The detector's hostile-cost tests (`TestDetectThreeHostile` 16 times, `TestDetectThreeHostile4K`
+  and `TestDetectHostileGrid4K` 6, `TestDetectHostileGrid` 2; SECURITY.md section 9.1) bound a
+  ratio to a real code's Detect in the same process and run serially. The ratio is the median, over
+  15 hostile runs, of each run's time against the mean of the real-code runs either side of it. It
+  was the ratio of the two kinds' fastest runs until CI run 43967374482, where macos-26-intel's
+  coverage step read 16.7 times under load: the short real-code run finds quiet moments the long
+  hostile one does not. The estimator changed, the bound did not. Quiet, on one machine, the noise
+  case reads 12.6 times (12.9 at most) by either estimator; when the bound was set it read 11.1, and
+  the rise came from #38's three-candidate path (the hostile Detect from 260 to 295 ms, the real
+  one unchanged at 23 ms). **Residual for the security pass (M7):** the 16-times bound has about 24%
+  of quiet headroom (16 against 12.9); any detector change that adds hostile cost re-measures it.
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),

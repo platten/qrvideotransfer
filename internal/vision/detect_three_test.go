@@ -71,8 +71,10 @@ func TestDetectTwoHidden(t *testing.T) {
 // Detect allocates at most 32 MB and takes at most 16 times as long as locating a real code of the
 // same size in the same process. The ratio is high by nature: a real 1920 x 1080 code is located on
 // the first scan, at half resolution, while here the full-resolution rescan follows (four times the
-// pixels), and noise yields many finder-like hits. Measured 11 times; the three-finder search is a
-// quarter of it.
+// pixels), and noise yields many finder-like hits. Measured 11.1 times when the bound was set and
+// 12.6 times (12.9 at most) since #38's three-candidate path, quiet machine: the bound has 16/12.9,
+// about 24%, of headroom. The three-finder search is a quarter of the cost. Serial, as every
+// geomCostRatio test (see there).
 func TestDetectThreeHostile(t *testing.T) {
 	raceSkipStatistics(t) // a cost ratio: race instrumentation distorts it unevenly
 	const w, h = 1920, 1080

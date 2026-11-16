@@ -3,6 +3,7 @@ package vision
 import (
 	"math"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -55,14 +56,31 @@ func TestGeomPairRatios(t *testing.T) {
 	}
 }
 
-// geomCostRounds is how many interleaved reference and hostile runs geomCostRatio times.
-const geomCostRounds = 7
+// geomCostRounds is how many hostile runs geomCostRatio times, each between two real-code runs.
+const geomCostRounds = 15
+
+// geomPairRatios sets hostile run i against the mean of real-code runs i and i+1, the runs either
+// side of it (real holds one more run than hostile), and returns the smallest, median and largest of
+// those ratios.
+func geomPairRatios(real, hostile []time.Duration) (lo, med, hi float64) {
+	r := make([]float64, len(hostile))
+	for i, h := range hostile {
+		r[i] = float64(h) / (float64(real[i]+real[i+1]) / 2)
+	}
+	slices.Sort(r)
+	return r[0], r[len(r)/2], r[len(r)-1]
+}
 
 // geomCostRatio asserts that a hostile frame's Detect takes at most most times a real code's of the
 // same size, measured in the same process, and allocates at most limit bytes. The two are timed in
-// turn, geomCostRounds times each, and the ratio is that of their fastest runs: interleaving lets
-// both see the same load, and the minimum discards the runs a busy machine slowed. A ratio holds on
-// slow and loaded runners alike, where a wall-clock bound does not.
+// turn, geomCostRounds hostile runs each between two real-code runs, and the ratio is the median of
+// each hostile run's time over the mean of its two neighbours'. Neighbours see nearly the same load,
+// and the median discards the pairs a burst of load upset. A ratio of the fastest runs did not
+// hold: under load the short real-code run often finds a quiet moment the long hostile run does
+// not, and in CI run 43967374482 that read 16.7 times where the machine's quiet ratio is 12.6. A
+// ratio holds on slow and loaded runners alike, where a wall-clock bound does not. The callers run
+// serially (no t.Parallel): the package's parallel tests would share the cores unevenly between
+// the two runs of a pair.
 func geomCostRatio(t *testing.T, name string, real, hostile *video.Frame, hostilePlanes [][]uint16, most float64, limit uint64) {
 	t.Helper()
 	var dr, dh FinderDetector
@@ -74,18 +92,20 @@ func geomCostRatio(t *testing.T, name string, real, hostile *video.Frame, hostil
 	}
 	runtime.ReadMemStats(&after)
 	alloc := (after.TotalAlloc - before.TotalAlloc) / uint64(len(hostilePlanes)*2)
-	ref, el := time.Duration(1<<62), time.Duration(1<<62)
 	realY := real.Y
+	refs := []time.Duration{geomDetectOnce(t, &dr, real, realY, false)}
+	var els []time.Duration
 	for i := range geomCostRounds {
-		ref = min(ref, geomDetectOnce(t, &dr, real, realY, false))
-		el = min(el, geomDetectOnce(t, &dh, hostile, hostilePlanes[i%len(hostilePlanes)], true))
+		els = append(els, geomDetectOnce(t, &dh, hostile, hostilePlanes[i%len(hostilePlanes)], true))
+		refs = append(refs, geomDetectOnce(t, &dr, real, realY, false))
 	}
-	ratio := float64(el) / float64(ref)
-	t.Logf("%s: fastest %v per Detect against %v for a real code (%.1f times), %.1f MB allocated", name, el, ref, ratio, float64(alloc)/(1<<20))
+	lo, ratio, hi := geomPairRatios(refs, els)
+	t.Logf("%s: hostile Detect over its real-code neighbours, %d pairs: %.2f / %.2f / %.2f times (smallest / median / largest; fastest %v against %v), %.1f MB allocated",
+		name, len(els), lo, ratio, hi, slices.Min(els), slices.Min(refs), float64(alloc)/(1<<20))
 	if alloc > limit {
 		t.Errorf("%s: %.1f MB allocated per Detect, want at most %.0f", name, float64(alloc)/(1<<20), float64(limit)/(1<<20))
 	}
 	if ratio > most {
-		t.Errorf("%s: %.1f times a real code's Detect, want at most %.0f", name, ratio, most)
+		t.Errorf("%s: median %.2f times a real code's Detect, want at most %.0f", name, ratio, most)
 	}
 }
