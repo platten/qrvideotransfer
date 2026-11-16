@@ -45,6 +45,11 @@ const emulatedEnv = "QRVT_EMULATED=1"
 // emulationNotice names every assertion that is logged rather than asserted under emulation.
 const emulationNotice = "under emulation (QRVT_EMULATED=1) these bounds are logged, not asserted: internal/video TestHostileFiles, 60 s per hostile file"
 
+// emulationMarker is the phrase with which tests log a bound they did not assert under emulation.
+const emulationMarker = "logged rather than asserted under emulation"
+
+func windowsKillCommand(exe string) (string, []string) { return "", nil }
+
 // loggedBound matches a test's log line ("    file_test.go:12: …") that reports a bound logged
 // rather than asserted under emulation; output that merely quotes such a line does not match.
 var loggedBound = regexp.MustCompile(`^\s+\w+_test\.go:\d+: .*logged rather than asserted under emulation`)

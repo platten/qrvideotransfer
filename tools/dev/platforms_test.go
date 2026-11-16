@@ -357,6 +357,75 @@ func TestArm64EmulationNotice(t *testing.T) {
 	}
 }
 
+// TestFullRefusesSkip: -full means every step, so a -skip with it is refused (review round 2, R2).
+func TestFullRefusesSkip(t *testing.T) {
+	if _, err := parsePlatformArgs([]string{"-full", "-skip", "arm64"}); err == nil {
+		t.Error("-full -skip arm64 was accepted")
+	}
+	if _, err := parsePlatformArgs([]string{"-full", "-skip", ""}); err != nil {
+		t.Errorf("-full with an empty -skip: %v", err)
+	}
+}
+
+// TestWindowsKillCommand: an interrupted Windows test binary is killed by its own full path, with
+// its children (the same executable), never by image name, which would also kill same-named
+// processes of other runs (review round 2, R1).
+func TestWindowsKillCommand(t *testing.T) {
+	name, args := windowsKillCommand(`C:\Users\a b\AppData\Local\Temp\qrvt-platforms-1\.bin-plain\video.test.exe`)
+	cmd := strings.Join(args, " ")
+	if name != "powershell.exe" || !strings.Contains(cmd, "Win32_Process") ||
+		!strings.Contains(cmd, `ExecutablePath -eq 'C:\Users\a b\AppData\Local\Temp\qrvt-platforms-1\.bin-plain\video.test.exe'`) ||
+		strings.Contains(cmd, "/IM") {
+		t.Errorf("windowsKillCommand = %s %q", name, args)
+	}
+	// A single quote in the path is doubled inside the PowerShell string.
+	if _, args := windowsKillCommand(`C:\it's\x.exe`); !strings.Contains(strings.Join(args, " "), `'C:\it''s\x.exe'`) {
+		t.Errorf("quoting: %q", args)
+	}
+}
+
+// TestEmulationMarkerInVideoTests: the phrase loggedBound looks for is the one internal/video's
+// tests log (review round 2, R3).
+func TestEmulationMarkerInVideoTests(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "..", "internal", "video", "*_test.go"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("internal/video tests: %v", err)
+	}
+	found := false
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found = found || strings.Contains(string(b), emulationMarker)
+	}
+	if !found {
+		t.Errorf("no internal/video test logs %q", emulationMarker)
+	}
+	if !loggedBound.MatchString("    sandbox_test.go:579: nostsd.mp4: 1m5s, over the 60 s bound, " + emulationMarker) {
+		t.Error("loggedBound does not match a test log line with the marker")
+	}
+}
+
+// TestInterruptStopsPackages: an interrupt stops the package loop and is reported once (R4).
+func TestInterruptStopsPackages(t *testing.T) {
+	d, _ := fakeDeps(t, module+"/internal/a", module+"/internal/b", module+"/internal/c")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	runs := 0
+	d.runTest = func(context.Context, string, []string, string, ...string) ([]byte, error) {
+		runs++
+		cancel()
+		return []byte("signal: killed\n"), errors.New("signal: killed")
+	}
+	o, _ := parsePlatformArgs([]string{"-skip", "compile,lint,race"})
+	r, _ := runPlatforms(ctx, o, d)
+	s := strings.Join(r.summary(false), "\n")
+	if runs != 1 || strings.Count(s, "interrupted") != 1 || strings.Count(s, "FAIL") > 1 {
+		t.Errorf("after an interrupt: %d runs, summary:\n%s", runs, s)
+	}
+}
+
 func TestCopyFiles(t *testing.T) {
 	got := copyable([]string{"go.mod", "recordings/a.mp4", "internal/x.go", "recordings"})
 	if !slices.Equal(got, []string{"go.mod", "internal/x.go"}) {
