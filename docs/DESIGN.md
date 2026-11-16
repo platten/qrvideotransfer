@@ -227,11 +227,19 @@ Rules for version 1:
    periods have passed, is deferred to M5, where a tracked quad could carry the header from a
    neighbouring capture (designer ruling, 2026-11-15; section 18).
 2. **Phase field.** At each anchor, the four quadrant intensities are linearised using the anchor's own
-   black and white and the palette's gamma, then solved for non-negative weights summing to one, one per
-   value of frame index mod 4. Interpolating across the lattice gives per-cell weights. This handles
-   boundaries in any direction, player tearing and three-frame blends.
+   black and the palette's gamma and divided by their own total, which is the white reference because the
+   weights sum to one (the anchor's white serves when that total is below half of it); the result is
+   projected onto non-negative weights summing to one, one per value of frame index mod 4. Interpolating
+   bilinearly across the lattice, with missing anchors predicted linearly from their neighbours, gives
+   per-cell weights. This handles boundaries in any direction, player tearing and three-frame blends.
+   Measured in M2: dividing by the anchor's white instead let fringes of 24 code values make clean
+   anchors look mixed, so that two of three recordings had no codeword left to decode. The per-cell
+   weight error reaches 0.08 where a blend spans only a few lattice steps and 0.15 beyond the outermost
+   anchors; the owner accepted this on 2026-11-15 (section 15). A cell the field misjudges is at worst
+   left out or credited with a little of the next frame in it; it is never credited to the wrong frame.
 3. **Assignment.** A cell contributes to code frame *k* only if the weight for *k* mod 4 is at least 0.92.
-   Otherwise its soft bits are zero.
+   Otherwise its soft bits are zero. Measured in M2, about 1.4% of truly clean cells (true weight at
+   least 0.92) are left out this way, and every credited cell's true weight is at least 0.80.
 4. **Guarantee.** With camera interval *Tc*, exposure *E*, pixel response *tr* and display period *Td*,
    every cell of every code frame is captured cleanly in one pass if *Tc + E + tr <= Td*. That holds for
    12 fps on a 30 fps camera with 50 ms to spare, and for 30 fps on a 60 fps camera when *E + tr* is
@@ -574,9 +582,9 @@ For each capture:
 
    A known limit, left to M5: the cases still not located are decoys of normal polarity 4 to 6
    cells diagonally or vertically inward at the bottom-left and top-right, 7 or 8 cells right of a
-   covered top-left finder or below a covered top-right one, and 10 cells right of the top-left
-   finder or diagonally in from the top-right; and inverted decoys 7 or 8 cells beside a top
-   finder. All fail safe, not located.
+   covered top-left finder, 6 to 8 cells below the top-right finder, covered or visible, and 10 cells
+   right of the top-left finder or diagonally in from the top-right; and inverted decoys 7 or 8 cells
+   beside a top finder. All fail safe, not located.
    The measured limit below (the table of codes located, at commit 2ec594f) predates this change.
    The hidden centre is an estimate. The tests judge
    quads by the designer's line: a visible finder more than half a module from the truth makes the
@@ -684,14 +692,73 @@ For each capture:
 5. **Calibrate levels.** Per tile of about 32 x 30 cells, keep a centre and variance for each level.
    Start from the palette and the anchors' black and white, refine with two or three rounds of
    expectation-maximisation on the data cells (scrambling makes levels equally likely, and their order
-   resolves the labels), and interpolate between tiles.
+   resolves the labels), and interpolate between tiles. Only cells that the anchors' phase field counts
+   are fitted: in M2 the blends of two frames widened the variances, the dark level's most (a blend
+   adds far more to a dark cell's code value than it takes from a light one's), and soft bits of clean
+   cells came out up to 18 times less confident than they were.
+   The equaliser then makes unknown (zero soft bits) the cells that need the learned levels to judge:
+   a cell brighter than its tile's lightest level by 5 standard deviations of that level (at least 3
+   code values), or one among the 5 x 5 cells around which so many read as the lightest level that
+   chance would allow it less than once in a million, as a glare patch makes them; the flagged region
+   grows by two rings for a patch's soft edge. Cells the phase field does not credit never trip the
+   brightness margin: they had no stripes removed, and a residual fringe lifted them above white (the M2
+   review found 0.1% to 0.2% of credited cells lost that way at fringe amplitude 24). Measured in M2
+   with a patch over 5% of the code, counting credited cells only: of those it lifts by more than half a
+   level spacing, 0% to 4.6% still give soft bits; of those more than four cells from it, at most 0.007%
+   are lost; fringes of amplitude 24 without a patch lose 0.02% of credited cells. Glare and fringes of
+   amplitude 24 together remain a residual: stripe cancellation answers the patch's broad bump with
+   waves across the capture, 6% (`tripod`) to 26% (`handheld`) of the lifted cells keep soft bits, and
+   0.1% to 0.5% of the distant cells are lost. Through the geometry pipeline the sampler and the equaliser together
+   miss 0.037 to 0.038 of the cells under the patch on `tripod` and 0.012 to 0.013 on `handheld`,
+   bounded at 0.06 on both (designer's decision of 2026-11-16). That needs the rule to count the cells
+   the sampler marks unknown because they clipped (PR #38) among the neighbours that read white: the
+   sampler's flag had hidden the patch's core from the rule, and the `tripod` miss rate rose to 0.138
+   until it did. Before PR #38 the pipeline missed 0.073 to 0.076 on `tripod`. A missed glare cell is wrong data stated with confidence. The share of a
+   cell's footprint near the top of the code range belongs to the sampler.
 6. **Cancel stripes.** Subtract each cell's decided level, take a 2-D Fourier transform of what remains,
    remove peaks standing above the noise, and re-estimate. Moire and backlight flicker are a few plane
-   waves and show up as such peaks.
+   waves and show up as such peaks. As built (M2): the cell grid is padded to the next sizes with no prime
+   factor above 5, so gaps stay near a tenth of it; a peak is a bin above 20 times the median power, its
+   neighbours going with it above 4 times; the estimate is repeated on what is left up to six times with
+   the levels decided afresh, and the whole step twice with the levels refitted between.
 7. **Soft bits.** For each bit, the difference between the best matching level with that bit 0 and with
    that bit 1, scaled by the variance, as a clipped 8-bit value in units of a quarter nat
-   (`modem.LLRScale`). Saturated cells give zero.
-8. **Assign and sum.** Apply the phase rules of section 7 and add into the code frame's accumulator.
+   (`modem.LLRScale`). Saturated cells give zero. A cell with phase weight *w* has its variances widened
+   by *u*^2 times the variance of the level centres, per plane used and averaged over those planes (Y
+   alone for grey modulations), where *u* = 1 - *w* is the share of another frame the cell may hold.
+   Measured in M2 on the credited cells that hold some of another frame, pooled over the variants: with
+   this size `handheld` is honest (Gray4 bucket 1: 0.0079 observed where 0.0116 is stated); a third of
+   it, as first built, left `tripod`'s partly mixed cells up to 9 times overconfident. Three residuals
+   remain, accepted by the designer on 2026-11-15 and revisited with the S2 recordings:
+   - **`tripod` partly mixed cells are overconfident** in buckets 0 to 2, because the phase field
+     overestimates the weight of cells beside narrow blends. At true cell positions (Gray4): 1.7, 4.3
+     and 2.7 times the stated rate, about 1% of credited bits. Through the geometry pipeline (detector,
+     mesh and sampler), on captures with more mixing: 9.8 times in pooled bucket 1 and 4.6 times in
+     bucket 2 (8.7 times for the whole bucket 1). One bounded attempt to cap such a cell's soft bits at
+     ln(*w* / (1 - *w*)) + 1 nat made them underconfident instead (0.43 and 0.005 times in bucket 1)
+     and was reverted. The honesty tests bound the overconfidence at 12 times on `tripod`.
+   - **The partly mixed cells cost the decoder** near its margin: through the pipeline, on `tripod`
+     at sensor noise 16, scaling their soft bits by 0.6 decodes 1,490 of 1,506 codewords against 1,480
+     as produced, about 0.7% of codewords (none at noise 14 and 15). An earlier check at true
+     positions and easier settings found no cost; it no longer stands. `TestPipelineMixedCost` bounds
+     the cost at 15 codewords.
+   - **Clean cells are underconfident**: on `tripod` at true positions (Gray4 bucket 1: 24 errors
+     where 167 are expected, 0.14 times; bucket 2: none where 23 are expected), probably because the
+     credited but partly mixed cells widen the fitted variances, and down to 0.035 times in the long
+     version; on `handheld` down to 0.13 times at true positions and 0.02 times through the pipeline
+     (long versions). Underconfidence is the safe direction for the LDPC decoder, but it is lost
+     capacity; no lower edge is asserted (designer's ruling of 2026-11-15), and calibrating it is a
+     likely gain to look for in the S2 analysis.
+   M2 settled the two points the M1 review left open. The omitted log-variance term, (planes / 2) times
+   the log of the ratio of two levels' variances, measured under `handheld` up to 1.43 nats for Gray4
+   (per-tile variance ratio 17.4, the dark level widest) and 3.41 nats for RGB8 (ratio 9.7, three planes),
+   yet confidence measured honest without it (section 15), and `modem.LLR` is unchanged. The 1/12 minimum variance never binds: a
+   soft bit is clipped once half the level spacing exceeds 8 times the standard deviation, 2.3 code
+   values at that floor, and the narrowest half-spacing of any modulation is 15.6 (Gray8, on the 8-bit
+   scale), so the floor costs nothing at 10 bits either.
+8. **Assign and sum.** Apply the phase rules of section 7 and add into the code frame's accumulator. The
+   phase field is estimated from the anchors alone; estimating per-cell weights from the cells' own
+   observations near a boundary is not built (owner's decision of 2026-11-15, section 15).
 
 | Distortion | Handled by |
 | --- | --- |
@@ -1421,13 +1488,13 @@ How the parameters are read, and the values every preset shares:
 | --- | --- |
 | Perspective to 25 degrees, lens distortion, rolling shear | Cell-centre error at most 0.15 cell RMS; finders found in at least 99.9% of 1,000 random poses; the header read in at least 99.5% of captures on `handheld` |
 | Blur, noise, recorder quantiser | Raw bit error rate never rises as a parameter improves, and stays within 10% of reference values stored when M2 is merged |
-| Gamma, white balance, tone curve, vignetting | Confidence is honest: with soft bits grouped into ten buckets by stated confidence, the observed error rate of every bucket holding at least 10,000 bits lies between half and twice the stated rate |
-| Moire fringes, flicker bands | Decoding succeeds with stripe cancellation on at an amplitude where it fails with it off |
-| Frame mixing, any boundary direction | Phase weight error at most 0.05; no soft bit is ever credited to the wrong code frame |
+| Gamma, white balance, tone curve, vignetting | Confidence is honest: with soft bits grouped into ten buckets by stated confidence, the observed error rate of every bucket holding at least 10,000 bits is at most twice the stated rate. A bucket passes when its error count is consistent, at the 0.1% level of a Poisson test, with that rate; in the tables pooled over the variants, wherever at least 100 errors are expected, the observed rate itself must also be at most twice the stated one. Credited cells that are wholly one frame and those that hold some of another are also pooled and judged apart, so that errors in opposite directions cannot cancel. Only overconfidence is asserted: by the designer's ruling of 2026-11-15 no lower edge is asserted anywhere, at true positions or through the pipeline, and underconfidence is logged. Met in M2 on `tripod` and `handheld` for Gray4, Gray2 and RGB8 under gamma error +-0.3, white balance +-0.10 and vignetting 0.25, each case alone and pooled, at true cell positions; and through the geometry pipeline (detector, mesh fitter and sampler; Gray4, 480 x 270 grid, 4K cameras; the preset and two variants in CI, the preset and five variants in the long version). The one exception is `tripod`'s partly mixed cells, bounded at 12 times (9.8 measured through the pipeline, section 10 step 7). Underconfidence measured in the long versions (480 x 270 grid, 4K cameras): `handheld` down to 0.13 times the stated rate (Gray4 pooled bucket 2: 31 errors where 239 are expected; RGB8 down to 0.10 times in one case), `tripod`'s clean cells down to 0.035 times (Gray4 pooled bucket 1: 4 errors where 115 are expected), and through the pipeline `handheld` down to 0.02 times. On clean captures the soft bits are therefore several times more cautious than the measured error rate justifies, which costs capacity: the LDPC decoder is given less confidence than it could use. Calibrating it is a likely gain to look for in the S2 analysis, where real noise replaces the simulator's |
+| Moire fringes, flicker bands | Decoding succeeds with stripe cancellation on at an amplitude where it fails with it off. Met in M2: on `handheld`, Gray4 with `normal`, at fringe amplitude 24 every codeword decodes with it on and none with it off, for three fringe periods and directions |
+| Frame mixing, any boundary direction | No soft bit is ever credited to the wrong code frame; every credited cell's true weight is at least 0.80; per preset, the share of truly clean cells (true weight at least 0.92) that are credited is at least its measured value less 0.02 (M2: `tripod` 0.986, `handheld` 0.989 to 0.990); as a regression check, the phase weight error is at most 0.09 at cells interpolated between four observed anchors and 0.16 beyond the outermost anchors and beside the finders. CI runs `handheld` with the panel scanning left to right at roll 60, which reaches 0.082 inner error; the smallest credited true weight, 0.802, and the pocket error closest to its bound, 0.149 against 0.16 (the tightest margin), occur only in the long run. The cost of this accepted phase accuracy is the clean-cell yield: of the cells that truly show one frame (weight at least 0.92), 0.99 are credited on `handheld` (0.9898 CI, 0.9904 long) and 0.986 on `tripod` (0.9857 CI, 0.9863 long); the designer accepted it on 2026-11-15. These replace "phase weight error at most 0.05" by the owner's decision of 2026-11-15, after five estimators were measured on `tripod` and `handheld` (largest error, inner / pockets): weights divided by the anchor's white with bilinear interpolation and nearest-neighbour fill, 0.13 / 0.44 on a 212 x 120 grid; the same with linear prediction of missing anchors, 0.07 / 0.15 on the 480 x 270 grid with 4K cameras; bicubic Catmull-Rom interpolation, no gain and worse at a sharp ramp's kinks; weights divided by the quadrants' own total, as built, 0.082 / 0.149; a boundary model fitted to all anchors at once (a quadratic surface of display time and the blur of exposure and panel response), 0.01-0.04 where the anchors see the blend but 0.067 / 0.15 where it lies beyond them, not adopted. None credited a cell to the wrong frame. The residual error comes from blends the anchors cannot locate (opposite scan directions, blends beyond the outermost anchors); per-cell estimation from the cells' own observations is not built, and the question is revisited in M5 only if the S2 or G1 recordings show that the cells it discards matter. Through the geometry pipeline (Gray4, 480 x 270 grid, 4K cameras; the long version all directions at rolls 0, 30 and 60, 191 captures, every one found and fitted): no wrong credit; the smallest credited true weight 0.8628 (CI) and 0.8018 (long); yield 0.9828 and 0.9864 on `tripod`, 0.9881 and 0.9894 on `handheld`; the phase weight error up to 0.058 inner and 0.139 in the pockets in CI, and 0.1105 and 0.1724 in the long version, set by `handheld` scanning left to right at roll 60, where the rectifier's anchors are less exact than the true positions. The pipeline's regression bounds are therefore 0.12 inner and 0.19 in the pockets, beside the 0.09 and 0.16 at true positions; the owner's floors (no wrong credit, credited weight at least 0.80, yield at least 0.96) are unchanged. The weight floor is met with almost no margin: 0.8018 against 0.80 in the long version, on one pose, both at true positions and through the pipeline. It passes, but not comfortably, and S2 checks it on real captures |
 | Camera at twice the display rate, any phase offset | One pass succeeds for every offset |
 | Camera equal to the display rate | At 30 fps both, 4 ms exposure and 8 ms readout: succeeds within 4 loop passes |
 | Dropped frames, bursts, mid-loop start | With parity 20, whose budget is 16.7% of frames: succeeds at 14.7% random loss; at 18.7% reports which blocks are short and writes nothing |
-| Glare patches, overlays | `normal` succeeds with a patch over 5% of the code; `robust` with 20% |
+| Glare patches, overlays | `normal` succeeds with a patch over 5% of the code; `robust` with 20%. M2 measured the cells under a patch over 5% of the code that keep soft bits (section 10, step 5): at true positions 0% to 4.6%, bounded at 0.05; through the geometry pipeline, where the sampler's clipping flag and the equaliser's rule act together, 0.037 to 0.038 on `tripod` and 0.012 to 0.013 on `handheld`, bounded at 0.06 |
 | Two partial recordings | Each alone fails; together they succeed |
 | Whole system | SHA-256 round trip for every row of the matrix below; identical raw frame hashes on every platform |
 

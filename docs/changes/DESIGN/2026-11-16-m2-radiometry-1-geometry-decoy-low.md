@@ -1,0 +1,1 @@
+Round 5 of the review of PR #38, made in PR #31 by the orchestrator's leave: section 10 step 1's known limit names normal decoys 6 to 8 cells below the top-right finder, covered or visible (it said 7 or 8 below a covered one)
