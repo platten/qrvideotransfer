@@ -2,6 +2,7 @@
 # licenses or check-workflows.
 #   scripts/test.ps1                unit tests, CGO_ENABLED=0
 #   scripts/test.ps1 -race          race detector (enables cgo)
+#   scripts/test.ps1 -race -part isolated   only internal/video (-part others: every other package)
 #   scripts/test.ps1 cover          tests with the 95% per-package coverage gate
 #   scripts/test.ps1 fuzz -time 30s every fuzz target for 30 s
 $ErrorActionPreference = 'Stop'
