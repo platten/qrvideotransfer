@@ -1694,9 +1694,10 @@ by GoReleaser).
     run". Under emulation `internal/video`'s `TestHostileFiles` logs instead of asserting its 60 s
     bound per hostile file (`nostsd.mp4` took 65 s); every other test asserts as it does natively.
   - The task prints, per package, the time, the tests passed and the tests skipped. On the
-    developer machine of spike S1 (16 threads, WSL2) a full run took 49 min 40 s: compile 51 s, lint
-    45 s, race builds 1 min 23 s, Windows 18 min 47 s and linux/arm64 under emulation 28 min, of
-    which `internal/vision` took 20 min.
+    developer machine of spike S1 (16 threads, WSL2) a full run took 44 min 05 s with the build
+    cache warm: compile 26 s, lint 28 s, race builds 13 s, Windows 11 min 04 s (plain and race), and
+    linux/arm64 under emulation 31 min 55 s, of which `internal/vision` took 23 min 35 s. A first run
+    with a cold build cache took 49 min 40 s (compile 51 s, lint 45 s, race builds 1 min 23 s).
   - **Not covered locally**, so a CI run can still find something: running anything on macOS
     (amd64 or arm64), running the windows/arm64 binaries, native arm64 timing on the arm runners,
     race runs on linux/arm64 and darwin, and `internal/video`'s race tests on Windows.
