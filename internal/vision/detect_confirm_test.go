@@ -71,6 +71,7 @@ func TestConfirmsOneLayout(t *testing.T) {
 // code seed 19), whose header decodes and whose mesh fits but where both anchors next to one
 // finder are unreadable, is confirmed and located.
 func TestConfirmsHarshPose(t *testing.T) {
+	raceSkipStatistics(t) // a pose of the harsh count, at 4K
 	c := geomNewCode(t, 480, 270, 4, 2, 4, 19)
 	p, err := geomPose(c, geomConfig(t, "harsh", 0, 0), 200, 2, 9000)
 	if err != nil {
@@ -101,6 +102,7 @@ func TestConfirmsHarshPose(t *testing.T) {
 // at least 196 located with their header read (17 were lost to an anchor check that required the
 // two anchors next to every finder), none wrong. It runs with QRVT_LONG_TESTS=1.
 func TestGeometryHarshRegression(t *testing.T) {
+	raceSkipStatistics(t)
 	if !geomLong() {
 		t.Skip("set QRVT_LONG_TESTS=1")
 	}

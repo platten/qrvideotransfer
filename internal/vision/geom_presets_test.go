@@ -40,8 +40,8 @@ func geomMeasured(gx, gy int) bool { return (7*gx+3*gy)%11 == 0 }
 // and then dropped, so that memory stays bounded by the number of workers.
 func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64) geomStats {
 	t.Helper()
-	if geomRace && !geomLong() {
-		n = max(1, n/4)
+	if raceEnabled {
+		n = 1 // a path smoke check; the rates are asserted without -race
 	}
 	var mu sync.Mutex
 	s := geomStats{poses: n}
@@ -212,6 +212,7 @@ func TestGeometryPresetsSmall(t *testing.T) {
 // TestGeometryPresets4K asserts the same on 4 full-size 4K poses per preset with a 480 x 270 grid
 // at 4 pixels per cell (1080p video), seeds 2000 to 2003.
 func TestGeometryPresets4K(t *testing.T) {
+	raceSkipStatistics(t)
 	c := geomNewCode(t, 480, 270, 4, 2, 4, 12)
 	for _, cfg := range []channel.Config{geomConfig(t, "tripod", 0, 0), geomConfig(t, "handheld", 0, 0), geomTilt25(t, 0, 0)} {
 		t.Run(cfg.Name, func(t *testing.T) {
@@ -226,6 +227,7 @@ func TestGeometryPresets4K(t *testing.T) {
 // handheld, and a centre error of at most 0.15 cell RMS on each, including handheld tilted up to 25
 // degrees. It runs with QRVT_LONG_TESTS=1.
 func TestGeometryPresetsLong(t *testing.T) {
+	raceSkipStatistics(t)
 	if !geomLong() {
 		t.Skip("set QRVT_LONG_TESTS=1")
 	}
@@ -246,6 +248,7 @@ func TestGeometryPresetsLong(t *testing.T) {
 // above the 4.5 that DESIGN.md section 5 gives for four greys handheld. The screen fills 0.7 of the
 // width instead of 0.8, so that the taller code stays inside a 16:9 capture.
 func TestGeometry16x10(t *testing.T) {
+	raceSkipStatistics(t)
 	c := geomNewCode(t, 432, 270, 4, 2, 4, 14)
 	cfg := geomConfig(t, "handheld", 2880, 1620)
 	cfg.Geometry.Fill = 0.7

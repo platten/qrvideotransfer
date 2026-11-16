@@ -47,6 +47,10 @@ func spinModule(memory ...byte) []byte {
 	)
 }
 
+// workerProcs2 is the argument after WorkerArg with which the test binary serves a worker job with
+// GOMAXPROCS 2.
+const workerProcs2 = "__test-procs2"
+
 // fakeParent is the argument with which the test binary plays a parent that starts a spinning worker
 // and prints its process id.
 const fakeParent = "__test-fake-parent"
@@ -59,6 +63,10 @@ func TestMain(m *testing.M) {
 	testModules["spin"] = spinWasm
 	testModules["spinbig"] = spinBigWasm
 	testModules["broken"] = []byte("not wasm")
+	if len(os.Args) > 2 && os.Args[1] == WorkerArg && os.Args[2] == workerProcs2 {
+		runtime.GOMAXPROCS(2) // a worker's least, which makes the blocked collection certain
+		os.Args = os.Args[:2]
+	}
 	if len(os.Args) > 2 && os.Args[1] == WorkerArg {
 		os.Exit(hostileWorker(os.Args[2]))
 	}
@@ -147,6 +155,12 @@ func hostileWorker(mode string) int {
 		binary.BigEndian.PutUint64(b[32:], uint64(24*time.Hour))
 		_ = writeMsg(os.Stdout, msgProgress, b)
 		time.Sleep(time.Hour)
+	case "env": // fails if it sees QRVT_TEST_LEAK, a variable not on workerEnv's keep-list
+		rc := 0
+		if _, ok := os.LookupEnv("QRVT_TEST_LEAK"); ok {
+			rc = 1
+		}
+		_ = writeMsg(os.Stdout, msgExit, exitMsg(rc, "QRVT_TEST_LEAK reached the worker"))
 	case "readyhang": // says it is ready, then hangs
 		_ = writeMsg(os.Stdout, msgReady, nil)
 		time.Sleep(time.Hour)
@@ -162,7 +176,9 @@ func hostileWorker(mode string) int {
 
 // runFakeParent starts a spinning worker with no watchdog, prints its process id, and waits to be
 // killed. With the argument "nojob" it does not put the worker in a Job Object (Windows), so that
-// the worker's exit on its pipe closing is tested alone.
+// the worker's exit on its pipe closing is tested alone; with "spinbig" the worker, run with
+// GOMAXPROCS 2, has its guest reserve 512 MiB before it spins, which blocks that exit
+// (docs/spikes/S1.md section 14.4). The process id is printed once the worker reports its reservation.
 func runFakeParent() int {
 	w, err := currentWorkers()
 	if w == nil {
@@ -170,10 +186,29 @@ func runFakeParent() int {
 		return 1
 	}
 	p := *w
-	p.noJob = len(os.Args) > 2 && os.Args[2] == "nojob"
-	p.started = func(pid int) { fmt.Println(pid) }
-	_, _ = p.exec(context.Background(), &job{prog: "ffmpeg", module: "spin", args: func(string, string) []string { return nil },
-		stdout: io.Discard, stderr: io.Discard}, &meter{}, "")
+	mode := ""
+	if len(os.Args) > 2 {
+		mode = os.Args[2]
+	}
+	p.noJob = mode == "nojob"
+	module := "spin"
+	if mode == "spinbig" {
+		module = "spinbig"
+		p.args = []string{WorkerArg, workerProcs2}
+	}
+	// The worker's process id is printed once its memory is reserved: its guest spins right after.
+	m := &meter{}
+	pid := make(chan int, 1)
+	p.started = func(n int) { pid <- n }
+	go func() {
+		n := <-pid
+		for m.memAt.Load() == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+		fmt.Println(n)
+	}()
+	_, _ = p.exec(context.Background(), &job{prog: "ffmpeg", module: module, args: func(string, string) []string { return nil },
+		stdout: io.Discard, stderr: io.Discard}, m, "")
 	time.Sleep(time.Hour)
 	return 0
 }
@@ -272,7 +307,7 @@ func TestWorkerParentKilled(t *testing.T) {
 func parentKilled(t *testing.T, mode string) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], fakeParent, mode) //nolint:gosec // the test binary
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "GOMAXPROCS=2")
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +323,11 @@ func parentKilled(t *testing.T, mode string) {
 		_ = cmd.Process.Kill()
 		t.Fatalf("fake parent said %q: %v", line, err)
 	}
-	time.Sleep(time.Second) // the worker is spinning now
+	t.Cleanup(func() { // a worker that outlived the test is not left spinning
+		if p, err := os.FindProcess(pid); err == nil {
+			_ = p.Kill()
+		}
+	})
 	if !processAlive(pid) {
 		t.Fatal("the worker is not running")
 	}
@@ -520,6 +559,22 @@ func TestWorkerStatusKeptWithoutReady(t *testing.T) {
 	_ = run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
 	if err := WorkerStatus(); err != nil {
 		t.Errorf("a worker reached ready: %v", err)
+	}
+}
+
+// TestWorkerEnvEmpty: a worker gets only the variables on workerEnv's keep-list, never the rest of
+// qrvt's environment (DESIGN.md section 12), also when none of the kept ones is set (an empty list,
+// not nil, which exec.Cmd would take for "inherit everything"). Not parallel: it sets a variable.
+func TestWorkerEnvEmpty(t *testing.T) {
+	t.Setenv("QRVT_TEST_LEAK", "1")
+	if workerEnv() == nil {
+		t.Error("workerEnv() is nil: the worker would inherit the whole environment")
+	}
+	p, _ := testWorkers(t, "env")
+	p.env = workerEnv()
+	err := run(testCtx(t, time.Minute), workerRunner{p}, job{prog: "ffmpeg", args: func(string, string) []string { return nil }})
+	if err != nil {
+		t.Errorf("worker environment: %v", err)
 	}
 }
 

@@ -158,7 +158,7 @@ func TestThreeFindersConflictingCopy(t *testing.T) {
 // no wrong quad or header, and a cell-centre error outside the patch of at most 0.15 cell RMS.
 func TestGlareOnFinder(t *testing.T) {
 	n := 6
-	if geomRace {
+	if raceEnabled {
 		n = 2
 	}
 	c := geomNewCode(t, 480, 270, 4, 2, 4, 30)

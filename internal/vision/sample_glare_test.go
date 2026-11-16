@@ -16,7 +16,7 @@ import (
 // clipped, are counted apart: telling them from data is the equaliser's part.
 func TestSampleGlareFlagged(t *testing.T) {
 	n := 2
-	if geomRace {
+	if raceEnabled {
 		n = 1
 	}
 	c := geomNewCode(t, 480, 270, 4, 2, 1, 31)
