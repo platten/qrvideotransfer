@@ -1453,6 +1453,13 @@ by GoReleaser).
   `raceSkipStatistics` in its tests); its budget under race is about 3 minutes on a developer
   machine. With it, on macos-26-intel, `internal/vision` took 125 s under race, down from 959 s, which
   had pushed the race step past its timeout, and the race step 13 min 26 s.
+  The race tests run as two CI steps, each with its own 20-minute limit: every package but
+  `internal/video` (`tools/dev test -race -part others`), then `internal/video` alone (`-part
+  isolated`). The single step had reached 15 min 53 s of its 20 minutes on macos-26-intel
+  (`internal/video` 528 s, `internal/vision` 187 s); the limit was not raised. Race-step timings are
+  quoted only from runs in which the packages were retested, never from a run whose output shows
+  them as `(cached)`: the task runner does not pass `-count=1`, so a run of a merge that changed no
+  Go code can restore results from Go's test cache.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
@@ -1604,3 +1611,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Stream G: section 17 adds the documents-only skip (allow-list, `changes` job, aggregate `ci result` check), scopes the never-cancelled sentence to the ci and codeql runs on main and codeql's schedule, and states the stricter `cancel-in-progress` policy (flow style, quoted keys, group with the pull request number and SHA) |
 | 2026-11-15 | Stream G, review of PR #35: section 17 narrows the documents-only allow-list to the Markdown files directly in `docs/spikes/`, makes Go files, module files, `.gitattributes`, `testdata/` paths and every deletion count as code, runs everything for a stacked pull request (base not the default branch, which closes the retarget hole; the trigger stays without `edited`), adds `//go:embed` to the allow-list guard, and has `ci result` require a `code` output of exactly `true` or `false` |
 | 2026-11-15 | M2 Geometry, race budget (PR #39): section 17 says that `internal/vision` runs a smoke subset under the race detector, with its statistical assertions only in the non-race step and a budget of about 3 minutes on a developer machine, and gives the macos-26-intel figures (vision 125 s under race, down from 959 s; race step 13 min 26 s) |
+| 2026-11-16 | Stream G, race step split: section 17 says the race tests run as two CI steps with 20 minutes each, every package but `internal/video` and then `internal/video` alone (`tools/dev test -race -part others|isolated`), after the single step reached 15 min 53 s of its 20 on macos-26-intel; and that race-step timings are quoted only from runs that retested the packages, not from cached results |

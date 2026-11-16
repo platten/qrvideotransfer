@@ -3,6 +3,7 @@
 # licenses or check-workflows.
 #   scripts/test.sh                unit tests, CGO_ENABLED=0
 #   scripts/test.sh -race          race detector (enables cgo)
+#   scripts/test.sh -race -part isolated   only internal/video (-part others: every other package)
 #   scripts/test.sh -long          include long tests
 #   scripts/test.sh -untagged      without the release build tags (RELEASE_TAGS in .goreleaser.yaml)
 #   scripts/test.sh cover          tests with the 95% per-package coverage gate
