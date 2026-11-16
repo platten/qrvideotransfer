@@ -355,8 +355,8 @@ func buildTestsOf(ctx context.Context, d platformDeps, env []string, tags, ldfla
 // as CI's "HEVC fast-path tests" step does on every runner.
 func fastPathRun(ctx context.Context, r *platformReport, d platformDeps, label string, env []string, dir, root string, windows bool, runEnv []string, dirs map[string]string, timeout time.Duration) {
 	rel, ok := dirs[isolated]
-	if !ok {
-		return
+	if !ok || ctx.Err() != nil {
+		return // nothing to run, or interrupted: the step's own report says so
 	}
 	if err := buildTestsOf(ctx, d, env, fuzzTags(d.tags), "", dir, false, "./internal/video/..."); err != nil {
 		r.add(kindFail, "%s fast-path test build: %v", label, err)
