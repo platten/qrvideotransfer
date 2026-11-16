@@ -83,7 +83,8 @@ func paletteThrough(f *video.Frame, m *Mesh, l *frame.Layout) []modem.Obs {
 // maxInnerErrPipeline and maxPocketErrPipeline. Gray4, 480 x 270 grid, 4K cameras, rolls 0 and 30 in every scan direction for
 // `handheld` and roll 0 for `tripod`, 2 captures each (fixed seeds); the long version runs both
 // presets at rolls 0, 30 and 60 with 8 captures each. It also reports how often the code was not
-// found or no mesh fitted.
+// found or no mesh fitted. Under the race detector it runs one combination of 2 captures, the smoke
+// test of the whole chain through the simulator's goroutines, without the yield floor.
 func TestPipelinePhase(t *testing.T) {
 	t.Parallel()
 	ncap := 2
@@ -92,7 +93,7 @@ func TestPipelinePhase(t *testing.T) {
 	switch {
 	case longTests():
 		ncap, rolls = 8, map[string][]float64{"tripod": {0, 30, 60}, "handheld": {0, 30, 60}}
-	case radRace:
+	case raceEnabled:
 		rots, rolls = []int{90}, map[string][]float64{"tripod": {}, "handheld": {30}}
 	}
 	s := newRadSession(t, 480, 270, 4, 2, 8, 0x77, false)
@@ -141,7 +142,7 @@ func TestPipelinePhase(t *testing.T) {
 		}
 		t.Logf("%s through the pipeline: yield %.4f (%d of %d truly clean cells credited), smallest true weight credited %.4f; %d captures, %d without a code, %d without a mesh",
 			name, all.yield(), all.cleanCredited, all.clean, all.minTrue, pipe.captures, pipe.notFound, pipe.fitFailed)
-		if !radRace && all.yield() < lim {
+		if !raceEnabled && all.yield() < lim {
 			t.Errorf("%s: yield %.4f below %.2f", name, all.yield(), lim)
 		}
 	}
@@ -152,8 +153,9 @@ func TestPipelinePhase(t *testing.T) {
 // as a whole and split into clean and partly mixed cells. Gray4 on `tripod` and `handheld` with a
 // 480 x 270 grid and the 4K cameras, the preset, gamma error +0.3 and white balance -0.10, 3 captures
 // each (fixed seeds); the long version adds gamma error -0.3, white balance +0.10 and vignetting 0.25
-// with 6 captures each; the race version the preset alone.
+// with 6 captures each. Statistical: skipped under the race detector.
 func TestPipelineHonesty(t *testing.T) {
+	raceSkipStatistics(t)
 	t.Parallel()
 	ncap := 3
 	type variant struct {
@@ -171,9 +173,6 @@ func TestPipelineHonesty(t *testing.T) {
 			variant{"gamma -0.3", func(c *channel.Config) { c.Display.GammaError -= 0.3 }},
 			variant{"white balance +0.10", func(c *channel.Config) { c.Sensor.WhiteBalance = 0.10 }},
 			variant{"vignetting 0.25", func(c *channel.Config) { c.Optics.Vignette = 0.25 }})
-	}
-	if radRace {
-		variants, ncap = variants[:1], 2
 	}
 	s := newRadSession(t, 480, 270, 4, 2, 8, 0x42, false)
 	for pi, name := range []string{"tripod", "handheld"} {
@@ -216,15 +215,13 @@ func TestPipelineHonesty(t *testing.T) {
 // seeds; 4 in the long version). A capture is used only when the code is found with and without the
 // patch. The miss rate and the loss away from the patch are held to TestGlareUnknown's limits.
 func TestPipelineGlare(t *testing.T) {
+	raceSkipStatistics(t)
 	t.Parallel()
 	ncap := 2
 	if longTests() {
 		ncap = 4
 	}
 	names := []string{"tripod", "handheld"}
-	if radRace {
-		names = names[:1]
-	}
 	s := newRadSession(t, 480, 270, 4, 2, 8, 0x63, false)
 	for pi, name := range names {
 		t.Run(name, func(t *testing.T) {

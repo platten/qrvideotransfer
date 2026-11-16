@@ -37,15 +37,14 @@ const (
 // each with the soft bits of its own phase. Gray4, Gray2, RGB8 and Gray8 on `tripod` and
 // `handheld`, and Gray4 with fringes of amplitude 24 and stripe cancellation on, where fringes
 // without a patch must cost no credited cell; 212 x 120 grid, 1600 x 900 camera, 4 captures each.
+// Statistical: skipped under the race detector.
 func TestGlareUnknown(t *testing.T) {
+	raceSkipStatistics(t)
 	type glareCase struct {
 		mod    uint8
 		fringe float64
 	}
 	cases := []glareCase{{2, 0}, {1, 0}, {3, 0}, {4, 0}, {2, 24}}
-	if radRace {
-		cases = cases[:1]
-	}
 	for _, k := range cases {
 		s := newRadSession(t, 212, 120, 4, k.mod, 8, 0x61+uint64(k.mod), false)
 		for pi, name := range []string{"tripod", "handheld"} {

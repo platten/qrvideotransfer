@@ -191,8 +191,9 @@ func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (
 // pixels per cell), 6 captures per case (8 frames shown at 30 fps, camera 60 fps, fixed seeds): about
 // 180,000 to 230,000 credited Gray4 bits per case. Every case is judged alone and then pooled over
 // the variants of a modulation and preset. The long version films a 480 x 270 grid with the
-// presets' own 4K cameras, 12 captures per case; the race version Gray4 without variants.
+// presets' own 4K cameras, 12 captures per case. Statistical: skipped under the race detector.
 func TestHonestConfidence(t *testing.T) {
+	raceSkipStatistics(t)
 	grid, pitch, cw, ch, ncap := [2]int{212, 120}, 4, 1600, 900, 6
 	if longTests() {
 		grid, pitch, cw, ch, ncap = [2]int{480, 270}, 4, 3840, 2160, 12
@@ -210,9 +211,6 @@ func TestHonestConfidence(t *testing.T) {
 		{"vignetting 0.25", func(c *channel.Config) { c.Optics.Vignette = 0.25 }},
 	}
 	mods := []uint8{2, 1, 3}
-	if radRace {
-		mods, variants = mods[:1], variants[:1]
-	}
 	for _, mod := range mods {
 		s := newRadSession(t, grid[0], grid[1], pitch, mod, 8, 0x40+uint64(mod), false)
 		for pi, name := range []string{"tripod", "handheld"} {

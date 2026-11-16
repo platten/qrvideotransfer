@@ -165,24 +165,22 @@ var minYield = map[string][2]float64{
 // cells and maxPocketErr at pocket cells (see phaseStats).
 // The CI version runs the four directions with rolls 0 and 30 degrees, and handheld scanning left
 // to right also at roll 60, 2 captures each (about 234,000 cells per case); the long version all
-// directions with rolls 0, 30 and 60, 8 captures each; the race version one combination, without
-// the yield floor.
+// directions with rolls 0, 30 and 60, 8 captures each. Statistical: skipped under the race detector.
 func TestPhaseWeights(t *testing.T) {
+	raceSkipStatistics(t)
 	t.Parallel()
 	ncap := 2
 	rots, rolls := []int{0, 90, 180, 270}, []float64{0, 30}
 	switch {
 	case longTests():
 		rolls, ncap = []float64{0, 30, 60}, 8
-	case radRace:
-		rots, rolls, ncap = []int{90}, []float64{30}, 2
 	}
 	s := newRadSession(t, 480, 270, 4, 2, 8, 0x77, false)
 	for pi, name := range []string{"tripod", "handheld"} {
 		var all phaseStats
 		for _, rot := range rots {
 			rr := rolls
-			if !longTests() && !radRace && name == "handheld" && rot == 270 {
+			if !longTests() && name == "handheld" && rot == 270 {
 				// The long version's worst case (inner error, smallest credited weight) runs in
 				// CI too.
 				rr = append(rr[:len(rr):len(rr)], 60)
@@ -228,7 +226,7 @@ func TestPhaseWeights(t *testing.T) {
 			lim = minYield[name][1]
 		}
 		t.Logf("%s: yield %.4f (%d of %d truly clean cells credited), smallest true weight credited %.4f", name, all.yield(), all.cleanCredited, all.clean, all.minTrue)
-		if !radRace && all.yield() < lim {
+		if all.yield() < lim {
 			t.Errorf("%s: yield %.4f below %.2f", name, all.yield(), lim)
 		}
 	}
