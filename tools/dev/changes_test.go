@@ -67,6 +67,15 @@ func TestCodeChanged(t *testing.T) {
 		{"pull_request", mod("docs/spikes/testdata/x.md"), true},
 		{"pull_request", mod("docs/spikes/.gitattributes"), true},
 		{"pull_request", mod("docs/spikes/S1.png"), true},
+		// Change-log entries, one file each (docs/changes/<document>/), are documents.
+		{"pull_request", []fileChange{{"A", "docs/changes/FORMAT/2026-11-15-g-changelog-files.md"}}, false},
+		{"pull_request", append(mod("docs/SECURITY.md"), fileChange{"A", "docs/changes/SECURITY/2026-11-15-x.md"}), false},
+		{"pull_request", append(mod("docs/DESIGN.md"), fileChange{"A", "docs/changes/DESIGN/2026-11-15-x.md"}), true},
+		{"pull_request", mod("docs/changes/README.md"), true},
+		{"pull_request", mod("docs/changes/DESIGN/sub/x.md"), true},
+		{"pull_request", mod("docs/changes/DESIGN/x.go"), true},
+		{"pull_request", mod("docs/changes/DESIGN/x.txt"), true},
+		{"pull_request", []fileChange{{"D", "docs/changes/DESIGN/2026-11-15-x.md"}}, true},
 		{"pull_request", mod("docs/x_test.go"), true},
 		// L1: a deletion, or any status other than an addition or modification, is code.
 		{"pull_request", []fileChange{{"D", "docs/SECURITY.md"}}, true},
@@ -214,7 +223,7 @@ func TestDocsOnlyAllowListUnread(t *testing.T) {
 }
 
 func TestDocsOnlyGuardCatchesReaders(t *testing.T) {
-	files := []string{"docs/FORMAT.md", "docs/SECURITY.md", "docs/spikes/S1.md"}
+	files := []string{"docs/FORMAT.md", "docs/SECURITY.md", "docs/spikes/S1.md", "docs/changes/DESIGN/2026-11-15-x.md"}
 	caught := []struct{ rel, src string }{
 		{"tools/x/a.go", `package x; var p = "../../docs/FORMAT.md"`},
 		{"tools/x/a.go", `package x; var p = "docs/spikes/S1.md"`},
@@ -222,6 +231,9 @@ func TestDocsOnlyGuardCatchesReaders(t *testing.T) {
 		{"tools/x/a.go", `package x; var p = "S1.md"`},
 		{"tools/x/a.go", `package x; var p = "../docs/spikes"`},
 		{"tools/x/a.go", `package x; var p = filepath.Join(root, "docs", "spikes")`},
+		{"tools/x/a.go", `package x; var p = "../../docs/changes"`},
+		{"tools/x/a.go", `package x; var p = filepath.Join(root, "docs", "changes", "DESIGN")`},
+		{"internal/x/a.go", "package x\n\n//go:embed ../../docs/changes\nvar s embed.FS\n"},
 		// Review of PR #35, L2: embedded files.
 		{"internal/x/a.go", "package x\n\n//go:embed ../../docs/spikes/S1.md\nvar s string\n"},
 		{"internal/x/a.go", "package x\n\n//go:embed ../../docs/spikes\nvar s embed.FS\n"},
