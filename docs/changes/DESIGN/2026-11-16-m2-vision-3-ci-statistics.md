@@ -1,0 +1,1 @@
+Vision follow-up: the always-on vision statistics are trimmed so that the non-race CI steps fit their budget (internal/vision took 530.7 s of macos-26-intel's coverage step in CI run 43811766030); every M2 assertion stays asserted in CI at a smaller size and the long version keeps the full sizes; section 15's pipeline honesty row says CI runs the preset and gamma error +0.3
