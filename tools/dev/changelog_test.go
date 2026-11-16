@@ -32,6 +32,39 @@ func TestEntryPath(t *testing.T) {
 	}
 }
 
+// TestChangelogTask covers the task's argument handling, in a temporary directory.
+func TestChangelogTask(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.MkdirAll(filepath.Join("docs", "changes", "SECURITY"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		args []string
+		ok   bool
+	}{
+		{nil, false},
+		{[]string{"add", "SECURITY", "g-x"}, false}, // no text
+		{[]string{"add", "SECURITY", "g-x", "Section", "5", "changes."}, true},
+		{[]string{"add", "SECURITY", "g-x", "again"}, false}, // exists
+		{[]string{"add", "NOPE", "g-x", "text"}, false},
+		{[]string{"show", "SECURITY"}, true},
+		{[]string{"show"}, false},
+		{[]string{"show", "SECURITY", "extra"}, false},
+		{[]string{"list", "SECURITY"}, false},
+	} {
+		if err := changelog(c.args); (err == nil) != c.ok {
+			t.Errorf("changelog(%q) = %v, want ok=%v", c.args, err, c.ok)
+		}
+	}
+	names, _ := filepath.Glob(filepath.Join("docs", "changes", "SECURITY", "*-g-x.md"))
+	if len(names) != 1 {
+		t.Fatalf("entries written: %v", names)
+	}
+	if b, _ := os.ReadFile(names[0]); string(b) != "Section 5 changes.\n" {
+		t.Fatalf("entry holds %q", b)
+	}
+}
+
 func TestAddEntryAndShow(t *testing.T) {
 	root := t.TempDir()
 	day := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)

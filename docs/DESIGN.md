@@ -1487,9 +1487,12 @@ by GoReleaser).
 - **Change logs**: every change to DESIGN, FORMAT, SECURITY or IMPLEMENTATION_PROMPT is recorded in
   a file of its own, `docs/changes/<document>/YYYY-MM-DD-<topic>.md` (`go run ./tools/dev changelog
   add <document> <topic> "<text>"`), so two branches never edit the same lines and no change-log
-  entry touches a document that tests read. Read in name order the files are the log (`changelog
-  show`); each directory starts with the document's earlier table, moved there unchanged. A topic
-  best starts with the stream, so names do not collide.
+  entry touches a document that tests read. The date is UTC (the tool uses the UTC date). Read in
+  name order the files are the log (`changelog show`), dated to the day and ordered by topic within
+  a day; each directory starts with the document's earlier table, moved there unchanged. A topic
+  best starts with the stream, so names do not collide, and several entries from one pull request
+  on one day take a number after the stream to keep their order (`m2-radiometry-1-gain`,
+  `m2-radiometry-2-noise`).
 - **Docs**: a website built from `docs/` and published to GitHub Pages on each release
   (`pages.yml`, a skeleton until M8), containing the user guide, this design, the format specification
   and an architecture guide.
@@ -1556,7 +1559,8 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 
 ## Change log
 
-Each change to this document is one file in `docs/changes/DESIGN/`, named `YYYY-MM-DD-<topic>.md`;
-read in name order, the files are the log, starting with `2026-11-13-table.md`, the table of the
-entries up to 2026-11-15. Add an entry with `go run ./tools/dev changelog add DESIGN <topic>
-"<text>"` and read the log with `go run ./tools/dev changelog show DESIGN` (DESIGN.md section 17).
+Each change to this document is one file in `docs/changes/DESIGN/`, named `YYYY-MM-DD-<topic>.md`
+(the date in UTC); read in name order (by topic within a day), the files are the log, starting with
+`2026-11-13-table.md`, the table of the entries up to 2026-11-15. Add an entry with `go run
+./tools/dev changelog add DESIGN <topic> "<text>"` and read the log with `go run ./tools/dev
+changelog show DESIGN` (DESIGN.md section 17).

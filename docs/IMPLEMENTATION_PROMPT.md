@@ -61,6 +61,7 @@ documents say.
 | Everything read from a video is validated before it sizes an allocation or names a file | SECURITY.md section 1 |
 | Concise code. A doc comment on every package and exported name. No abstraction beyond the frozen interfaces until a second use exists | The owner asked for maintainability through brevity and documentation |
 | Conventional commit messages | release-please derives the changelog and version from them |
+| Before applying a finding about a measurement (a CI timing, a baseline run, a ratio), check it against the tree the run tested: a pull_request run tests the merge commit of the head into the base at the time of the run, not the head alone. Timings come only from runs that retested the package, never from `(cached)` results | A baseline "correction" in spike S1 section 14.6 compared a run against the wrong tree (2026-11-15) |
 
 ## 3. Facts you can rely on
 
@@ -360,7 +361,7 @@ documents describe what was actually built, and the release candidate tag is pre
 ## Change log
 
 Each change to this document is one file in `docs/changes/IMPLEMENTATION_PROMPT/`, named
-`YYYY-MM-DD-<topic>.md`; read in name order, the files are the log, starting with
-`2026-11-14-table.md`, the table of the entries up to 2026-11-15. Add an entry with `go run
-./tools/dev changelog add IMPLEMENTATION_PROMPT <topic> "<text>"` and read the log with `go run
-./tools/dev changelog show IMPLEMENTATION_PROMPT` (DESIGN.md section 17).
+`YYYY-MM-DD-<topic>.md` (the date in UTC); read in name order (by topic within a day), the files are
+the log, starting with `2026-11-14-table.md`, the table of the entries up to 2026-11-15. Add an
+entry with `go run ./tools/dev changelog add IMPLEMENTATION_PROMPT <topic> "<text>"` and read the
+log with `go run ./tools/dev changelog show IMPLEMENTATION_PROMPT` (DESIGN.md section 17).

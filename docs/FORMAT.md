@@ -546,7 +546,8 @@ the interleaver rows were also reproduced independently by a reviewer.
 
 ## 15. Change log
 
-Each change to this document is one file in `docs/changes/FORMAT/`, named `YYYY-MM-DD-<topic>.md`;
-read in name order, the files are the log, starting with `2026-11-13-table.md`, the table of the
-entries up to 2026-11-15. Add an entry with `go run ./tools/dev changelog add FORMAT <topic>
-"<text>"` and read the log with `go run ./tools/dev changelog show FORMAT` (DESIGN.md section 17).
+Each change to this document is one file in `docs/changes/FORMAT/`, named `YYYY-MM-DD-<topic>.md`
+(the date in UTC); read in name order (by topic within a day), the files are the log, starting with
+`2026-11-13-table.md`, the table of the entries up to 2026-11-15. Add an entry with `go run
+./tools/dev changelog add FORMAT <topic> "<text>"` and read the log with `go run ./tools/dev
+changelog show FORMAT` (DESIGN.md section 17).
