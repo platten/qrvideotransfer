@@ -1704,9 +1704,9 @@ by GoReleaser).
     does natively.
   - An interrupt (Ctrl-C, SIGTERM) stops the running command, kills a Windows test binary and its
     engine workers by the binary's full path in this run's directory (never by image name, which
-    would match another run's), reports the interrupted step once, and removes the temporary
-    directories; directories that an earlier run left behind more than six hours ago are removed at
-    the start.
+    would match another run's), reports the interruption once as INTERRUPTED, which fails the run
+    in every mode, and removes the temporary directories; directories that an earlier run left
+    behind more than six hours ago are removed at the start.
   - The task prints, per package, the time, the tests passed and the tests skipped. On the
     developer machine of spike S1 (16 threads, WSL2) a `-full` run took 35 min 44 s with the build
     cache warm: compile 15 s, lint 19 s, race builds 7 s, Windows 9 min 03 s (plain and race), and

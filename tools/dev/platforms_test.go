@@ -431,7 +431,7 @@ func TestInterruptStopsPackages(t *testing.T) {
 	o, _ := parsePlatformArgs([]string{"-skip", "compile,lint,race"})
 	r, err := runPlatforms(ctx, o, d)
 	s := strings.Join(r.summary(false), "\n")
-	if runs != 1 || strings.Count(s, "interrupted") != 1 || strings.Count(s, "FAIL") > 1 {
+	if runs != 1 || strings.Count(s, "INTERRUPTED ") != 1 || strings.Count(s, "FAIL") > 1 {
 		t.Errorf("after an interrupt: %d runs, summary:\n%s", runs, s)
 	}
 	// An interrupted run fails whatever the mode, -strict or not (review of PR #42, N1).

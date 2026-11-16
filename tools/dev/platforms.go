@@ -256,7 +256,8 @@ const (
 	kindFail
 	kindNotRun
 	kindSkipped
-	kindCIOnly // not run here, and accepted as CI-only (DESIGN.md section 17)
+	kindCIOnly      // not run here, and accepted as CI-only (DESIGN.md section 17)
+	kindInterrupted // stopped by an interrupt: always a failure
 )
 
 type reportEntry struct {
@@ -288,6 +289,8 @@ func (e reportEntry) line() string {
 		return "SKIPPED " + e.text
 	case kindCIOnly:
 		return "CI-ONLY " + e.text
+	case kindInterrupted:
+		return "INTERRUPTED " + e.text
 	}
 	return e.text
 }
@@ -304,7 +307,7 @@ func (r *platformReport) summary(strict bool) []string {
 	if strict && count[kindNotRun] > 0 {
 		notRun += " (failing: -strict or -full)"
 	}
-	out = append(out, fmt.Sprintf("%d failed, %s, %d CI-only, %d steps skipped", count[kindFail], notRun, count[kindCIOnly], count[kindSkipped]))
+	out = append(out, fmt.Sprintf("%d failed, %d interrupted, %s, %d CI-only, %d steps skipped", count[kindFail], count[kindInterrupted], notRun, count[kindCIOnly], count[kindSkipped]))
 	out = append(out, "not covered locally (CI-only): "+strings.Join(notCoveredLocally, "; "))
 	return out
 }
@@ -314,7 +317,7 @@ func (r *platformReport) err(strict bool) error {
 	var errs []error
 	for _, e := range r.entries {
 		switch {
-		case e.kind == kindFail:
+		case e.kind == kindFail || e.kind == kindInterrupted:
 			errs = append(errs, errors.New(e.line()))
 		case strict && e.kind == kindNotRun:
 			errs = append(errs, errors.New("not run: "+e.text))
@@ -358,7 +361,7 @@ func runPlatforms(ctx context.Context, o platformOpts, d platformDeps) (*platfor
 			continue
 		}
 		if ctx.Err() != nil {
-			r.add(kindNotRun, "%s: interrupted", s)
+			r.add(kindInterrupted, "%s: interrupted", s)
 			continue
 		}
 		start := time.Now()
@@ -444,7 +447,7 @@ func runBinaries(ctx context.Context, r *platformReport, d platformDeps, label, 
 	var logged []string
 	for _, p := range pkgs {
 		if ctx.Err() != nil {
-			r.add(kindNotRun, "%s: interrupted", label)
+			r.add(kindInterrupted, "%s: interrupted", label)
 			break
 		}
 		suffix := ""
@@ -468,7 +471,7 @@ func runBinaries(ctx context.Context, r *platformReport, d platformDeps, label, 
 		start := time.Now()
 		out, err := d.runTest(ctx, filepath.Join(root, filepath.FromSlash(dirs[p])), env, name, args...)
 		if ctx.Err() != nil {
-			r.add(kindNotRun, "%s: interrupted during %s", label, p)
+			r.add(kindInterrupted, "%s: interrupted during %s", label, p)
 			break
 		}
 		res := parseTestOutput(string(out))
