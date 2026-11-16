@@ -110,7 +110,7 @@ pkgname() {
 	if [ "$1" = xz ] && [ "$pm" = apt ]; then echo xz-utils; else echo "$1"; fi
 }
 
-plan="" pkgs="" go_install=0 wasmtime_install=0 zig_install=0
+plan="" pkgs="" go_install=0 wasmtime_install=0 zig_install=0 qemu_install=""
 add() { plan="$plan
   - $*"; }
 need_pkg() {
@@ -173,13 +173,21 @@ if [ $cross = 1 ]; then
 		add "zig $ZIG_VERSION from https://ziglang.org/download/$ZIG_VERSION/zig-$warch-$wos-$ZIG_VERSION.tar.xz (SHA-256 checked) into $PREFIX/opt, linked from $PREFIX/bin/zig"
 		have xz || need_pkg xz
 	fi
-	if [ $os = linux ]; then
-		if have qemu-aarch64-static || have qemu-aarch64 || [ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
-			say "ok  qemu for linux/arm64"
-		elif [ "$(id -u)" -ne 0 ] && [ -z "$sudo" ]; then
-			say "missing: qemu-user-static, which needs root to install; tools/dev platforms will report linux/arm64 as not run"
+	# qemu-user-static, for linux/arm64 under emulation on an amd64 Linux host. Only the system
+	# package manager installs it (not Homebrew), only with usable root rights, and never so that
+	# a failure stops the rest of the setup.
+	if [ $os = linux ] && [ $arch = amd64 ]; then
+		qpm=""
+		if have apt-get; then qpm=apt; elif have dnf; then qpm=dnf; elif have pacman; then qpm=pacman; fi
+		if grep -qs '^enabled' /proc/sys/fs/binfmt_misc/qemu-aarch64; then
+			say "ok  qemu for linux/arm64 (binfmt)"
+		elif [ -z "$qpm" ]; then
+			say "missing: qemu-user-static (no apt, dnf or pacman to install it with); tools/dev platforms will report linux/arm64 as not run"
+		elif [ "$(id -u)" -eq 0 ] || { have sudo && sudo -n true 2>/dev/null; } || { have sudo && [ $yes = 0 ] && [ -t 0 ]; }; then
+			qemu_install=$qpm
+			add "qemu-user-static from $qpm (installed last; a failure there does not stop the setup)"
 		else
-			need_pkg qemu-user-static
+			say "missing: qemu-user-static, which needs root (sudo is not usable without a password here); tools/dev platforms will report linux/arm64 as not run"
 		fi
 	fi
 fi
@@ -258,6 +266,14 @@ if [ $zig_install = 1 ]; then
 	tar -xJf "$tmp/zig.tar.xz" -C "$PREFIX/opt"
 	ln -sf "$PREFIX/opt/$name/zig" "$PREFIX/bin/zig"
 	say "installed zig $ZIG_VERSION into $PREFIX/opt/$name"
+fi
+
+if [ -n "$qemu_install" ]; then
+	case $qemu_install in
+	apt) $sudo apt-get update && $sudo apt-get install -y qemu-user-static ;;
+	dnf) $sudo dnf install -y qemu-user-static ;;
+	pacman) $sudo pacman -Syu --needed --noconfirm qemu-user-static ;;
+	esac || say "missing: qemu-user-static could not be installed; tools/dev platforms will report linux/arm64 as not run"
 fi
 
 if [ $spike = 1 ] && ! ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx265; then

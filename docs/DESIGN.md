@@ -1665,11 +1665,15 @@ by GoReleaser).
   best starts with the stream, so names do not collide, and several entries from one pull request
   on one day take a number after the stream to keep their order (`m2-radiometry-1-gain`,
   `m2-radiometry-2-noise`).
-- **Local checks before every push** (the owner's standing instruction, from M3 on): one stream at
-  a time; the independent review runs on the pushed branch before any pull request is opened; and a
-  pull request gets one CI run at the end, a second only when a CI runner finds what the local checks
-  cannot. Before every push, besides `test`, `cover`, `lint` and `build -all`, the developer runs
-  `go run ./tools/dev platforms` (`-skip` leaves steps out):
+- **Local checks before every push** (the owner's standing instruction, from 2026-11-16 on): one
+  stream at a time; the independent review runs on the pushed branch before any pull request is
+  opened; and a pull request gets one CI run at the end, a second only when a CI runner finds what
+  the local checks cannot. Before every push, besides `test`, `cover`, `lint`, `test -race` and
+  `build -all`, the developer runs `go run ./tools/dev platforms`. That routine run leaves out the
+  linux/arm64 step (about 12 minutes on the machine below). Once per pull request, immediately
+  before the push that opens it, `go run ./tools/dev platforms -full` runs every step and fails if
+  any step could not run (`-strict` does the latter alone; `-skip` leaves named steps out and refuses
+  unknown names). A step that could not run is reported as NOT RUN with its reason, never as a pass.
   - *compile*: `go vet` and `go test -c` of every package for all six targets, with and without the
     release build tags, `CGO_ENABLED=0`. This catches build-constraint files, signature changes and
     code that compiles only on some systems.
@@ -1682,25 +1686,32 @@ by GoReleaser).
     test task's own `-race`. The darwin binaries are only built, and so are the linux/arm64 ones:
     they need an aarch64 C library to run. The release stays pure Go with `CGO_ENABLED=0`.
   - *windows*: the windows/amd64 test binaries run through WSL interop, plain and race, each from
-    its package directory in a copy of the tracked files under the Windows user's `%TEMP%`, removed
-    afterwards. They run through `cmd.exe` with full Windows paths, so that tests which start
-    themselves again (engine workers, Job Objects) find their binary. The Windows-only tests run
-    there (Job Object, sparse files, path rules); `internal/video`'s race tests do not, because its
-    race-enabled engine workers cannot allocate ThreadSanitizer memory under the zig-linked race
-    runtime, so CI's windows-2025 race step keeps them. Outside WSL the step reports "not run".
-  - *arm64*: the linux/arm64 test binaries run under user-mode emulation, directly through binfmt or
-    through `qemu-aarch64` (`qemu-user-static`, installed by `scripts/setup.sh --cross` where the
-    script has root or sudo), with `QRVT_EMULATED=1`. Where neither is present the step reports "not
-    run". Under emulation `internal/video`'s `TestHostileFiles` logs instead of asserting its 60 s
-    bound per hostile file (`nostsd.mp4` took 65 s); every other test asserts as it does natively.
+    its package directory in a copy of the module's files (tracked, and untracked but not ignored;
+    never `recordings/`) under the Windows user's `%TEMP%`. They run through `cmd.exe` with full
+    Windows paths, so that tests which start themselves again (engine workers, Job Objects) find
+    their binary. The Windows-only tests run there (Job Object, sparse files, path rules);
+    `internal/video`'s race tests do not, because its race-enabled engine workers cannot allocate
+    ThreadSanitizer memory under the zig-linked race runtime. Outside WSL the step reports NOT RUN.
+  - *arm64*: the linux/arm64 test binaries run natively on an arm64 Linux host, else under user-mode
+    emulation through an enabled binfmt entry for aarch64 (`qemu-user-static`, installed by
+    `scripts/setup.sh --cross` where the script has usable root rights), with `QRVT_EMULATED=1` and
+    a 90-minute limit per test binary. qemu without binfmt is reported as NOT RUN, because tests
+    that start their own binary again need binfmt. Under emulation `internal/video`'s
+    `TestHostileFiles` logs instead of asserting its 60 s bound per hostile file (`nostsd.mp4` took
+    65 s); the step prints that list and every bound it logged. Every other test asserts as it
+    does natively.
+  - An interrupt (Ctrl-C, SIGTERM) stops the running command, kills a Windows test binary's process
+    tree, and removes the temporary directories; directories that an earlier run left behind more
+    than six hours ago are removed at the start.
   - The task prints, per package, the time, the tests passed and the tests skipped. On the
-    developer machine of spike S1 (16 threads, WSL2) a full run took 44 min 05 s with the build
+    developer machine of spike S1 (16 threads, WSL2) a `-full` run took 44 min 05 s with the build
     cache warm: compile 26 s, lint 28 s, race builds 13 s, Windows 11 min 04 s (plain and race), and
     linux/arm64 under emulation 31 min 55 s, of which `internal/vision` took 23 min 35 s. A first run
     with a cold build cache took 49 min 40 s (compile 51 s, lint 45 s, race builds 1 min 23 s).
-  - **Not covered locally**, so a CI run can still find something: running anything on macOS
-    (amd64 or arm64), running the windows/arm64 binaries, native arm64 timing on the arm runners,
-    race runs on linux/arm64 and darwin, and `internal/video`'s race tests on Windows.
+  - **Not covered locally**, accepted as CI-only, so a CI run can still find something: running
+    anything on macOS (amd64 or arm64), running the windows/arm64 binaries, native arm64 timing on
+    the arm runners, race runs on linux/arm64 and darwin, and `internal/video`'s race tests on
+    Windows. The task prints this list.
 - **Docs**: a website built from `docs/` and published to GitHub Pages on each release
   (`pages.yml`, a skeleton until M8), containing the user guide, this design, the format specification
   and an architecture guide.

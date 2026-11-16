@@ -67,7 +67,27 @@ type platformOpts struct {
 
 // parsePlatformArgs parses the task's flags. Without -full, arm64 is left out (the routine run).
 func parsePlatformArgs(args []string) (platformOpts, error) {
-	return platformOpts{skip: map[string]string{}}, nil
+	fs := newFlags("platforms")
+	full := fs.Bool("full", false, "run every step, linux/arm64 included, and fail on any step that could not run (once per pull request, before the push that opens it)")
+	strict := fs.Bool("strict", false, "fail on any step that could not run")
+	skip := fs.String("skip", "", "comma-separated steps to leave out: "+strings.Join(platformSteps, ", "))
+	timeout := fs.Duration("timeout", 30*time.Minute, "time limit per test binary")
+	emulated := fs.Duration("emulated-timeout", 90*time.Minute, "time limit per test binary under emulation")
+	_ = fs.Parse(args) // ExitOnError: never returns an error
+	o := platformOpts{skip: map[string]string{}, strict: *strict || *full, timeout: *timeout, emulatedTimeout: *emulated}
+	if !*full {
+		o.skip["arm64"] = "routine run; -full runs it"
+	}
+	for _, s := range strings.Split(*skip, ",") {
+		if s = strings.TrimSpace(s); s == "" {
+			continue
+		}
+		if !slices.Contains(platformSteps, s) {
+			return o, fmt.Errorf("-skip %q: the steps are %s", s, strings.Join(platformSteps, ", "))
+		}
+		o.skip[s] = "skipped by -skip"
+	}
+	return o, nil
 }
 
 // platformDeps are the task's contacts with the machine, replaced in tests.
@@ -152,11 +172,32 @@ const binfmtAarch64 = "/proc/sys/fs/binfmt_misc/qemu-aarch64"
 // where an enabled aarch64 entry hands them to qemu, or "" and the reason they cannot. qemu without
 // binfmt is not enough: tests that start their own binary again would exec an arm64 binary.
 func arm64Mode(d platformDeps) (mode, reason string) {
-	return "", ""
+	if d.hostOS == "linux" && d.hostArch == "arm64" {
+		return "native", ""
+	}
+	b, err := d.readFile(binfmtAarch64)
+	switch {
+	case err == nil && strings.HasPrefix(string(b), "enabled"):
+		return "binfmt", ""
+	case err == nil:
+		return "", "the binfmt entry for aarch64 is disabled (" + binfmtAarch64 + ")"
+	}
+	for _, q := range []string{"qemu-aarch64-static", "qemu-aarch64"} {
+		if p, err := d.lookPath(q); err == nil {
+			return "", p + " is installed but binfmt has no aarch64 entry, which tests that start their own binary again need"
+		}
+	}
+	return "", "qemu-aarch64 not found (scripts/setup.sh --cross installs qemu-user-static)"
 }
 
 // wslUnavailable returns why the Windows binaries cannot run here, or "".
 func wslUnavailable(d platformDeps) string {
+	if _, err := d.lookPath("cmd.exe"); err != nil {
+		return "no WSL interop: cmd.exe is not reachable"
+	}
+	if _, err := d.readFile("/proc/sys/fs/binfmt_misc/WSLInterop"); err != nil {
+		return "no WSL interop: /proc/sys/fs/binfmt_misc/WSLInterop is not registered"
+	}
 	return ""
 }
 
@@ -177,7 +218,14 @@ func parseTestOutput(out string) testResult {
 
 // copyable drops what must never leave the machine (recordings/) from a file list.
 func copyable(files []string) []string {
-	return files
+	var out []string
+	for _, f := range files {
+		if f == "recordings" || strings.HasPrefix(f, "recordings/") {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 type entryKind int
@@ -268,7 +316,28 @@ func buildTests(ctx context.Context, d platformDeps, env []string, tags, ldflags
 
 // runPlatforms runs the steps that opts leaves in.
 func runPlatforms(ctx context.Context, o platformOpts, d platformDeps) (*platformReport, error) {
-	return &platformReport{}, nil
+	r := &platformReport{}
+	steps := map[string]func(){
+		"compile": func() { platformsCompile(ctx, r, d) },
+		"lint":    func() { platformsLint(ctx, r, d) },
+		"race":    func() { platformsRace(ctx, r, d) },
+		"windows": func() { platformsWindows(ctx, r, d, o, o.skip["race"] == "") },
+		"arm64":   func() { platformsArm64(ctx, r, d, o) },
+	}
+	for _, s := range platformSteps {
+		if why, ok := o.skip[s]; ok {
+			r.add(kindSkipped, "%s: %s", s, why)
+			continue
+		}
+		if ctx.Err() != nil {
+			r.add(kindNotRun, "%s: interrupted", s)
+			continue
+		}
+		start := time.Now()
+		steps[s]()
+		r.add(kindInfo, "%s: %s", s, time.Since(start).Round(time.Second))
+	}
+	return r, r.err(o.strict)
 }
 
 func platformsCompile(ctx context.Context, r *platformReport, d platformDeps) {
