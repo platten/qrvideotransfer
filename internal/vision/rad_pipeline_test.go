@@ -71,7 +71,7 @@ func paletteThrough(f *video.Frame, m *Mesh, l *frame.Layout) []modem.Obs {
 			c := gpt(m.At(x, y))
 			hx := gpt(m.At(x+hw, y)).sub(gpt(m.At(x-hw, y))).mul(0.5)
 			hy := gpt(m.At(x, y+hh)).sub(gpt(m.At(x, y-hh))).mul(0.5)
-			out[8*cp+k] = v.footprint(c, hx, hy)
+			out[8*cp+k], _ = v.footprint(c, hx, hy)
 		}
 	}
 	return out

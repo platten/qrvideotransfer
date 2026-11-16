@@ -50,3 +50,54 @@ func TestFitSkipsBlends(t *testing.T) {
 		t.Fatalf("three-plane blend variance %v, want %v", st.Variance[0], want)
 	}
 }
+
+// TestGlareCountsClipped: cells the sampler already marked saturated because they clipped (a glare
+// patch's core) count among the neighbours that read white, so the lifted cells around the core
+// are made unknown too; clipped dark cells do not.
+func TestGlareCountsClipped(t *testing.T) {
+	s := newSynth(t, 212, 120, 2, 2, 0, 60)
+	cx, cy := 100, 60
+	for i, c := range s.l.DataCells() {
+		dx, dy := int(c.X)-cx, int(c.Y)-cy
+		switch r := max(iabs(dx), iabs(dy)); {
+		case r <= 5: // the core: clipped white, already unknown
+			s.obs[i] = modem.Obs{Y: 235, Cb: 128, Cr: 128, Saturated: true}
+		case r <= 7: // the soft edge: lifted to the lightest level, not clipped
+			s.obs[i].Y = s.centre(3, int(c.X), int(c.Y))[0]
+		}
+	}
+	(&TileEqualiser{Mod: s.c}).Fit(s.obs, s.palette, s.l, s.anchors)
+	edge, flagged := 0, 0
+	for i, c := range s.l.DataCells() {
+		if r := max(iabs(int(c.X)-cx), iabs(int(c.Y)-cy)); r == 6 || r == 7 {
+			edge++
+			if s.obs[i].Saturated {
+				flagged++
+			}
+		}
+	}
+	if edge == 0 || flagged < edge*9/10 {
+		t.Fatalf("%d of %d edge cells made unknown around a clipped core", flagged, edge)
+	}
+	// A clipped dark region is not a patch of white.
+	d := newSynth(t, 212, 120, 2, 2, 0, 61)
+	for i, c := range d.l.DataCells() {
+		if max(iabs(int(c.X)-cx), iabs(int(c.Y)-cy)) <= 5 {
+			d.obs[i] = modem.Obs{Y: 0, Cb: 128, Cr: 128, Saturated: true}
+		}
+	}
+	(&TileEqualiser{Mod: d.c}).Fit(d.obs, d.palette, d.l, d.anchors)
+	for i, c := range d.l.DataCells() {
+		if r := max(iabs(int(c.X)-cx), iabs(int(c.Y)-cy)); r > 5 && r <= 9 && d.obs[i].Saturated {
+			t.Fatalf("cell %d beside a clipped dark region made unknown", i)
+		}
+	}
+}
+
+// iabs returns |v|.
+func iabs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
