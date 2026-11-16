@@ -83,8 +83,9 @@ func paletteThrough(f *video.Frame, m *Mesh, l *frame.Layout) []modem.Obs {
 // maxInnerErrPipeline and maxPocketErrPipeline. Gray4, 480 x 270 grid, 4K cameras, rolls 0 and 30 in every scan direction for
 // `handheld` and roll 0 for `tripod`, 2 captures each (fixed seeds); the long version runs both
 // presets at rolls 0, 30 and 60 with 8 captures each. It also reports how often the code was not
-// found or no mesh fitted. Under the race detector it runs one combination of 2 captures, the smoke
-// test of the whole chain through the simulator's goroutines, without the yield floor.
+// found or no mesh fitted. Under the race detector it runs one combination of 2 captures on a 212 x
+// 120 grid with a 1600 x 900 camera, the smoke test of the whole chain through the simulator's
+// goroutines, without the yield floor.
 func TestPipelinePhase(t *testing.T) {
 	t.Parallel()
 	ncap := 2
@@ -96,14 +97,18 @@ func TestPipelinePhase(t *testing.T) {
 	case raceEnabled:
 		rots, rolls = []int{90}, map[string][]float64{"tripod": {}, "handheld": {30}}
 	}
-	s := newRadSession(t, 480, 270, 4, 2, 8, 0x77, false)
+	// Under the race detector a 4K pose is too slow: the smoke run films a 212 x 120 grid with a
+	// 1600 x 900 camera instead.
+	gx, gy := raceSize(480, 212), raceSize(270, 120)
+	cw, ch := raceSize(3840, 1600), raceSize(2160, 900)
+	s := newRadSession(t, gx, gy, 4, 2, 8, 0x77, false)
 	for pi, name := range []string{"tripod", "handheld"} {
 		var all phaseStats
 		var pipe pipeStats
 		for _, rot := range rots {
 			for _, roll := range rolls[name] {
 				t.Run(fmt.Sprintf("%s/scan%d/roll%.0f", name, rot, roll), func(t *testing.T) {
-					c := preset(t, name, 3840, 2160)
+					c := preset(t, name, cw, ch)
 					c.Display.ScanRotation = rot
 					c.Geometry.Roll = roll
 					sn, cs := math.Sincos(roll * math.Pi / 180)
