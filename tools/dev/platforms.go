@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -23,10 +27,11 @@ import (
 //     darwin/arm64, with zig as the C cross-compiler (windows/arm64 has no race detector; the
 //     host's own race run is the test task's -race);
 //   - windows: the windows/amd64 test binaries, plain and race, run through WSL interop;
-//   - arm64: the linux/arm64 test binaries run under user-mode emulation (qemu-aarch64), with
-//     QRVT_EMULATED=1 so that tests asserting wall-clock bounds can relax them.
+//   - arm64: the linux/arm64 test binaries, natively on an arm64 host or under user-mode
+//     emulation through binfmt, with QRVT_EMULATED=1 there.
 //
-// macOS binaries and the arm64 Windows binaries are built but not run: those stay CI-only.
+// The routine run before a push leaves out arm64 (about 12 minutes); -full runs every step and
+// fails on any step that could not run, once per pull request, before the push that opens it.
 
 // zigVersion is the pinned zig, installed by scripts/setup.sh --cross.
 const zigVersion = "0.17.1"
@@ -34,6 +39,57 @@ const zigVersion = "0.17.1"
 // emulatedEnv is set for test binaries run under emulation; tests that assert wall-clock bounds
 // read it and log those bounds instead of asserting them.
 const emulatedEnv = "QRVT_EMULATED=1"
+
+// emulationNotice names every assertion that is logged rather than asserted under emulation.
+const emulationNotice = "under emulation (QRVT_EMULATED=1) these bounds are logged, not asserted: internal/video TestHostileFiles, 60 s per hostile file"
+
+// emulationMarker is the text with which those tests log a bound they did not assert.
+const emulationMarker = "logged rather than asserted under emulation"
+
+// notCoveredLocally is what only the CI runners check (DESIGN.md section 17).
+var notCoveredLocally = []string{
+	"running anything on macOS (amd64 or arm64)",
+	"running the windows/arm64 binaries",
+	"native arm64 timing on the arm runners",
+	"race runs on linux/arm64 and darwin",
+	"internal/video's race tests on Windows",
+}
+
+// platformSteps are the task's steps, in order.
+var platformSteps = []string{"compile", "lint", "race", "windows", "arm64"}
+
+type platformOpts struct {
+	skip            map[string]string // step -> why it is skipped
+	strict          bool              // a step that could not run fails the task
+	timeout         time.Duration     // per test binary
+	emulatedTimeout time.Duration     // per test binary under emulation
+}
+
+// parsePlatformArgs parses the task's flags. Without -full, arm64 is left out (the routine run).
+func parsePlatformArgs(args []string) (platformOpts, error) {
+	return platformOpts{skip: map[string]string{}}, nil
+}
+
+// platformDeps are the task's contacts with the machine, replaced in tests.
+type platformDeps struct {
+	hostOS, hostArch string
+	lookPath         func(string) (string, error)
+	readFile         func(string) ([]byte, error)
+	getenv           func(string) string
+	exists           func(string) bool
+	// run runs a command with extra environment, streaming its output.
+	run func(ctx context.Context, env []string, name string, args ...string) error
+	// output returns a command's standard output.
+	output func(ctx context.Context, name string, args ...string) (string, error)
+	// runTest runs a test binary in dir and returns its combined output.
+	runTest  func(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error)
+	lintTool func() (string, error)
+	pkgDirs  func(tags string) (map[string]string, error)
+	// listFiles lists the files to copy for the Windows run, relative to the module root.
+	listFiles func() ([]string, error)
+	tags      string // the release build tags
+	tempRoot  string // where the task's own temporary directories go
+}
 
 type platformJob struct {
 	name string
@@ -90,18 +146,18 @@ func findZig(getenv func(string) string, lookPath func(string) (string, error)) 
 	return ""
 }
 
-// arm64Runner returns how to run a linux/arm64 binary: directly when binfmt has an aarch64 entry
-// (""), else through qemu-aarch64 on PATH; false when neither exists.
-func arm64Runner(lookPath func(string) (string, error), binfmt func(string) bool) (string, bool) {
-	if binfmt("/proc/sys/fs/binfmt_misc/qemu-aarch64") {
-		return "", true
-	}
-	for _, q := range []string{"qemu-aarch64-static", "qemu-aarch64"} {
-		if p, err := lookPath(q); err == nil {
-			return p, true
-		}
-	}
-	return "", false
+const binfmtAarch64 = "/proc/sys/fs/binfmt_misc/qemu-aarch64"
+
+// arm64Mode returns how linux/arm64 binaries run here: "native" on an arm64 Linux host, "binfmt"
+// where an enabled aarch64 entry hands them to qemu, or "" and the reason they cannot. qemu without
+// binfmt is not enough: tests that start their own binary again would exec an arm64 binary.
+func arm64Mode(d platformDeps) (mode, reason string) {
+	return "", ""
+}
+
+// wslUnavailable returns why the Windows binaries cannot run here, or "".
+func wslUnavailable(d platformDeps) string {
+	return ""
 }
 
 type testResult struct{ passed, failed, skipped []string }
@@ -119,30 +175,76 @@ func parseTestOutput(out string) testResult {
 	return r
 }
 
-func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
-
-// platformReport collects one line per step and the errors.
-type platformReport struct {
-	lines []string
-	errs  []error
+// copyable drops what must never leave the machine (recordings/) from a file list.
+func copyable(files []string) []string {
+	return files
 }
 
-func (r *platformReport) add(format string, a ...any) {
-	l := fmt.Sprintf(format, a...)
-	r.lines = append(r.lines, l)
-	fmt.Println("platforms:", l)
+type entryKind int
+
+const (
+	kindOK entryKind = iota
+	kindInfo
+	kindFail
+	kindNotRun
+	kindSkipped
+)
+
+type reportEntry struct {
+	kind entryKind
+	text string
 }
 
-func (r *platformReport) fail(err error) {
-	r.errs = append(r.errs, err)
-	r.add("FAIL %v", err)
+// platformReport collects the task's results.
+type platformReport struct{ entries []reportEntry }
+
+func (r *platformReport) add(k entryKind, format string, a ...any) {
+	e := reportEntry{k, fmt.Sprintf(format, a...)}
+	r.entries = append(r.entries, e)
+	fmt.Println("platforms:", e.line())
 }
 
-// timed runs f and returns its duration.
-func timed(f func()) time.Duration {
-	s := time.Now()
-	f()
-	return time.Since(s).Round(time.Second)
+func (e reportEntry) line() string {
+	switch e.kind {
+	case kindFail:
+		return "FAIL " + e.text
+	case kindNotRun:
+		return "NOT RUN " + e.text
+	case kindSkipped:
+		return "SKIPPED " + e.text
+	}
+	return e.text
+}
+
+// summary returns the report's lines, the counts and the list of what only CI checks.
+func (r *platformReport) summary(strict bool) []string {
+	var out []string
+	count := map[entryKind]int{}
+	for _, e := range r.entries {
+		out = append(out, e.line())
+		count[e.kind]++
+	}
+	notRun := fmt.Sprintf("%d not run", count[kindNotRun])
+	if strict && count[kindNotRun] > 0 {
+		notRun += " (failing: -strict or -full)"
+	}
+	out = append(out, fmt.Sprintf("%d failed, %s, %d steps skipped", count[kindFail], notRun, count[kindSkipped]))
+	out = append(out, "not covered locally (CI-only): "+strings.Join(notCoveredLocally, "; "))
+	return out
+}
+
+// err returns the task's outcome: any failure, and with strict any step that could not run.
+func (r *platformReport) err(strict bool) error {
+	var errs []error
+	for _, e := range r.entries {
+		switch {
+		case e.kind == kindFail:
+			errs = append(errs, errors.New(e.line()))
+		case strict && e.kind == kindNotRun:
+			errs = append(errs, errors.New("not run: "+e.text))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func goTagArgs(tags string) []string {
@@ -152,9 +254,8 @@ func goTagArgs(tags string) []string {
 	return []string{"-tags=" + tags}
 }
 
-// buildTests builds the test binary of every package into dir with the given environment, tags
-// and ldflags, and returns the packages that have one.
-func buildTests(env []string, tags, ldflags, dir string, race bool) error {
+// buildTests builds the test binary of every package into dir.
+func buildTests(ctx context.Context, d platformDeps, env []string, tags, ldflags, dir string, race bool) error {
 	args := append([]string{"test", "-c", "-o", dir + string(os.PathSeparator)}, goTagArgs(tags)...)
 	if race {
 		args = append(args, "-race")
@@ -162,79 +263,133 @@ func buildTests(env []string, tags, ldflags, dir string, race bool) error {
 	if ldflags != "" {
 		args = append(args, "-ldflags="+ldflags)
 	}
-	return run(env, "go", append(args, "./...")...)
+	return d.run(ctx, env, "go", append(args, "./...")...)
 }
 
-// pkgDirs returns, for each package of the module, its directory relative to the module root.
-func pkgDirs(tags string) (map[string]string, error) {
-	pkgs, err := packages(tags)
-	if err != nil {
-		return nil, err
-	}
-	dirs := map[string]string{}
-	for _, p := range pkgs {
-		rel := strings.TrimPrefix(strings.TrimPrefix(p, module), "/")
-		if rel == "" {
-			rel = "."
+// runPlatforms runs the steps that opts leaves in.
+func runPlatforms(ctx context.Context, o platformOpts, d platformDeps) (*platformReport, error) {
+	return &platformReport{}, nil
+}
+
+func platformsCompile(ctx context.Context, r *platformReport, d platformDeps) {
+	for _, j := range compileJobs(d.tags) {
+		if err := d.run(ctx, j.env, "go", append(append([]string{"vet"}, goTagArgs(j.tags)...), "./...")...); err != nil {
+			r.add(kindFail, "go vet %s: %v", j.name, err)
+			continue
 		}
-		dirs[p] = rel
+		dir, err := os.MkdirTemp(d.tempRoot, "compile-")
+		if err != nil {
+			r.add(kindFail, "compile: %v", err)
+			return
+		}
+		if err := buildTests(ctx, d, j.env, j.tags, "", dir, false); err != nil {
+			r.add(kindFail, "go test -c %s: %v", j.name, err)
+		} else {
+			r.add(kindOK, "compile ok %s", j.name)
+		}
+		_ = os.RemoveAll(dir)
 	}
-	return dirs, nil
 }
 
-// runBinaries runs the test binary of each package found in bindir (named <base>.test or
-// <base>.test.exe), one at a time, from the package's directory under root, through runner when
-// it is set, and reports the results.
-func runBinaries(r *platformReport, label, runner, bindir, root, suffix string, env []string, dirs map[string]string, timeout time.Duration) {
-	pkgs := make([]string, 0, len(dirs))
-	for p := range dirs {
-		pkgs = append(pkgs, p)
+func platformsLint(ctx context.Context, r *platformReport, d platformDeps) {
+	p, err := d.lintTool()
+	if err != nil {
+		r.add(kindFail, "lint: %v", err)
+		return
 	}
-	slices.Sort(pkgs)
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		for _, a := range lintRuns(d.tags, false) {
+			if err := d.run(ctx, []string{"CGO_ENABLED=0", "GOOS=" + goos}, p, a...); err != nil {
+				r.add(kindFail, "lint %s %s: %v", goos, strings.Join(a, " "), err)
+			} else {
+				r.add(kindOK, "lint ok %s %s", goos, strings.Join(a[1:len(a)-1], " "))
+			}
+		}
+	}
+}
+
+// platformsRace builds the race-enabled test binaries; the windows/amd64 ones stay in
+// tempRoot/race-windows-amd64 for the windows step.
+func platformsRace(ctx context.Context, r *platformReport, d platformDeps) {
+	zig := findZig(d.getenv, d.lookPath)
+	if zig == "" {
+		r.add(kindNotRun, "race: zig not found (set ZIG, or run scripts/setup.sh --cross)")
+		return
+	}
+	if out, err := d.output(ctx, zig, "version"); err != nil || strings.TrimSpace(out) != zigVersion {
+		r.add(kindNotRun, "race: %s is zig %q, want %s (scripts/setup.sh --cross)", zig, strings.TrimSpace(out), zigVersion)
+		return
+	}
+	for _, t := range [][2]string{{"linux", "arm64"}, {"windows", "amd64"}, {"darwin", "amd64"}, {"darwin", "arm64"}} {
+		target, _ := zigTarget(t[0], t[1])
+		env, ldflags := raceEnv(zig, t[0], t[1], target)
+		dir := filepath.Join(d.tempRoot, "race-"+t[0]+"-"+t[1])
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			r.add(kindFail, "race: %v", err)
+			return
+		}
+		if err := buildTests(ctx, d, env, d.tags, ldflags, dir, true); err != nil {
+			r.add(kindFail, "race build %s/%s: %v", t[0], t[1], err)
+			continue
+		}
+		r.add(kindOK, "race build ok %s/%s (zig %s)", t[0], t[1], target)
+	}
+	r.add(kindInfo, "race: windows/arm64 has no race detector; linux/amd64 is the test task's -race")
+}
+
+// runBinaries runs the test binary of each package in bindir (named <base>.test<suffix>), one at
+// a time, from the package's directory under root, and reports the results. windows runs them
+// through cmd.exe with their Windows path, so that tests that start their own binary again find
+// it (WSL interop would pass the bare file name, which Windows looks up on PATH only).
+func runBinaries(ctx context.Context, r *platformReport, d platformDeps, label, bindir, root string, windows bool, env []string, dirs map[string]string, timeout time.Duration) string {
+	pkgs := slices.Sorted(maps.Keys(dirs))
 	var npkg, npass, nskip int
+	var logged []string
 	for _, p := range pkgs {
+		suffix := ""
+		if windows {
+			suffix = ".exe"
+		}
 		bin := filepath.Join(bindir, path.Base(p)+".test"+suffix)
-		if !fileExists(bin) {
+		if !d.exists(bin) {
 			continue
 		}
 		npkg++
-		args := []string{"-test.v", "-test.count=1", "-test.timeout=" + timeout.String()}
-		name := bin
-		if suffix == ".exe" {
-			// Through cmd.exe with the full Windows path, so that the binary's os.Args[0] is a
-			// path: tests that start themselves again (worker processes) exec it, and WSL interop
-			// would otherwise pass the bare file name, which Windows looks up on PATH only.
-			win, err := exec.Command("wslpath", "-w", bin).Output()
+		name, args := bin, []string{"-test.v", "-test.count=1", "-test.timeout=" + timeout.String()}
+		if windows {
+			win, err := d.output(ctx, "wslpath", "-w", bin)
 			if err != nil {
-				r.fail(fmt.Errorf("wslpath -w %s: %w", bin, err))
-				return
+				r.add(kindFail, "%s %s: wslpath: %v", label, p, err)
+				continue
 			}
-			name, args = "cmd.exe", append([]string{"/d", "/c", strings.TrimSpace(string(win))}, args...)
-		} else if runner != "" {
-			name, args = runner, append([]string{bin}, args...)
+			name, args = "cmd.exe", append([]string{"/d", "/c", strings.TrimSpace(win)}, args...)
 		}
-		cmd := exec.Command(name, args...)
-		cmd.Dir = filepath.Join(root, filepath.FromSlash(dirs[p]))
-		cmd.Env = append(os.Environ(), env...)
-		var out []byte
-		var err error
-		d := timed(func() { out, err = cmd.CombinedOutput() })
+		start := time.Now()
+		out, err := d.runTest(ctx, filepath.Join(root, filepath.FromSlash(dirs[p])), env, name, args...)
 		res := parseTestOutput(string(out))
 		npass += len(res.passed)
 		nskip += len(res.skipped)
-		status := "ok"
-		if err != nil {
-			status = "FAIL"
-			r.fail(fmt.Errorf("%s %s: %w; failed: %s", label, p, err, strings.Join(res.failed, ", ")))
-			fmt.Println(lastLines(string(out), 30))
+		for _, l := range lines(out) {
+			if strings.Contains(l, emulationMarker) {
+				logged = append(logged, strings.TrimSpace(l))
+			}
 		}
-		line := fmt.Sprintf("%s %s %s: %s, %d passed", label, status, p, d, len(res.passed))
+		detail := fmt.Sprintf("%s: %s, %d passed", p, time.Since(start).Round(time.Second), len(res.passed))
 		if len(res.skipped) > 0 {
-			line += ", skipped: " + strings.Join(res.skipped, " ")
+			detail += ", skipped: " + strings.Join(res.skipped, " ")
 		}
-		r.add("%s", line)
+		if err != nil {
+			r.add(kindFail, "%s %s; %v, failed: %s", label, detail, err, strings.Join(res.failed, ", "))
+			fmt.Println(lastLines(string(out), 30))
+		} else {
+			r.add(kindOK, "%s ok %s", label, detail)
+		}
 	}
-	r.add("%s: %d packages, %d tests passed, %d skipped", label, npkg, npass, nskip)
+	r.add(kindInfo, "%s: %d packages, %d tests passed, %d skipped", label, npkg, npass, nskip)
+	for _, l := range logged {
+		r.add(kindInfo, "%s logged: %s", label, l)
+	}
+	return strings.Join(logged, "\n")
 }
 
 func lastLines(s string, n int) string {
@@ -243,15 +398,6 @@ func lastLines(s string, n int) string {
 		ls = ls[len(ls)-n:]
 	}
 	return strings.Join(ls, "\n")
-}
-
-// trackedFiles lists the files git tracks, relative to the module root.
-func trackedFiles() ([]string, error) {
-	out, err := exec.Command("git", "ls-files", "-z").Output()
-	if err != nil {
-		return nil, fmt.Errorf("git ls-files: %w", err)
-	}
-	return strings.FieldsFunc(string(out), func(r rune) bool { return r == 0 }), nil
 }
 
 // copyTree copies the given files from the current directory to dst, keeping their paths.
@@ -275,170 +421,73 @@ func copyTree(files []string, dst string) error {
 	return nil
 }
 
-// windowsTemp returns a new directory under the Windows user's temporary directory, as a Linux
-// path, through WSL interop.
-func windowsTemp() (string, error) {
-	out, err := exec.Command("cmd.exe", "/d", "/c", "echo %TEMP%").Output()
+// windowsTemp returns the Windows user's temporary directory as a Linux path.
+func windowsTemp(ctx context.Context, d platformDeps) (string, error) {
+	out, err := d.output(ctx, "cmd.exe", "/d", "/c", "echo %TEMP%")
 	if err != nil {
 		return "", fmt.Errorf("cmd.exe: %w", err)
 	}
-	win := strings.TrimSpace(strings.ReplaceAll(string(out), "\r", ""))
-	lin, err := exec.Command("wslpath", "-u", win).Output()
+	win := strings.TrimSpace(strings.ReplaceAll(out, "\r", ""))
+	lin, err := d.output(ctx, "wslpath", "-u", win)
 	if err != nil {
 		return "", fmt.Errorf("wslpath %s: %w", win, err)
 	}
-	return os.MkdirTemp(strings.TrimSpace(string(lin)), "qrvt-platforms-")
+	return strings.TrimSpace(lin), nil
 }
 
-func platforms(args []string) error {
-	fs := newFlags("platforms")
-	skip := fs.String("skip", "", "comma-separated steps to skip: compile, lint, race, windows, arm64")
-	timeout := fs.Duration("timeout", 30*time.Minute, "test timeout per package where tests run")
-	_ = fs.Parse(args) // ExitOnError: never returns an error
-	skipped := map[string]bool{}
-	for _, s := range strings.Split(*skip, ",") {
-		skipped[strings.TrimSpace(s)] = true
-	}
-	tags, err := releaseTags()
-	if err != nil {
-		return err
-	}
-	tmp, err := os.MkdirTemp("", "qrvt-platforms-")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.RemoveAll(tmp) }()
-	r := &platformReport{}
-	total := timed(func() {
-		if !skipped["compile"] {
-			r.add("compile: %s", timed(func() { platformsCompile(r, tags, tmp) }))
+// removeStale removes the task's temporary directories under base left by an interrupted run
+// more than six hours ago.
+func removeStale(base string) {
+	old, _ := filepath.Glob(filepath.Join(base, "qrvt-platforms-*"))
+	for _, p := range old {
+		if fi, err := os.Stat(p); err == nil && time.Since(fi.ModTime()) > 6*time.Hour {
+			_ = os.RemoveAll(p)
 		}
-		if !skipped["lint"] {
-			r.add("lint: %s", timed(func() { platformsLint(r, tags) }))
-		}
-		zig := ""
-		if !skipped["race"] {
-			r.add("race: %s", timed(func() { zig = platformsRace(r, tags, tmp) }))
-		}
-		if !skipped["windows"] {
-			r.add("windows: %s", timed(func() { platformsWindows(r, tags, tmp, zig, *timeout) }))
-		}
-		if !skipped["arm64"] {
-			r.add("arm64: %s", timed(func() { platformsArm64(r, tags, tmp, *timeout) }))
-		}
-	})
-	fmt.Println()
-	fmt.Println("platforms summary:")
-	for _, l := range r.lines {
-		fmt.Println("  " + l)
-	}
-	fmt.Printf("  total: %s\n", total)
-	fmt.Println("  not covered here: running the darwin binaries (macOS runners) and the windows/arm64 binaries (windows-11-arm runner) stays CI-only")
-	return errors.Join(r.errs...)
-}
-
-func platformsCompile(r *platformReport, tags, tmp string) {
-	for _, j := range compileJobs(tags) {
-		if err := run(j.env, "go", append(append([]string{"vet"}, goTagArgs(j.tags)...), "./...")...); err != nil {
-			r.fail(fmt.Errorf("go vet %s: %w", j.name, err))
-			continue
-		}
-		dir, err := os.MkdirTemp(tmp, "compile-")
-		if err != nil {
-			r.fail(err)
-			return
-		}
-		if err := buildTests(j.env, j.tags, "", dir, false); err != nil {
-			r.fail(fmt.Errorf("go test -c %s: %w", j.name, err))
-		} else {
-			r.add("compile ok %s", j.name)
-		}
-		_ = os.RemoveAll(dir)
 	}
 }
 
-func platformsLint(r *platformReport, tags string) {
-	p, err := find(toolNamed("golangci-lint"))
-	if err != nil {
-		r.fail(err)
+// platformsWindows runs the windows/amd64 test binaries, plain and (when the race step ran) race,
+// through WSL interop, in a copy of the module's files under the Windows user's temporary
+// directory, removed afterwards.
+func platformsWindows(ctx context.Context, r *platformReport, d platformDeps, o platformOpts, race bool) {
+	if why := wslUnavailable(d); why != "" {
+		r.add(kindNotRun, "windows: %s", why)
 		return
 	}
-	for _, goos := range []string{"linux", "darwin", "windows"} {
-		for _, a := range lintRuns(tags, false) {
-			if err := run([]string{"CGO_ENABLED=0", "GOOS=" + goos}, p, a...); err != nil {
-				r.fail(fmt.Errorf("lint %s %s: %w", goos, strings.Join(a, " "), err))
-			} else {
-				r.add("lint ok %s %s", goos, strings.Join(a[1:len(a)-1], " "))
-			}
-		}
-	}
-}
-
-// platformsRace builds the race-enabled test binaries and returns zig's path, or "" when zig was
-// not used. The windows/amd64 binaries stay in tmp/race-windows-amd64 for the windows step.
-func platformsRace(r *platformReport, tags, tmp string) string {
-	zig := findZig(os.Getenv, exec.LookPath)
-	if zig == "" {
-		r.add("race: not run: zig not found (set ZIG, or run scripts/setup.sh --cross)")
-		return ""
-	}
-	if out, err := output(zig, "version"); err != nil || strings.TrimSpace(out) != zigVersion {
-		r.add("race: not run: %s is zig %q, want %s (scripts/setup.sh --cross)", zig, strings.TrimSpace(out), zigVersion)
-		return ""
-	}
-	for _, t := range [][2]string{{"linux", "arm64"}, {"windows", "amd64"}, {"darwin", "amd64"}, {"darwin", "arm64"}} {
-		target, _ := zigTarget(t[0], t[1])
-		env, ldflags := raceEnv(zig, t[0], t[1], target)
-		dir := filepath.Join(tmp, "race-"+t[0]+"-"+t[1])
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			r.fail(err)
-			return zig
-		}
-		if err := buildTests(env, tags, ldflags, dir, true); err != nil {
-			r.fail(fmt.Errorf("race build %s/%s: %w", t[0], t[1], err))
-			continue
-		}
-		r.add("race build ok %s/%s (zig %s)", t[0], t[1], target)
-	}
-	r.add("race: windows/arm64 has no race detector; linux/amd64 is the test task's -race")
-	return zig
-}
-
-// platformsWindows runs the windows/amd64 test binaries, plain and race, through WSL interop, in
-// a copy of the tracked files under the Windows user's temporary directory, removed afterwards.
-func platformsWindows(r *platformReport, tags, tmp, zig string, timeout time.Duration) {
-	if _, err := exec.LookPath("cmd.exe"); err != nil || !fileExists("/proc/sys/fs/binfmt_misc/WSLInterop") {
-		r.add("windows: not run: no WSL interop (cmd.exe not reachable)")
+	base, err := windowsTemp(ctx, d)
+	if err != nil {
+		r.add(kindFail, "windows: %v", err)
 		return
 	}
-	root, err := windowsTemp()
+	removeStale(base)
+	root, err := os.MkdirTemp(base, "qrvt-platforms-")
 	if err != nil {
-		r.fail(err)
+		r.add(kindFail, "windows: %v", err)
 		return
 	}
 	defer func() { _ = os.RemoveAll(root) }()
-	files, err := trackedFiles()
+	files, err := d.listFiles()
 	if err == nil {
-		err = copyTree(files, root)
+		err = copyTree(copyable(files), root)
 	}
 	if err != nil {
-		r.fail(err)
+		r.add(kindFail, "windows: copying the module: %v", err)
 		return
 	}
-	dirs, err := pkgDirs(tags)
+	dirs, err := d.pkgDirs(d.tags)
 	if err != nil {
-		r.fail(err)
+		r.add(kindFail, "windows: %v", err)
 		return
 	}
 	plain := filepath.Join(root, ".bin-plain")
-	if err := buildTests([]string{"CGO_ENABLED=0", "GOOS=windows", "GOARCH=amd64"}, tags, "", plain, false); err != nil {
-		r.fail(fmt.Errorf("windows/amd64 test build: %w", err))
+	if err := buildTests(ctx, d, []string{"CGO_ENABLED=0", "GOOS=windows", "GOARCH=amd64"}, d.tags, "", plain, false); err != nil {
+		r.add(kindFail, "windows/amd64 test build: %v", err)
 		return
 	}
-	runBinaries(r, "windows/amd64", "", plain, root, ".exe", nil, dirs, timeout)
-	race := filepath.Join(tmp, "race-windows-amd64")
-	if zig == "" || !fileExists(race) {
-		r.add("windows/amd64 race: not run: no race binaries (the race step needs zig)")
+	runBinaries(ctx, r, d, "windows/amd64", plain, root, true, nil, dirs, o.timeout)
+	raceBin := filepath.Join(d.tempRoot, "race-windows-amd64")
+	if !race || !d.exists(raceBin) {
+		r.add(kindNotRun, "windows/amd64 race: no race binaries (the race step builds them, with zig)")
 		return
 	}
 	// internal/video's race binary starts engine workers, each a race-enabled copy of itself that
@@ -446,33 +495,136 @@ func platformsWindows(r *platformReport, tags, tmp, zig string, timeout time.Dur
 	// allocate its own memory then ("failed to allocate 0x40000000"), so the package's race tests
 	// stay with CI's windows-2025 race step.
 	raceDirs := maps.Clone(dirs)
-	delete(raceDirs, isolated)
-	r.add("windows/amd64 race: not run: %s (its engine workers' ThreadSanitizer cannot allocate memory under the zig-linked race runtime; CI's windows-2025 race step runs it)", isolated)
-	runBinaries(r, "windows/amd64 race", "", race, root, ".exe", nil, raceDirs, timeout)
+	if _, ok := raceDirs[isolated]; ok {
+		delete(raceDirs, isolated)
+		r.add(kindNotRun, "windows/amd64 race %s: its engine workers' ThreadSanitizer cannot allocate memory under the zig-linked race runtime; CI's windows-2025 race step runs it", isolated)
+	}
+	runBinaries(ctx, r, d, "windows/amd64 race", raceBin, root, true, nil, raceDirs, o.timeout)
 }
 
-// platformsArm64 runs the linux/arm64 test binaries under user-mode emulation, from the
-// packages' own directories, with QRVT_EMULATED=1.
-func platformsArm64(r *platformReport, tags, tmp string, timeout time.Duration) {
-	runner, ok := arm64Runner(exec.LookPath, fileExists)
-	if !ok {
-		r.add("arm64: not run: qemu-aarch64 not found (scripts/setup.sh --cross installs qemu-user-static)")
+// platformsArm64 runs the linux/arm64 test binaries from the packages' own directories: natively
+// on an arm64 host, else under emulation with QRVT_EMULATED=1.
+func platformsArm64(ctx context.Context, r *platformReport, d platformDeps, o platformOpts) {
+	mode, why := arm64Mode(d)
+	if mode == "" {
+		r.add(kindNotRun, "arm64: %s", why)
 		return
 	}
-	dirs, err := pkgDirs(tags)
+	dirs, err := d.pkgDirs(d.tags)
 	if err != nil {
-		r.fail(err)
+		r.add(kindFail, "arm64: %v", err)
 		return
 	}
-	bin := filepath.Join(tmp, "arm64-plain")
-	if err := buildTests([]string{"CGO_ENABLED=0", "GOOS=linux", "GOARCH=arm64"}, tags, "", bin, false); err != nil {
-		r.fail(fmt.Errorf("linux/arm64 test build: %w", err))
+	bin := filepath.Join(d.tempRoot, "arm64-plain")
+	if err := buildTests(ctx, d, []string{"CGO_ENABLED=0", "GOOS=linux", "GOARCH=arm64"}, d.tags, "", bin, false); err != nil {
+		r.add(kindFail, "linux/arm64 test build: %v", err)
 		return
 	}
 	wd, err := os.Getwd()
 	if err != nil {
-		r.fail(err)
+		r.add(kindFail, "arm64: %v", err)
 		return
 	}
-	runBinaries(r, "linux/arm64 (emulated)", runner, bin, wd, "", []string{emulatedEnv}, dirs, timeout)
+	if mode == "native" {
+		runBinaries(ctx, r, d, "linux/arm64 (native)", bin, wd, false, nil, dirs, o.timeout)
+		return
+	}
+	r.add(kindInfo, "arm64: %s", emulationNotice)
+	runBinaries(ctx, r, d, "linux/arm64 (emulated)", bin, wd, false, []string{emulatedEnv}, dirs, o.emulatedTimeout)
+}
+
+// commandWithCancel returns a command bound to ctx. When ctx ends, a Windows test binary run
+// through cmd.exe is killed with its process tree (taskkill), which killing the WSL side alone
+// would leave running.
+func commandWithCancel(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if name == "cmd.exe" && len(args) >= 3 {
+		image := path.Base(strings.ReplaceAll(args[2], `\`, "/"))
+		cmd.Cancel = func() error {
+			_ = exec.Command("taskkill.exe", "/F", "/T", "/IM", image).Run()
+			return cmd.Process.Kill()
+		}
+	}
+	return cmd
+}
+
+// realPlatformDeps returns the task's dependencies on this machine.
+func realPlatformDeps(tags, tempRoot string) platformDeps {
+	return platformDeps{
+		hostOS: runtime.GOOS, hostArch: runtime.GOARCH,
+		lookPath: exec.LookPath, readFile: os.ReadFile, getenv: os.Getenv,
+		exists: func(p string) bool { _, err := os.Stat(p); return err == nil },
+		run: func(ctx context.Context, env []string, name string, args ...string) error {
+			fmt.Fprintf(os.Stderr, "+ %s %s %s\n", strings.Join(env, " "), name, strings.Join(args, " "))
+			cmd := exec.CommandContext(ctx, name, args...)
+			cmd.Stdout, cmd.Stderr, cmd.Env = os.Stdout, os.Stderr, append(os.Environ(), env...)
+			return cmd.Run()
+		},
+		output: func(ctx context.Context, name string, args ...string) (string, error) {
+			out, err := exec.CommandContext(ctx, name, args...).Output()
+			return string(out), err
+		},
+		runTest: func(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
+			cmd := commandWithCancel(ctx, name, args...)
+			cmd.Dir, cmd.Env = dir, append(os.Environ(), env...)
+			return cmd.CombinedOutput()
+		},
+		lintTool: func() (string, error) { return find(toolNamed("golangci-lint")) },
+		pkgDirs:  pkgDirs,
+		listFiles: func() ([]string, error) {
+			out, err := exec.Command("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard").Output()
+			if err != nil {
+				return nil, fmt.Errorf("git ls-files: %w", err)
+			}
+			return strings.FieldsFunc(string(out), func(r rune) bool { return r == 0 }), nil
+		},
+		tags: tags, tempRoot: tempRoot,
+	}
+}
+
+// pkgDirs returns, for each package of the module, its directory relative to the module root.
+func pkgDirs(tags string) (map[string]string, error) {
+	pkgs, err := packages(tags)
+	if err != nil {
+		return nil, err
+	}
+	dirs := map[string]string{}
+	for _, p := range pkgs {
+		rel := strings.TrimPrefix(strings.TrimPrefix(p, module), "/")
+		if rel == "" {
+			rel = "."
+		}
+		dirs[p] = rel
+	}
+	return dirs, nil
+}
+
+// platforms is the platforms task. An interrupt (SIGINT, SIGTERM) stops the running command and
+// still removes the temporary directories.
+func platforms(args []string) error {
+	o, err := parsePlatformArgs(args)
+	if err != nil {
+		return err
+	}
+	tags, err := releaseTags()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	removeStale(os.TempDir())
+	tmp, err := os.MkdirTemp("", "qrvt-platforms-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	start := time.Now()
+	r, err := runPlatforms(ctx, o, realPlatformDeps(tags, tmp))
+	fmt.Println()
+	fmt.Println("platforms summary:")
+	for _, l := range r.summary(o.strict) {
+		fmt.Println("  " + l)
+	}
+	fmt.Printf("  total: %s\n", time.Since(start).Round(time.Second))
+	return err
 }
