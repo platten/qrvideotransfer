@@ -15,10 +15,7 @@ import (
 // value must not (at most 0.1% flagged). Cells on the patch's soft edge, brightened but not
 // clipped, are counted apart: telling them from data is the equaliser's part.
 func TestSampleGlareFlagged(t *testing.T) {
-	n := 2
-	if raceEnabled {
-		n = 1
-	}
+	n := raceSize(2, 1)
 	c := geomNewCode(t, 480, 270, 4, 2, 1, 31)
 	clean := geomConfig(t, "handheld", 0, 0)
 	glared := clean

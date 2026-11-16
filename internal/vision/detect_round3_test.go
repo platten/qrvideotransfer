@@ -73,6 +73,7 @@ func TestFitFinderOff(t *testing.T) {
 // Detect allocates at most 32 MB and takes at most 6 times as long as locating the real code in the
 // same process.
 func TestDetectHostileGrid4K(t *testing.T) {
+	raceSkipStatistics(t) // a cost ratio: race instrumentation distorts it unevenly
 	c := geomNewCode(t, 480, 270, 8, 2, 1, 37)
 	a := geomFakeCopies(t, c, 2047, 1393, 0, 1, 2, 3)
 	b := geomFakeCopies(t, c, 2046, 1393, 0, 1, 2, 3)

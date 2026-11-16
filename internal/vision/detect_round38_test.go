@@ -18,7 +18,7 @@ func TestThreeFindersBesideGateFailure(t *testing.T) {
 	const w, h = 2400, 900
 	const rx, ry, sx, sy = 0, 90, 1500, 200
 	want := geomPlainQuad(real)
-	for k := range 4 {
+	for k := range raceSize(4, 2) {
 		f := &video.Frame{W: w, H: h, Bits: 8, Y: make([]uint16, w*h)}
 		for i := range f.Y {
 			f.Y[i] = 126
@@ -56,7 +56,8 @@ func TestThreeFindersBesideDecoy(t *testing.T) {
 	want := geomPlainQuad(c)
 	plain := geomPlain(c, 0)
 	sep := c.layout.Separator(frame.TopRight).Pixels(c.pitch)
-	for _, off := range []float64{1, 1.5, 2, 3} {
+	offs := []float64{1, 1.5, 2, 3}
+	for _, off := range offs[:raceSize(len(offs), 2)] {
 		f := geomPlain(c, 0)
 		geomPaintDisc(f, want.Centres[1].X, want.Centres[1].Y, 12*float64(c.pitch), 235)
 		dx := int(off * float64(c.pitch))
@@ -90,9 +91,10 @@ func TestThreeFindersOverlappingDecoy(t *testing.T) {
 	c := geomNewCode(t, 480, 270, 4, 2, 1, 45)
 	want := geomPlainQuad(c)
 	plain := geomPlain(c, 0)
-	for k, corner := range []frame.Corner{frame.TopLeft, frame.TopRight, frame.BottomLeft, frame.BottomRight} {
+	corners := []frame.Corner{frame.TopLeft, frame.BottomRight, frame.TopRight, frame.BottomLeft}
+	for _, corner := range corners[:raceSize(len(corners), 2)] {
 		sep := c.layout.Separator(corner).Pixels(c.pitch)
-		for _, off := range []int{4, 5} {
+		for _, off := range []int{4, 5}[:raceSize(2, 1)] {
 			dx, dy := off*c.pitch, off*c.pitch
 			if corner == frame.TopRight || corner == frame.BottomRight {
 				dx = -dx
@@ -114,12 +116,12 @@ func TestThreeFindersOverlappingDecoy(t *testing.T) {
 				var d FinderDetector
 				q, ok := d.Detect(f, nil)
 				if !ok {
-					t.Errorf("corner %d, %d cells, inverted %v: not located", k, off, inverted)
+					t.Errorf("corner %d, %d cells, inverted %v: not located", corner, off, inverted)
 					continue
 				}
 				for j := range 4 {
 					if e := geomDist(q.Centres[j], want.Centres[j]); e > want.Module {
-						t.Errorf("corner %d, %d cells, inverted %v: centre %d at %v, want %v", k, off, inverted, j, q.Centres[j], want.Centres[j])
+						t.Errorf("corner %d, %d cells, inverted %v: centre %d at %v, want %v", corner, off, inverted, j, q.Centres[j], want.Centres[j])
 					}
 				}
 			}

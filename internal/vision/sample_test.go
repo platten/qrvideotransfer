@@ -81,7 +81,7 @@ func TestSamplePartialClip(t *testing.T) {
 			most = 0.035
 		}
 		worst, at := 0.0, 0
-		for share := 5; share <= 95; share += 5 {
+		for share := 5; share <= 95; share += raceSize(5, 30) {
 			f := geomPlain(c, 0)
 			edge := f.W * share / 100
 			for y := range f.H {
@@ -242,10 +242,7 @@ func TestSampleSimulated(t *testing.T) {
 // per cell, 480 x 270 at 4): every one of the 30 black-and-white codes loses at most 3.5% of its
 // cells (designer ruling, 2026-11-15) and every four-grey code at most 0.1%. The largest is logged.
 func TestSampleClipCostSpread(t *testing.T) {
-	seeds := 10
-	if raceEnabled {
-		seeds = 3
-	}
+	seeds := raceSize(10, 1)
 	for _, mod := range []uint8{1, 2} {
 		most := 0.001
 		if mod == 1 {

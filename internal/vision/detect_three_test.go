@@ -53,16 +53,15 @@ func TestDetectThreeFindersPlain(t *testing.T) {
 func TestDetectTwoHidden(t *testing.T) {
 	c := geomNewCode(t, 320, 180, 8, 2, 1, 29)
 	want := geomPlainQuad(c)
-	for a := range 4 {
-		for b := a + 1; b < 4; b++ {
-			f := geomPlain(c, 0)
-			for _, k := range []int{a, b} {
-				geomPaintDisc(f, want.Centres[k].X, want.Centres[k].Y, 12*float64(c.pitch), 235)
-			}
-			var d FinderDetector
-			if q, ok := d.Detect(f, nil); ok {
-				t.Errorf("finders %d and %d hidden: located %v", a, b, q.Centres)
-			}
+	pairs := [][2]int{{0, 3}, {1, 2}, {0, 1}, {0, 2}, {1, 3}, {2, 3}}
+	for _, p := range pairs[:raceSize(len(pairs), 2)] {
+		f := geomPlain(c, 0)
+		for _, k := range p {
+			geomPaintDisc(f, want.Centres[k].X, want.Centres[k].Y, 12*float64(c.pitch), 235)
+		}
+		var d FinderDetector
+		if q, ok := d.Detect(f, nil); ok {
+			t.Errorf("finders %d and %d hidden: located %v", p[0], p[1], q.Centres)
 		}
 	}
 }
@@ -75,6 +74,7 @@ func TestDetectTwoHidden(t *testing.T) {
 // pixels), and noise yields many finder-like hits. Measured 11 times; the three-finder search is a
 // quarter of it.
 func TestDetectThreeHostile(t *testing.T) {
+	raceSkipStatistics(t) // a cost ratio: race instrumentation distorts it unevenly
 	const w, h = 1920, 1080
 	f := &video.Frame{W: w, H: h, Bits: 8, Y: make([]uint16, w*h)}
 	s := uint64(11)
@@ -115,6 +115,7 @@ func TestDetectThreeHostile(t *testing.T) {
 // is never located; each Detect allocates at most 32 MB and takes at most 6 times as long as
 // locating the real code in the same process.
 func TestDetectThreeHostile4K(t *testing.T) {
+	raceSkipStatistics(t) // a cost ratio: race instrumentation distorts it unevenly
 	c := geomNewCode(t, 480, 270, 8, 2, 1, 40)
 	q := geomPlainQuad(c)
 	var planes [][]uint16
@@ -133,8 +134,14 @@ func TestDetectThreeHostile4K(t *testing.T) {
 func TestThreeFindersConflictingCopy(t *testing.T) {
 	c := geomNewCode(t, 320, 180, 8, 2, 1, 41)
 	want := geomPlainQuad(c)
-	for k := range 4 {
-		for j := range 4 {
+	n := 0
+	for step := range 4 {
+		for k := range 4 {
+			if n == raceSize(16, 2) {
+				return
+			}
+			n++
+			j := (k + step + 1) % 4 // every (k, j) pair once, with distinct k and j in the first cases
 			f := geomPlain(c, 0)
 			f.Y = geomFakeCopies(t, c, 300, 180, j)
 			geomPaintDisc(f, want.Centres[k].X, want.Centres[k].Y, 12*float64(c.pitch), 235)
@@ -157,10 +164,7 @@ func TestThreeFindersConflictingCopy(t *testing.T) {
 // of 2% of the code area centred on each finder in turn: every pose located with its header read,
 // no wrong quad or header, and a cell-centre error outside the patch of at most 0.15 cell RMS.
 func TestGlareOnFinder(t *testing.T) {
-	n := 6
-	if raceEnabled {
-		n = 2
-	}
+	n := raceSize(6, 1)
 	c := geomNewCode(t, 480, 270, 4, 2, 4, 30)
 	cases := geomGlareCases(c)[:4]
 	poses := geomPoses(t, c, geomConfig(t, "handheld", 0, 0), n, 21000)
