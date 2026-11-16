@@ -423,6 +423,8 @@ func isolatedRuns(args, pkgs []string) [][]string {
 	return [][]string{others, append(slices.Clone(head), "./internal/video/...")}
 }
 
+func selectRuns(runs [][]string, part string) ([][]string, error) { return nil, nil }
+
 // packages lists the module's packages, with the given build tags.
 func packages(tags string) ([]string, error) {
 	args := []string{"list"}

@@ -119,6 +119,61 @@ func TestIsolatedRuns(t *testing.T) {
 	}
 }
 
+// TestSelectRuns: -part runs one half of the split, so that CI can give internal/video under the
+// race detector a step (and a time limit) of its own.
+func TestSelectRuns(t *testing.T) {
+	runs := [][]string{{"test", "a", "b"}, {"test", "./internal/video/..."}}
+	for _, c := range []struct {
+		part string
+		want [][]string
+	}{
+		{"", runs},
+		{"others", runs[:1]},
+		{"isolated", runs[1:]},
+	} {
+		got, err := selectRuns(runs, c.part)
+		if err != nil || len(got) != len(c.want) || !slices.Equal(got[0], c.want[0]) {
+			t.Errorf("selectRuns(%q) = %q, %v; want %q", c.part, got, err, c.want)
+		}
+	}
+	if _, err := selectRuns(runs, "video"); err == nil {
+		t.Error("an unknown part gave no error")
+	}
+	// A command that is not split has no parts.
+	if _, err := selectRuns(runs[:1], "isolated"); err == nil {
+		t.Error("a part of an unsplit command gave no error")
+	}
+}
+
+// TestRaceStepsSplit checks that ci.yml runs the race tests in two steps, internal/video alone and
+// every other package, each with the 20-minute limit.
+func TestRaceStepsSplit(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"run: scripts/test.sh -race -part others\n",
+		"run: scripts/test.sh -race -part isolated\n",
+		"run: scripts/test.ps1 -race -part others\n",
+		"run: scripts/test.ps1 -race -part isolated\n",
+	} {
+		i := strings.Index(s, want)
+		if i < 0 {
+			t.Errorf("ci.yml lacks %q", strings.TrimSpace(want))
+			continue
+		}
+		step := s[strings.LastIndex(s[:i], "      - name:"):i]
+		if !strings.Contains(step, "timeout-minutes: 20\n") {
+			t.Errorf("the step running %q has no 20-minute limit", strings.TrimSpace(want))
+		}
+	}
+	if strings.Contains(s, "run: scripts/test.sh -race\n") || strings.Contains(s, "run: scripts/test.ps1 -race\n") {
+		t.Error("ci.yml still runs the race tests in one step")
+	}
+}
+
 // TestMergeProfiles: two coverage profiles become one, with a single mode line.
 func TestMergeProfiles(t *testing.T) {
 	dir := t.TempDir()
