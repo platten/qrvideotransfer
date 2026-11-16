@@ -1672,8 +1672,9 @@ by GoReleaser).
   `build -all`, the developer runs `go run ./tools/dev platforms`. That routine run leaves out the
   linux/arm64 step (about 10 minutes on the machine below). Once per pull request, immediately
   before the push that opens it, `go run ./tools/dev platforms -full` runs every step and fails if
-  any step could not run (`-strict` does the latter alone; `-skip` leaves named steps out and refuses
-  unknown names). A step that could not run is reported as NOT RUN with its reason, never as a pass.
+  any step could not run, and it takes no `-skip` (`-strict` fails on steps that could not run
+  alone; `-skip` leaves named steps out of a routine run and refuses unknown names). A step that
+  could not run is reported as NOT RUN with its reason, never as a pass.
   - *compile*: `go vet` and `go test -c` of every package for all six targets, with and without the
     release build tags, `CGO_ENABLED=0`. This catches build-constraint files, signature changes and
     code that compiles only on some systems.
@@ -1701,9 +1702,11 @@ by GoReleaser).
     `TestHostileFiles` logs instead of asserting its 60 s bound per hostile file (`nostsd.mp4` took
     65 s); the step prints that list and every bound it logged. Every other test asserts as it
     does natively.
-  - An interrupt (Ctrl-C, SIGTERM) stops the running command, kills a Windows test binary's process
-    tree, and removes the temporary directories; directories that an earlier run left behind more
-    than six hours ago are removed at the start.
+  - An interrupt (Ctrl-C, SIGTERM) stops the running command, kills a Windows test binary and its
+    engine workers by the binary's full path in this run's directory (never by image name, which
+    would match another run's), reports the interrupted step once, and removes the temporary
+    directories; directories that an earlier run left behind more than six hours ago are removed at
+    the start.
   - The task prints, per package, the time, the tests passed and the tests skipped. On the
     developer machine of spike S1 (16 threads, WSL2) a `-full` run took 35 min 44 s with the build
     cache warm: compile 15 s, lint 19 s, race builds 7 s, Windows 9 min 03 s (plain and race), and

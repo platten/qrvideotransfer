@@ -48,11 +48,19 @@ const emulationNotice = "under emulation (QRVT_EMULATED=1) these bounds are logg
 // emulationMarker is the phrase with which tests log a bound they did not assert under emulation.
 const emulationMarker = "logged rather than asserted under emulation"
 
-func windowsKillCommand(exe string) (string, []string) { return "", nil }
+// windowsKillCommand returns the command that kills every Windows process whose executable is
+// exactly exe: an interrupted test binary and its engine workers, which are the same executable in
+// this run's own directory, and nothing of another run's (an image name would match those too).
+func windowsKillCommand(exe string) (string, []string) {
+	quoted := "'" + strings.ReplaceAll(exe, "'", "''") + "'"
+	return "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command",
+		"Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq " + quoted +
+			" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"}
+}
 
 // loggedBound matches a test's log line ("    file_test.go:12: …") that reports a bound logged
 // rather than asserted under emulation; output that merely quotes such a line does not match.
-var loggedBound = regexp.MustCompile(`^\s+\w+_test\.go:\d+: .*logged rather than asserted under emulation`)
+var loggedBound = regexp.MustCompile(`^\s+\w+_test\.go:\d+: .*` + emulationMarker)
 
 // notCoveredLocally is what only the CI runners check (DESIGN.md section 17).
 var notCoveredLocally = []string{
@@ -82,6 +90,9 @@ func parsePlatformArgs(args []string) (platformOpts, error) {
 	timeout := fs.Duration("timeout", 30*time.Minute, "time limit per test binary")
 	emulated := fs.Duration("emulated-timeout", 90*time.Minute, "time limit per test binary under emulation")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
+	if *full && strings.TrimSpace(*skip) != "" {
+		return platformOpts{}, errors.New("-full runs every step: it takes no -skip")
+	}
 	o := platformOpts{skip: map[string]string{}, strict: *strict || *full, timeout: *timeout, emulatedTimeout: *emulated}
 	if !*full {
 		o.skip["arm64"] = "routine run; -full runs it"
@@ -432,6 +443,10 @@ func runBinaries(ctx context.Context, r *platformReport, d platformDeps, label, 
 	var npkg, npass, nskip int
 	var logged []string
 	for _, p := range pkgs {
+		if ctx.Err() != nil {
+			r.add(kindNotRun, "%s: interrupted", label)
+			break
+		}
 		suffix := ""
 		if windows {
 			suffix = ".exe"
@@ -452,6 +467,10 @@ func runBinaries(ctx context.Context, r *platformReport, d platformDeps, label, 
 		}
 		start := time.Now()
 		out, err := d.runTest(ctx, filepath.Join(root, filepath.FromSlash(dirs[p])), env, name, args...)
+		if ctx.Err() != nil {
+			r.add(kindNotRun, "%s: interrupted during %s", label, p)
+			break
+		}
 		res := parseTestOutput(string(out))
 		npass += len(res.passed)
 		nskip += len(res.skipped)
@@ -622,14 +641,14 @@ func platformsArm64(ctx context.Context, r *platformReport, d platformDeps, o pl
 }
 
 // commandWithCancel returns a command bound to ctx. When ctx ends, a Windows test binary run
-// through cmd.exe is killed with its process tree (taskkill), which killing the WSL side alone
-// would leave running.
+// through cmd.exe is killed by its full path, with its engine workers (windowsKillCommand), which
+// killing the WSL side alone would leave running.
 func commandWithCancel(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if name == "cmd.exe" && len(args) >= 3 {
-		image := path.Base(strings.ReplaceAll(args[2], `\`, "/"))
+		kill, kargs := windowsKillCommand(args[2])
 		cmd.Cancel = func() error {
-			_ = exec.Command("taskkill.exe", "/F", "/T", "/IM", image).Run()
+			_ = exec.Command(kill, kargs...).Run()
 			return cmd.Process.Kill()
 		}
 	}

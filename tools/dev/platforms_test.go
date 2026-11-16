@@ -180,6 +180,16 @@ func TestWSLAvailable(t *testing.T) {
 	}
 }
 
+// fullWithout returns -full's options with the given steps left out, which the command line
+// refuses but the tests use to run one step strictly.
+func fullWithout(steps ...string) platformOpts {
+	o, _ := parsePlatformArgs([]string{"-full"})
+	for _, s := range steps {
+		o.skip[s] = "left out by the test"
+	}
+	return o
+}
+
 // fakeDeps returns dependencies for runPlatforms in which every command succeeds, the module has
 // the given packages, and every package has a test binary.
 func fakeDeps(t *testing.T, pkgs ...string) (platformDeps, *[]string) {
@@ -282,7 +292,7 @@ func TestRunPlatformsNotRun(t *testing.T) {
 	if _, err := runPlatforms(t.Context(), o, d); err == nil || !strings.Contains(err.Error(), "not run") {
 		t.Errorf("with -strict, not run gave %v", err)
 	}
-	o, _ = parsePlatformArgs([]string{"-full", "-skip", "compile,lint,race,windows"})
+	o = fullWithout("compile", "lint", "race", "windows")
 	r, err = runPlatforms(t.Context(), o, d)
 	if err == nil || !strings.Contains(strings.Join(r.summary(true), "\n"), "qemu-aarch64 not found") {
 		t.Errorf("-full without qemu: %v", err)
@@ -325,7 +335,7 @@ func TestWindowsRaceExcludesVideo(t *testing.T) {
 	if s := strings.Join(r.summary(false), "\n"); !strings.Contains(s, "CI-ONLY windows/amd64 race "+isolated) {
 		t.Errorf("summary does not report video's race tests as CI-only:\n%s", s)
 	}
-	o, _ = parsePlatformArgs([]string{"-full", "-skip", "compile,lint,arm64"})
+	o = fullWithout("compile", "lint", "arm64")
 	if _, err := runPlatforms(t.Context(), o, d); err != nil {
 		t.Errorf("-full failed on the accepted CI-only exclusion: %v", err)
 	}
@@ -340,7 +350,7 @@ func TestArm64EmulationNotice(t *testing.T) {
 		return []byte("=== RUN   TestHostileFiles\n    sandbox_test.go:579: nostsd.mp4: 1m5s, over the 60 s bound, logged rather than asserted under emulation\n" +
 			"platforms: x logged: sandbox_test.go:1: y, logged rather than asserted under emulation\n--- PASS: TestHostileFiles (82.00s)\nPASS\n"), nil
 	}
-	o, _ := parsePlatformArgs([]string{"-full", "-skip", "compile,lint,race,windows"})
+	o := fullWithout("compile", "lint", "race", "windows")
 	r, err := runPlatforms(t.Context(), o, d)
 	if err != nil {
 		t.Fatal(err)
