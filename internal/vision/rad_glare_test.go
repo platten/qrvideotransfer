@@ -19,11 +19,10 @@ const (
 	maxGlareMiss       = 0.05  // share of cells under the patch that still give soft bits
 	maxGlareFalse      = 0.002 // share of cells away from the patch made unknown
 	maxGlareMissFringe = 0.30
-	// Through the geometry pipeline the miss rate measured 0.073 on tripod (0.036 handheld), an
-	// accepted residual revisited with S2: the cells missed are wrong data stated with confidence.
-	// Since the sampler marks clipped cells unknown (PR #38) it measures 0.037 to 0.038 (0.012 to
-	// 0.013); the bound stays until a review tightens it.
-	maxGlareMissPipeline = 0.10
+	// Through the geometry pipeline the sampler and the equaliser together miss 0.037 to 0.038 of
+	// the cells under the patch on tripod and 0.012 to 0.013 on handheld (designer's decision of
+	// 2026-11-16: bound 0.06 on both). Missed cells are wrong data stated with confidence.
+	maxGlareMissPipeline = 0.06
 	maxGlareFalseFringe  = 0.008
 	maxFringeLoss        = 0.0005 // credited cells lost to fringes without a patch: measured 0.00019
 )
