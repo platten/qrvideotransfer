@@ -179,7 +179,7 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	loadTimer := time.AfterFunc(loadLimit, func() {
 		if m.memAt.Load() == 0 {
 			overdue.Store(true)
-			m.cancelledAt.CompareAndSwap(0, time.Now().UnixNano())
+			m.cancelledAt.CompareAndSwap(0, meterStamp(time.Now()))
 			cancel(loadError())
 		}
 	})
@@ -203,7 +203,7 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 	// call returns.
 	ctx = experimental.WithMemoryAllocator(ctx, timedAlloc{m})
 	ctx = experimental.WithCloseNotifier(ctx, experimental.CloseNotifyFunc(func(context.Context, uint32) {
-		m.checkAt.CompareAndSwap(0, time.Now().UnixNano())
+		m.checkAt.CompareAndSwap(0, meterStamp(time.Now()))
 	}))
 	rc, err := wasm.Run(ctx, e.rt, e.cm, wasm.Args{
 		Name: j.prog, Args: j.args(in, "/out"), Stdin: j.stdin, Stdout: j.stdout, Stderr: j.stderr,
@@ -211,7 +211,7 @@ func (e *engine) exec(ctx context.Context, j *job, m *meter) (int, error) {
 			return c.WithSysWalltime().WithSysNanotime().WithFSConfig(fsc)
 		},
 	})
-	m.runAt.CompareAndSwap(0, time.Now().UnixNano())
+	m.runAt.CompareAndSwap(0, meterStamp(time.Now()))
 	if overdue.Load() {
 		return 0, loadError()
 	}

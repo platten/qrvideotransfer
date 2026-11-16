@@ -27,7 +27,9 @@ type procRunner struct {
 	env []string
 	// started, when set, is told each worker's process id (tests).
 	started func(pid int)
-	// noJob leaves the worker out of a Job Object on Windows (tests).
+	// noJob leaves the worker out of a Job Object on Windows and, on Linux, drops the parent-death
+	// signal and the thread lock that goes with it, so that a test exercises only the worker's own
+	// exit when its pipe closes (tests).
 	noJob bool
 }
 
@@ -123,7 +125,7 @@ func (p *procRunner) exec(ctx context.Context, j *job, m *meter, cacheDir string
 	loadTimer := time.AfterFunc(loadLimit, func() {
 		if m.memAt.Load() == 0 { // never became ready, or never reported its reservation
 			overdue.Store(true)
-			m.cancelledAt.CompareAndSwap(0, time.Now().UnixNano())
+			m.cancelledAt.CompareAndSwap(0, meterStamp(time.Now()))
 			_ = cmd.Process.Kill()
 		}
 	})
@@ -241,7 +243,7 @@ func workerInput(m *meter, b []byte) {
 	if v := get(2); v > m.inCalls.Load() {
 		m.inCalls.Store(v)
 	}
-	now := time.Now().UnixNano()
+	now := meterStamp(time.Now())
 	for i, at := range []*atomic.Int64{&m.firstIn, &m.memAt, &m.openAt} {
 		if d := int64(binary.BigEndian.Uint64(b[24+8*i:])); d >= 0 && m.readyAt.Load() != 0 { //nolint:gosec // -1: not yet
 			at.CompareAndSwap(0, min(m.readyAt.Load()+min(d, int64(24*time.Hour)), now))

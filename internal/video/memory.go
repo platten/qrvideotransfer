@@ -52,5 +52,5 @@ var beforeReserve = func(*meter) {}
 // Free implements experimental.LinearMemory. wazero frees the memory as it closes the module.
 func (t *timedMem) Free() {
 	t.buf = nil
-	t.m.freedAt.CompareAndSwap(0, time.Now().UnixNano())
+	t.m.freedAt.CompareAndSwap(0, meterStamp(time.Now()))
 }
