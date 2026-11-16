@@ -180,12 +180,13 @@ func goTest(tags string, args ...string) []string {
 }
 
 // testCommand returns the environment and `go test` arguments of the test task.
-func testCommand(args []string, tags string) (env, goArgs []string) {
+func testCommand(args []string, tags string) (env, goArgs []string, part string) {
 	fs := newFlags("test")
 	race := fs.Bool("race", false, "run with the race detector (enables cgo)")
 	long := fs.Bool("long", false, "include long tests (QRVT_LONG_TESTS=1)")
 	short := fs.Bool("short", false, "pass -short to go test")
 	untagged := fs.Bool("untagged", false, "test the default build, without the release build tags")
+	p := fs.String("part", "", "others: every package but internal/video; isolated: internal/video alone")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
 	if *untagged {
 		tags = ""
@@ -205,7 +206,7 @@ func testCommand(args []string, tags string) (env, goArgs []string) {
 		extra = append(extra, "-short")
 	}
 	extra = append(append(extra, fs.Args()...), "./...")
-	return env, goTest(tags, extra...)
+	return env, goTest(tags, extra...), *p
 }
 
 func test(args []string) error {
@@ -213,8 +214,8 @@ func test(args []string) error {
 	if err != nil {
 		return err
 	}
-	env, goArgs := testCommand(args, tags)
-	return runTests(env, tags, goArgs)
+	env, goArgs, part := testCommand(args, tags)
+	return runTests(env, tags, goArgs, part)
 }
 
 // lintRuns returns the golangci-lint invocations: the default build, then, when the release build
@@ -423,7 +424,22 @@ func isolatedRuns(args, pkgs []string) [][]string {
 	return [][]string{others, append(slices.Clone(head), "./internal/video/...")}
 }
 
-func selectRuns(runs [][]string, part string) ([][]string, error) { return nil, nil }
+// selectRuns returns the part of an isolatedRuns split that -part names: "" for both, "others"
+// for every package but the isolated one, "isolated" for that one alone. CI runs the two parts of
+// the race tests as separate steps, each with its own time limit.
+func selectRuns(runs [][]string, part string) ([][]string, error) {
+	switch {
+	case part == "":
+		return runs, nil
+	case len(runs) != 2:
+		return nil, fmt.Errorf("-part %s needs the whole module (./...)", part)
+	case part == "others":
+		return runs[:1], nil
+	case part == "isolated":
+		return runs[1:], nil
+	}
+	return nil, fmt.Errorf("-part %q: want others or isolated", part)
+}
 
 // packages lists the module's packages, with the given build tags.
 func packages(tags string) ([]string, error) {
@@ -438,14 +454,19 @@ func packages(tags string) ([]string, error) {
 	return strings.Fields(out), nil
 }
 
-// runTests runs go test with goArgs as isolatedRuns splits it, all runs even if one fails.
-func runTests(env []string, tags string, goArgs []string) error {
+// runTests runs go test with goArgs as isolatedRuns splits it, all runs of the selected part (""
+// for both) even if one fails.
+func runTests(env []string, tags string, goArgs []string, part string) error {
 	pkgs, err := packages(tags)
 	if err != nil {
 		return err
 	}
+	runs, err := selectRuns(isolatedRuns(goArgs, pkgs), part)
+	if err != nil {
+		return err
+	}
 	var errs []error
-	for _, a := range isolatedRuns(goArgs, pkgs) {
+	for _, a := range runs {
 		errs = append(errs, run(env, "go", a...))
 	}
 	return errors.Join(errs...)

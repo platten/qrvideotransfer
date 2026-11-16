@@ -203,7 +203,7 @@ func TestTestCommand(t *testing.T) {
 		{[]string{"-long", "-short", "--", "-count=1"}, "CGO_ENABLED=0 QRVT_LONG_TESTS=1", "test -tags=noasm,nounsafe -short -count=1 ./..."},
 	}
 	for _, c := range cases {
-		env, args := testCommand(c.args, "noasm,nounsafe")
+		env, args, _ := testCommand(c.args, "noasm,nounsafe")
 		if strings.Join(env, " ") != c.wantEnv || strings.Join(args, " ") != c.want {
 			t.Errorf("testCommand(%v) = %v, %v; want %s, %s", c.args, env, args, c.wantEnv, c.want)
 		}

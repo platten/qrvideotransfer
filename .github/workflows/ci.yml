@@ -135,16 +135,28 @@ jobs:
           config: ./.testcoverage.yml
 
       # The race detector needs cgo and does not support windows/arm64.
-      - name: Race tests (Unix)
+      # Two steps, each with its own 20-minute limit: every package but internal/video, then
+      # internal/video on its own (DESIGN.md section 17).
+      - name: Race tests, other packages (Unix)
         if: runner.os != 'Windows'
         timeout-minutes: 20
         shell: bash
-        run: scripts/test.sh -race
-      - name: Race tests (Windows)
+        run: scripts/test.sh -race -part others
+      - name: Race tests, internal/video (Unix)
+        if: runner.os != 'Windows'
+        timeout-minutes: 20
+        shell: bash
+        run: scripts/test.sh -race -part isolated
+      - name: Race tests, other packages (Windows)
         if: matrix.os == 'windows-2025'
         timeout-minutes: 20
         shell: pwsh
-        run: scripts/test.ps1 -race
+        run: scripts/test.ps1 -race -part others
+      - name: Race tests, internal/video (Windows)
+        if: matrix.os == 'windows-2025'
+        timeout-minutes: 20
+        shell: pwsh
+        run: scripts/test.ps1 -race -part isolated
 
       - name: Static build, all six targets (Unix)
         if: runner.os != 'Windows'
