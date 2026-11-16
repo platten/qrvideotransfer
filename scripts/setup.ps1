@@ -8,15 +8,17 @@ Prints everything it will install, and asks, before installing anything.
                              (golangci-lint, GoReleaser, syft, actionlint, go-licenses, govulncheck)
   scripts/setup.ps1 -Spike   also a native ffmpeg with an HEVC encoder (libx265) and the wasmtime
                              command-line runner, which only spike S1 needs
+  scripts/setup.ps1 -Cross   also zig, the C cross-compiler of `tools/dev platforms`' race builds
   -Yes                       do not ask
   -DryRun                    print the plan and stop
 
-Go and wasmtime come from their vendors' release archives, checked against the SHA-256 sums pinned
+Go, wasmtime and zig come from their vendors' release archives, checked against the SHA-256 sums pinned
 below, and go under %LOCALAPPDATA%\Programs. git and ffmpeg come from winget (Git.Git and
 Gyan.FFmpeg, whose full build includes libx265).
 #>
 param(
     [switch]$Spike,
+    [switch]$Cross,
     [switch]$Yes,
     [switch]$DryRun
 )
@@ -27,6 +29,7 @@ $env:GOTOOLCHAIN = 'local'
 
 $GoVersion = '1.27.4'
 $WasmtimeVersion = '50.0.1'
+$ZigVersion = '0.17.1'
 $Prefix = Join-Path $env:LOCALAPPDATA 'Programs'
 
 # SHA-256 of the release archives, from https://go.dev/dl/?mode=json and the GitHub release assets of
@@ -34,6 +37,11 @@ $Prefix = Join-Path $env:LOCALAPPDATA 'Programs'
 $GoSha256 = @{
     'amd64' = '178ab98950ac69ab25069307dc6ade79f3816e414cce95b4da166a115cde1e7e'
     'arm64' = '9e7a72565792b8ab370b37ac9ac109799237abacb39ff2f541c438b963c0cc64'
+}
+# From https://ziglang.org/download/index.json.
+$ZigSha256 = @{
+    'x86_64'  = 'b03f477a1943673e02aca0f570e8030dffd536ce1f45cbc4d3326ec31159562e'
+    'aarch64' = '4789895bdb1e312a2ea73b2a7c0a0cc8d2ab62ba6976e834a7c54cf443377c15'
 }
 $WasmtimeSha256 = @{
     'x86_64'  = 'c3646ee2de8cfcefe532e75852e1fd2728d78c3fcc43251794803a698d1c30ca'
@@ -57,6 +65,9 @@ $goInstall = $false
 $wasmtimeInstall = $false
 $wasmtimeName = "wasmtime-v$WasmtimeVersion-$warch-windows"
 $wasmtimeDir = Join-Path $Prefix $wasmtimeName
+$zigInstall = $false
+$zigName = "zig-$warch-windows-$ZigVersion"
+$zigDir = Join-Path $Prefix $zigName
 
 if ((Have go) -and ((& go env GOVERSION) -eq "go$GoVersion")) {
     Write-Host "ok  Go $GoVersion ($((Get-Command go).Source))"
@@ -85,6 +96,17 @@ if ($Spike) {
     } else {
         $wasmtimeInstall = $true
         $plan += "wasmtime $WasmtimeVersion from the GitHub release $wasmtimeName.zip (SHA-256 checked) into $wasmtimeDir"
+    }
+}
+if ($Cross) {
+    $zigExe = Join-Path $zigDir 'zig.exe'
+    if ((Have zig) -and ((& zig version) -eq $ZigVersion)) {
+        Write-Host "ok  zig $ZigVersion"
+    } elseif ((Test-Path $zigExe) -and ((& $zigExe version) -eq $ZigVersion)) {
+        Write-Host "ok  zig $ZigVersion ($zigDir, not on PATH)"
+    } else {
+        $zigInstall = $true
+        $plan += "zig $ZigVersion from https://ziglang.org/download/$ZigVersion/$zigName.zip (SHA-256 checked) into $zigDir"
     }
 }
 if ($winget.Count -gt 0 -and -not (Have winget)) { throw 'setup: winget is required to install ' + ($winget -join ', ') }
@@ -130,6 +152,12 @@ try {
         Expand-Archive -Path $zip -DestinationPath $goRoot
         Write-Host "installed Go $GoVersion into $goRoot"
     }
+    if ($zigInstall) {
+        $zip = Join-Path $tmp 'zig.zip'
+        Fetch "https://ziglang.org/download/$ZigVersion/$zigName.zip" $ZigSha256[$warch] $zip
+        Expand-Archive -Path $zip -DestinationPath $Prefix
+        Write-Host "installed zig $ZigVersion into $zigDir"
+    }
     if ($wasmtimeInstall) {
         $zip = Join-Path $tmp 'wasmtime.zip'
         Fetch "https://github.com/bytecodealliance/wasmtime/releases/download/v$WasmtimeVersion/$wasmtimeName.zip" $WasmtimeSha256[$warch] $zip
@@ -150,11 +178,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & go run ./tools/dev check-tools
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-if ($goBin -or $wasmtimeInstall) {
+if ($goBin -or $wasmtimeInstall -or $zigInstall) {
     Write-Host ''
     Write-Host 'Add to your user PATH (System Properties > Environment Variables):'
     if ($goBin) { Write-Host "  $goBin" }
     if ($wasmtimeInstall) { Write-Host "  $wasmtimeDir" }
+    if ($zigInstall) { Write-Host "  $zigDir" }
     Write-Host "  $(& go env GOPATH)\bin"
 }
 Write-Host 'setup complete'

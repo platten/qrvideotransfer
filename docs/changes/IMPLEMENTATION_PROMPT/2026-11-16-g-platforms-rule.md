@@ -1,0 +1,1 @@
+Stream G: section 2 adds the rule to run `tools/dev platforms` with the usual checks before every push, `platforms -full` once per pull request before the push that opens it, and to open a pull request, with its one CI run, only for a reviewed branch.

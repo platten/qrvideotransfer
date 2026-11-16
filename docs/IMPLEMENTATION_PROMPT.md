@@ -62,6 +62,7 @@ documents say.
 | Concise code. A doc comment on every package and exported name. No abstraction beyond the frozen interfaces until a second use exists | The owner asked for maintainability through brevity and documentation |
 | Conventional commit messages | release-please derives the changelog and version from them |
 | Before applying a finding about a measurement (a CI timing, a baseline run, a ratio), check it against the tree the run tested: a pull_request run tests the merge commit of the head into the base at the time of the run, not the head alone. Timings come only from runs that retested the package, never from `(cached)` results | A baseline "correction" in spike S1 section 14.6 compared a run against the wrong tree (2026-11-15) |
+| Before every push run `go run ./tools/dev platforms` with `test`, `cover`, `lint`, `test -race` and `build -all`, and `platforms -full` once per pull request, before the push that opens it; review happens on the pushed branch, and only an approved branch gets a pull request and its CI run | Each CI run costs the owner's budget; the local checks cover every target that this machine can build or run (DESIGN.md section 17) |
 
 ## 3. Facts you can rely on
 

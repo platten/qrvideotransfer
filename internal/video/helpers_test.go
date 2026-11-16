@@ -10,6 +10,11 @@ import (
 	"testing"
 )
 
+// emulated reports whether the test binary runs under user-mode emulation, as tools/dev platforms
+// runs the linux/arm64 binaries (QRVT_EMULATED=1). Emulation slows the engine several times, so
+// wall-clock bounds are logged rather than asserted there; the logic they guard is still tested.
+func emulated() bool { return os.Getenv("QRVT_EMULATED") == "1" }
+
 // gray4 are the default Gray4 luma levels of FORMAT.md section 7.
 var gray4 = [4]uint16{16, 89, 162, 235}
 

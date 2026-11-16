@@ -6,12 +6,14 @@
 #                               (golangci-lint, GoReleaser, syft, actionlint, go-licenses, govulncheck)
 #   scripts/setup.sh --spike    also a native ffmpeg with an HEVC encoder (libx265) and the
 #                               wasmtime command-line runner, which only spike S1 needs
+#   scripts/setup.sh --cross    also zig (the C cross-compiler of `tools/dev platforms`' race
+#                               builds) and, on Linux, qemu-user-static (its linux/arm64 runs)
 #   --yes                       do not ask (required when stdin is not a terminal)
 #   --dry-run                   print the plan and stop
 #
-# Go and wasmtime come from their vendors' release archives, checked against the SHA-256 sums
-# pinned below, and go under $QRVT_PREFIX (default ~/.local). git, curl, xz and ffmpeg come from
-# the system package manager: Homebrew, apt, dnf or pacman.
+# Go, wasmtime and zig come from their vendors' release archives, checked against the SHA-256
+# sums pinned below, and go under $QRVT_PREFIX (default ~/.local). git, curl, xz, ffmpeg and
+# qemu-user-static come from the system package manager: Homebrew, apt, dnf or pacman.
 set -eu
 # Never let an older go on PATH download a toolchain before the plan is printed.
 GOTOOLCHAIN=local
@@ -19,6 +21,7 @@ export GOTOOLCHAIN
 
 GO_VERSION=1.27.4
 WASMTIME_VERSION=50.0.1
+ZIG_VERSION=0.17.1
 PREFIX=${QRVT_PREFIX:-$HOME/.local}
 
 # SHA-256 of the release archives, from https://go.dev/dl/?mode=json and the GitHub release assets
@@ -41,15 +44,26 @@ wasmtime_sha256() {
 	*) return 1 ;;
 	esac
 }
+# From https://ziglang.org/download/index.json.
+zig_sha256() {
+	case $1 in
+	x86_64-linux) echo 3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a ;;
+	aarch64-linux) echo a1546d5646eb184437918d6635ca6b762a0e889eac09cef720ee7a1ed3fe7795 ;;
+	x86_64-macos) echo 9af07b20319fbd0c92ee46ad23e81d6a782b1aaea2cfb8dcbff35f1d2c7ddbb7 ;;
+	aarch64-macos) echo 75f1bc7a1e9852f17ec9a0c1895f767c4ec56d46bc8a834920eece1d0359dd8d ;;
+	*) return 1 ;;
+	esac
+}
 
-spike=0 yes=0 dry=0
+spike=0 cross=0 yes=0 dry=0
 for a in "$@"; do
 	case $a in
 	--spike) spike=1 ;;
+	--cross) cross=1 ;;
 	--yes | -y) yes=1 ;;
 	--dry-run) dry=1 ;;
 	-h | --help)
-		sed -n '2,15p' "$0"
+		sed -n '2,17p' "$0"
 		exit 0
 		;;
 	*)
@@ -96,7 +110,7 @@ pkgname() {
 	if [ "$1" = xz ] && [ "$pm" = apt ]; then echo xz-utils; else echo "$1"; fi
 }
 
-plan="" pkgs="" go_install=0 wasmtime_install=0
+plan="" pkgs="" go_install=0 wasmtime_install=0 zig_install=0 qemu_install=""
 add() { plan="$plan
   - $*"; }
 need_pkg() {
@@ -145,6 +159,36 @@ if [ $spike = 1 ]; then
 		need_download=1
 		add "wasmtime $WASMTIME_VERSION from the GitHub release wasmtime-v$WASMTIME_VERSION-$warch-$wos.tar.xz (SHA-256 checked) into $PREFIX/opt, linked from $PREFIX/bin/wasmtime"
 		have xz || need_pkg xz
+	fi
+fi
+# Cross-checking tools (tools/dev platforms).
+if [ $cross = 1 ]; then
+	if have zig && [ "$(zig version 2>/dev/null)" = "$ZIG_VERSION" ]; then
+		say "ok  zig $ZIG_VERSION ($(command -v zig))"
+	elif [ -x "$PREFIX/bin/zig" ] && [ "$("$PREFIX/bin/zig" version)" = "$ZIG_VERSION" ]; then
+		say "ok  zig $ZIG_VERSION ($PREFIX/bin/zig, not on PATH)"
+	else
+		zig_install=1
+		need_download=1
+		add "zig $ZIG_VERSION from https://ziglang.org/download/$ZIG_VERSION/zig-$warch-$wos-$ZIG_VERSION.tar.xz (SHA-256 checked) into $PREFIX/opt, linked from $PREFIX/bin/zig"
+		have xz || need_pkg xz
+	fi
+	# qemu-user-static, for linux/arm64 under emulation on an amd64 Linux host. Only the system
+	# package manager installs it (not Homebrew), only with usable root rights, and never so that
+	# a failure stops the rest of the setup.
+	if [ $os = linux ] && [ $arch = amd64 ]; then
+		qpm=""
+		if have apt-get; then qpm=apt; elif have dnf; then qpm=dnf; elif have pacman; then qpm=pacman; fi
+		if grep -qs '^enabled' /proc/sys/fs/binfmt_misc/qemu-aarch64; then
+			say "ok  qemu for linux/arm64 (binfmt)"
+		elif [ -z "$qpm" ]; then
+			say "missing: qemu-user-static (no apt, dnf or pacman to install it with); tools/dev platforms will report linux/arm64 as not run"
+		elif [ "$(id -u)" -eq 0 ] || { have sudo && sudo -n true 2>/dev/null; } || { have sudo && [ $yes = 0 ] && [ -t 0 ]; }; then
+			qemu_install=$qpm
+			add "qemu-user-static from $qpm (installed last; a failure there does not stop the setup)"
+		else
+			say "missing: qemu-user-static, which needs root (sudo is not usable without a password here); tools/dev platforms will report linux/arm64 as not run"
+		fi
 	fi
 fi
 if [ "$need_download" = 1 ] && ! have curl; then need_pkg curl; fi
@@ -214,6 +258,24 @@ if [ $wasmtime_install = 1 ]; then
 	say "installed wasmtime $WASMTIME_VERSION into $PREFIX/opt/$name"
 fi
 
+if [ $zig_install = 1 ]; then
+	name="zig-$warch-$wos-$ZIG_VERSION"
+	sum=$(zig_sha256 "$warch-$wos") || die "no pinned zig archive for $warch-$wos"
+	fetch "https://ziglang.org/download/$ZIG_VERSION/$name.tar.xz" "$sum" "$tmp/zig.tar.xz"
+	mkdir -p "$PREFIX/opt" "$PREFIX/bin"
+	tar -xJf "$tmp/zig.tar.xz" -C "$PREFIX/opt"
+	ln -sf "$PREFIX/opt/$name/zig" "$PREFIX/bin/zig"
+	say "installed zig $ZIG_VERSION into $PREFIX/opt/$name"
+fi
+
+if [ -n "$qemu_install" ]; then
+	case $qemu_install in
+	apt) $sudo apt-get update && $sudo apt-get install -y qemu-user-static ;;
+	dnf) $sudo dnf install -y qemu-user-static ;;
+	pacman) $sudo pacman -Syu --needed --noconfirm qemu-user-static ;;
+	esac || say "missing: qemu-user-static could not be installed; tools/dev platforms will report linux/arm64 as not run"
+fi
+
 if [ $spike = 1 ] && ! ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx265; then
 	die "the installed ffmpeg has no libx265 encoder"
 fi
@@ -222,11 +284,11 @@ fi
 go run ./tools/dev install-tools
 go run ./tools/dev check-tools
 
-if [ -n "$gobin" ] || [ $wasmtime_install = 1 ]; then
+if [ -n "$gobin" ] || [ $wasmtime_install = 1 ] || [ $zig_install = 1 ]; then
 	say ""
 	say "Add to your shell profile:"
 	[ -n "$gobin" ] && say "  export PATH=\"$gobin:\$PATH\""
-	[ $wasmtime_install = 1 ] && say "  export PATH=\"$PREFIX/bin:\$PATH\""
+	{ [ $wasmtime_install = 1 ] || [ $zig_install = 1 ]; } && say "  export PATH=\"$PREFIX/bin:\$PATH\""
 	say "  export PATH=\"\$(go env GOPATH)/bin:\$PATH\""
 fi
 say "setup complete"

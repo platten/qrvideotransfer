@@ -1526,7 +1526,7 @@ note in this document.
 
 | | macOS and Linux | Windows | Does |
 | --- | --- | --- | --- |
-| Setup | `scripts/setup.sh` | `scripts/setup.ps1` | Installs or verifies pinned Go from the official go.dev archive (SHA-256 pinned in the script), git through Homebrew, apt, dnf, pacman or winget, and the pinned development tools through `tools/dev install-tools`. Native ffmpeg and wasmtime are optional |
+| Setup | `scripts/setup.sh` | `scripts/setup.ps1` | Installs or verifies pinned Go from the official go.dev archive (SHA-256 pinned in the script), git through Homebrew, apt, dnf, pacman or winget, and the pinned development tools through `tools/dev install-tools`. Native ffmpeg and wasmtime (`--spike`), zig and qemu (`--cross`) are optional |
 | Build | `scripts/build.sh` | `scripts/build.ps1` | Static build for the host, or all six targets |
 | Test | `scripts/test.sh` | `scripts/test.ps1` | Unit and integration tests with the coverage gate; options for fuzzing, the simulator matrix and real recordings |
 
@@ -1536,8 +1536,10 @@ package manager, because distributions lag and cannot pin a patch release; the a
 pinned in the script, and `GOTOOLCHAIN=local` stops an older Go from fetching a toolchain on its own.
 With `--spike` they also install the two tools only spike S1 needs: a native ffmpeg with an HEVC encoder
 (libx265, from the package manager or winget) and the wasmtime command-line runner (from its release
-archive, SHA-256 pinned). They print what they are about to install, and ask, before installing
-anything. The build and test scripts are thin wrappers around
+archive, SHA-256 pinned). With `--cross` (`-Cross` on Windows) they install what `tools/dev platforms`
+needs: zig 0.17.1 from its release archive (SHA-256 pinned) and, on Linux, `qemu-user-static` from the
+package manager; without root or sudo the script says that qemu is missing and goes on. They print
+what they are about to install, and ask, before installing anything. The build and test scripts are thin wrappers around
 `go run ./tools/dev <task>`, so that logic exists once. CI calls the same scripts on all three systems.
 
 `install-tools` downloads golangci-lint, GoReleaser, syft (the SBOM generator) and actionlint as
@@ -1663,6 +1665,64 @@ by GoReleaser).
   best starts with the stream, so names do not collide, and several entries from one pull request
   on one day take a number after the stream to keep their order (`m2-radiometry-1-gain`,
   `m2-radiometry-2-noise`).
+- **Local checks before every push** (the owner's standing instruction, from 2026-11-16 on): one
+  stream at a time; the independent review runs on the pushed branch before any pull request is
+  opened; and a pull request gets one CI run at the end, a second only when a CI runner finds what
+  the local checks cannot. Before every push, besides `test`, `cover`, `lint`, `test -race` and
+  `build -all`, the developer runs `go run ./tools/dev platforms`. That routine run leaves out the
+  linux/arm64 step (about 14 minutes on the machine below). Once per pull request, immediately
+  before the push that opens it, `go run ./tools/dev platforms -full` runs every step and fails if
+  any step could not run, and it takes no `-skip` (`-strict` fails on steps that could not run
+  alone; `-skip` leaves named steps out of a routine run and refuses unknown names). A step that
+  could not run is reported as NOT RUN with its reason, never as a pass.
+  - *compile*: `go vet` and `go test -c` of every package for all six targets, `CGO_ENABLED=0`, with
+    no tags, the release build tags, and the release tags with the HEVC fast path's
+    `unsandboxedhevc` (the set of CI's "HEVC fast-path tests" step). This catches build-constraint files, signature changes and
+    code that compiles only on some systems.
+  - *lint*: golangci-lint with `GOOS` linux, darwin and windows, each with and without the tags.
+  - *race*: race-enabled test binaries built with zig 0.17.1 as the C cross-compiler (`CC="zig cc
+    -target …"`, `CGO_ENABLED=1`; found through `ZIG` or `PATH`, installed by `scripts/setup.sh
+    --cross`). They build for linux/arm64, windows/amd64 (with the import library of
+    `WaitOnAddress` and a low image base, without which the race runtime cannot map its shadow
+    memory), darwin/amd64 and darwin/arm64. windows/arm64 has no race detector, and linux/amd64 is the
+    test task's own `-race`. The darwin binaries are only built, and so are the linux/arm64 ones:
+    they need an aarch64 C library to run. The release stays pure Go with `CGO_ENABLED=0`.
+  - *windows*: the windows/amd64 test binaries run through WSL interop, plain and race, each from
+    its package directory in a copy of the module's files (tracked, and untracked but not ignored;
+    never `recordings/`) under the Windows user's `%TEMP%`. They run through `cmd.exe` with full
+    Windows paths, so that tests which start themselves again (engine workers, Job Objects) find
+    their binary. `internal/video` also runs a third time, built with the HEVC fast path's tag set,
+    as CI's fast-path step does: run 1 of the pull request that added this task failed in that step
+    on windows-2025, which the local run had not built (a timing check in `TestReservationLoadLimit`
+    read 9 µs under its 2 s bound, between wall-clock readings and the monotonic timer; the test now
+    allows 50 ms). The Windows-only tests run there (Job Object, sparse files, path rules);
+    `internal/video`'s race tests do not, because its race-enabled engine workers cannot allocate
+    ThreadSanitizer memory under the zig-linked race runtime; the task reports them as CI-ONLY,
+    which `-full` accepts. Outside WSL the step reports NOT RUN.
+  - *arm64*: the linux/arm64 test binaries run natively on an arm64 Linux host, else under user-mode
+    emulation through an enabled binfmt entry for aarch64 (`qemu-user-static`, installed by
+    `scripts/setup.sh --cross` where the script has usable root rights), with `QRVT_EMULATED=1` and
+    a 90-minute limit per test binary; `internal/video` runs with the fast-path tag set too. qemu without binfmt is reported as NOT RUN, because tests
+    that start their own binary again need binfmt. Under emulation `internal/video`'s
+    `TestHostileFiles` logs instead of asserting its 60 s bound per hostile file (`nostsd.mp4` took
+    65 s); the step prints that list and every bound it logged. Every other test asserts as it
+    does natively.
+  - An interrupt (Ctrl-C, SIGTERM) stops the running command, kills a Windows test binary and its
+    engine workers by the binary's full path in this run's directory (never by image name, which
+    would match another run's), reports the interruption once as INTERRUPTED, which fails the run
+    in every mode, and removes the temporary directories; directories that an earlier run left
+    behind more than six hours ago are removed at the start.
+  - The task prints, per package, the time, the tests passed and the tests skipped. On the
+    developer machine of spike S1 (16 threads, WSL2) a `-full` run took 48 min 09 s with the build
+    cache warm: compile (three tag sets) 35 s, lint 29 s, race builds 8 s, Windows 13 min 13 s
+    (plain, fast path and race), and linux/arm64 under emulation 33 min 43 s (with its fast-path run
+    of `internal/video`, 6 min 28 s); the routine run is the same without linux/arm64, about 14
+    minutes. A first run with a cold build cache took
+    49 min 40 s (compile 51 s, lint 45 s, race builds 1 min 23 s).
+  - **Not covered locally**, accepted as CI-only, so a CI run can still find something: running
+    anything on macOS (amd64 or arm64), running the windows/arm64 binaries, native arm64 timing on
+    the arm runners, race runs on linux/arm64 and darwin, and `internal/video`'s race tests on
+    Windows. The task prints this list.
 - **Docs**: a website built from `docs/` and published to GitHub Pages on each release
   (`pages.yml`, a skeleton until M8), containing the user guide, this design, the format specification
   and an architecture guide.
