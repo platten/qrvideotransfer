@@ -1446,20 +1446,29 @@ by GoReleaser).
   packages' test binaries ran beside it. CI tests them under that condition (`tools/dev`,
   `isolatedRuns`). The cost, accepted by the owner, on the slowest runner (macos-26-intel): the
   coverage step went from 4 min 08 s to 7 min 13 s and the race step from 10 min 51 s to 13 min 18 s,
-  5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout.
+  5 min 32 s more in all, which leaves the race step 6 min 42 s under its 20-minute timeout (figures
+  from PR #26's runs, which were not identified, so whether they restored cached results was not
+  checked).
   Under the race detector `internal/vision` runs a smoke subset: every code path and goroutine
   boundary, with one or two poses or captures each and its concurrency tests in full, while its
   statistical assertions run only in the non-race test step (`raceEnabled`, `raceSize` and
   `raceSkipStatistics` in its tests); its budget under race is about 3 minutes on a developer
   machine. With it, on macos-26-intel, `internal/vision` took 125 s under race, down from 959 s, which
-  had pushed the race step past its timeout, and the race step 13 min 26 s.
-  The race tests run as two CI steps, each with its own 20-minute limit: every package but
-  `internal/video` (`tools/dev test -race -part others`), then `internal/video` alone (`-part
-  isolated`). The single step had reached 15 min 53 s of its 20 minutes on macos-26-intel
-  (`internal/video` 528 s, `internal/vision` 187 s); the limit was not raised. Race-step timings are
-  quoted only from runs in which the packages were retested, never from a run whose output shows
-  them as `(cached)`: the task runner does not pass `-count=1`, so a run of a merge that changed no
-  Go code can restore results from Go's test cache.
+  had pushed the race step past its timeout. In a run that retested every package (run 43774194055,
+  no cache restored) the race step took 15 min 53 s, `internal/video` 528 s and `internal/vision`
+  187 s; an earlier 13 min 26 s (run 43769482359) restored cached results for `internal/fec/conv`,
+  `internal/fec/rs` and `internal/modem` and is not comparable. The race tests now run as two CI
+  steps, each with its own 20-minute limit: every package but `internal/video` (`tools/dev test
+  -race -part others`), then `internal/video` alone (`-part isolated`), which runs even when the
+  first step failed. Both pass `-count=1`: setup-go restores Go's test cache across runs, for every
+  package unchanged since the cache was saved, and a cached race pass reuses one old run's luck for
+  the nondeterministic tests (`internal/fec/conv`'s parallel test, `internal/fec/rs`'s subprocess
+  test). That costs 0-3 minutes per run on macos-26-intel, nothing when nothing would have been
+  cached. The `check` job's limit is 60 minutes, two race steps at 20 each plus 20 for every other
+  step (`tools/dev` `fixedStepsBudget`, checked by a test): the split's own arithmetic, not an
+  allowance for slow hosts, and a single slow run is still a runner fault (spike S1, section 14).
+  Race-step timings are quoted only from runs that retested the packages, never from output that
+  shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
@@ -1611,4 +1620,4 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | Stream G: section 17 adds the documents-only skip (allow-list, `changes` job, aggregate `ci result` check), scopes the never-cancelled sentence to the ci and codeql runs on main and codeql's schedule, and states the stricter `cancel-in-progress` policy (flow style, quoted keys, group with the pull request number and SHA) |
 | 2026-11-15 | Stream G, review of PR #35: section 17 narrows the documents-only allow-list to the Markdown files directly in `docs/spikes/`, makes Go files, module files, `.gitattributes`, `testdata/` paths and every deletion count as code, runs everything for a stacked pull request (base not the default branch, which closes the retarget hole; the trigger stays without `edited`), adds `//go:embed` to the allow-list guard, and has `ci result` require a `code` output of exactly `true` or `false` |
 | 2026-11-15 | M2 Geometry, race budget (PR #39): section 17 says that `internal/vision` runs a smoke subset under the race detector, with its statistical assertions only in the non-race step and a budget of about 3 minutes on a developer machine, and gives the macos-26-intel figures (vision 125 s under race, down from 959 s; race step 13 min 26 s) |
-| 2026-11-16 | Stream G, race step split: section 17 says the race tests run as two CI steps with 20 minutes each, every package but `internal/video` and then `internal/video` alone (`tools/dev test -race -part others|isolated`), after the single step reached 15 min 53 s of its 20 on macos-26-intel; and that race-step timings are quoted only from runs that retested the packages, not from cached results |
+| 2026-11-16 | Stream G, race step split: section 17 says the race tests run as two CI steps with 20 minutes each, every package but `internal/video` and then `internal/video` alone even after a failure (`tools/dev test -race -part others|isolated`), both with `-count=1` (0-3 minutes per run), after the single step reached 15 min 53 s of its 20 on macos-26-intel in a retested run; the `check` job's limit is 60 minutes by the split's arithmetic, not for slow hosts; the cached 13 min 26 s is marked, the PR #26 figures are marked unchecked, and race-step timings are quoted only from retested runs |

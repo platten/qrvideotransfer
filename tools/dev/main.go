@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -197,7 +198,10 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 		// internal/video's engine tests take minutes under the race detector on the slowest runner
 		// (macos-26-intel), past go test's default of 10 minutes per package; 18 minutes stays inside
 		// the CI step's 20.
-		env, extra = []string{"CGO_ENABLED=1"}, append(extra, "-race", "-timeout=18m")
+		// -count=1: a cached race pass reuses one old run's luck for the nondeterministic tests
+		// (internal/fec/conv's parallel test, internal/fec/rs's subprocess test), and setup-go
+		// restores the test cache across runs (DESIGN.md section 17).
+		env, extra = []string{"CGO_ENABLED=1"}, append(extra, "-race", "-timeout=18m", "-count=1")
 	}
 	if *long {
 		env = append(env, "QRVT_LONG_TESTS=1")
@@ -441,9 +445,34 @@ func selectRuns(runs [][]string, part string) ([][]string, error) {
 	return nil, fmt.Errorf("-part %q: want others or isolated", part)
 }
 
-const fixedStepsBudget = 0
+// fixedStepsBudget is the time, in minutes, that the check job's limit allows for every step but
+// the two race steps. With the race steps at their limits (2 x 20) it gives the job's 60 minutes:
+// the split's own arithmetic, not an allowance for slow hosts (DESIGN.md section 17).
+const fixedStepsBudget = 20
 
-func checkJobLimits(b []byte) (job, race int) { return 0, 0 }
+// checkJobLimits returns, from ci.yml, the check job's timeout-minutes and the sum of the
+// timeout-minutes of its Unix race steps.
+func checkJobLimits(b []byte) (job, race int) {
+	in, step := false, ""
+	for _, l := range lines(b) {
+		code := stripComment(l)
+		switch {
+		case code == "  check:":
+			in = true
+		case in && jobLine.MatchString(code):
+			return job, race
+		case !in:
+		case strings.HasPrefix(code, "      - name: "):
+			step = strings.TrimPrefix(code, "      - name: ")
+		case strings.HasPrefix(code, "    timeout-minutes: "):
+			job, _ = strconv.Atoi(strings.TrimPrefix(code, "    timeout-minutes: "))
+		case strings.HasPrefix(code, "        timeout-minutes: ") && strings.HasPrefix(step, "Race tests") && strings.HasSuffix(step, "(Unix)"):
+			n, _ := strconv.Atoi(strings.TrimPrefix(code, "        timeout-minutes: "))
+			race += n
+		}
+	}
+	return job, race
+}
 
 // packages lists the module's packages, with the given build tags.
 func packages(tags string) ([]string, error) {

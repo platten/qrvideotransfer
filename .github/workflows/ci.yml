@@ -66,7 +66,8 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-2025, windows-11-arm]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # 2 race steps x 20 minutes + 20 for the rest (tools/dev fixedStepsBudget, DESIGN.md section 17).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -136,14 +137,14 @@ jobs:
 
       # The race detector needs cgo and does not support windows/arm64.
       # Two steps, each with its own 20-minute limit: every package but internal/video, then
-      # internal/video on its own (DESIGN.md section 17).
+      # internal/video on its own, which runs even if the first failed (DESIGN.md section 17).
       - name: Race tests, other packages (Unix)
         if: runner.os != 'Windows'
         timeout-minutes: 20
         shell: bash
         run: scripts/test.sh -race -part others
       - name: Race tests, internal/video (Unix)
-        if: runner.os != 'Windows'
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 20
         shell: bash
         run: scripts/test.sh -race -part isolated
@@ -153,7 +154,7 @@ jobs:
         shell: pwsh
         run: scripts/test.ps1 -race -part others
       - name: Race tests, internal/video (Windows)
-        if: matrix.os == 'windows-2025'
+        if: ${{ !cancelled() && matrix.os == 'windows-2025' }}
         timeout-minutes: 20
         shell: pwsh
         run: scripts/test.ps1 -race -part isolated
