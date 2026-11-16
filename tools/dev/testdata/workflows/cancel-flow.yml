@@ -1,0 +1,21 @@
+# Violations: cancel-in-progress hidden in a flow mapping, behind a quoted key, or as a quoted value.
+name: cancel-flow
+on: [push, pull_request]
+permissions:
+  contents: read
+concurrency: {group: "ci-${{ github.ref }}", cancel-in-progress: true}
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: a
+      "cancel-in-progress": true
+    steps:
+      - run: "true"
+  b:
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: b
+      cancel-in-progress: 'true'
+    steps:
+      - run: "true"

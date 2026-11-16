@@ -1415,9 +1415,30 @@ by GoReleaser).
   `internal/video` tests with `-tags unsandboxedhevc,noasm,nounsafe` on every runner, since only that
   tag compiles the HEVC fast path; the fuzz task adds the tag, so `FuzzFastPathNAL` is fuzzed with the
   others. Every job and every long step has a timeout. A newer push to a pull request cancels that
-  pull request's older `ci` and `codeql` runs; runs on main, tags and schedules are never cancelled
-  (the workflow policy test allows `cancel-in-progress` only as `false` or the pull-request
-  condition). The test, race and coverage tasks run
+  pull request's older `ci` and `codeql` runs; their runs on main, and codeql's weekly runs, have a
+  group of their own (the commit SHA) and are never cancelled. The workflow policy test allows
+  `cancel-in-progress` only as a bare `false` or the pull-request condition, in block or flow style,
+  and with the latter requires a group holding both the pull request number and the commit SHA.
+  **Documents-only pull requests**: a first `changes` job lists the files a pull request changes
+  against its merge base, with their status (full history fetched; renames counted as a deletion
+  and an addition). If every change adds or modifies a file on an allow-list of files that no test,
+  build, script, workflow or release configuration reads (`tools/dev/changes.go`: `docs/FORMAT.md`,
+  `docs/SECURITY.md`, `docs/IMPLEMENTATION_PROMPT.md`, and the Markdown files directly in
+  `docs/spikes/`), the six-runner checks, release snapshot, setup scripts and short fuzzing are
+  skipped; the workflow and licence checks and CodeQL still run. Every other event, every deletion,
+  and any other changed file runs everything: code, tests, fixtures, golden files, build and release
+  configuration, LICENSE, NOTICE, README, `docs/DESIGN.md` (whose preset tables `internal/channel`'s
+  tests read), and any Go file, `go.mod`, `go.sum`, `.gitattributes` or `testdata/` path wherever it
+  sits. Only a pull request into the default branch can skip: a stacked one, whose base is another
+  branch, runs everything, because a later retarget to main would otherwise leave its green result
+  standing for code never tested. That rule alone closes the retarget hole, so the `pull_request`
+  trigger keeps its default types: with `edited`, every title or body edit would cost a full run. A
+  test keeps the allow-list honest by failing if a Go string literal or `//go:embed` pattern reaches
+  a listed file or the spike directory, if any Go file sits under `docs/`, or if a workflow, script
+  or the GoReleaser configuration names a listed path. An aggregate `ci result` job waits for every
+  job and fails on any failure or cancellation, on a `code` output other than `true` or `false`, or
+  on a skipped job unless `code` is `false`; it is the check to require from `ci.yml`, because a
+  skipped matrix job does not report under its expanded names. The test, race and coverage tasks run
   `internal/video` on its own, after the other packages have finished, not in parallel with them:
   the worker cap and the watchdog's stop latency are properties of one process on a machine that
   other test binaries are not oversubscribing, and the package's tests assert wall-clock bounds
@@ -1574,3 +1595,5 @@ Checked on 2026-11-13 by research agents; "verified" means seen at the address g
 | 2026-11-15 | M2 Geometry, review of PR #30: section 10 step 1 gives the detector's threshold at about half the light in linear terms and flanks of a quarter module (blur in linear light thinned the outer dark ring, and finders of 4 to 6 pixels per module were missed), says that a quad is reported only when its header decodes (data cells gave wrong quads on a 240 x 135 grid), and records the measured limit: found in every pose at 4.0 camera pixels per untilted module under the handheld blur. Step 3 states when the fit fails (no anchor, or under a quarter of those inside the capture, located) |
 | 2026-11-15 | M2 Geometry, review of PR #30, measured limits: section 10 step 1 adds the anchor check on a confirmed quad (one copy decoded with one finder wrong) and the table of finders found against camera pixels per cell for each preset, with the limit (3.6 handheld, 4.4 HLG, not reached for harsh at 1080p); section 11 condition 2 says what the geometry needs against the planning point of 5 |
 | 2026-11-15 | M2 Geometry, review round 2 of PR #30: section 7 rule 1 defers the inference of an undecoded frame index to M5 (a tracked quad could carry the header from a neighbouring capture); in M2 a capture whose four copies all fail is skipped. Section 10 step 1 replaces the confirmation rule (one of the two anchors next to each finder, which rejected 17 of 200 real harsh captures) with a leave-one-out check of each finder against the located anchors, bounds the decoded grid by the image (1.5 pixels per cell, one layout per capture); step 4 records that limited-range glare escapes the saturation flag until the follow-up PR. The table of finders found is re-measured with the new rule |
+| 2026-11-15 | Stream G: section 17 adds the documents-only skip (allow-list, `changes` job, aggregate `ci result` check), scopes the never-cancelled sentence to the ci and codeql runs on main and codeql's schedule, and states the stricter `cancel-in-progress` policy (flow style, quoted keys, group with the pull request number and SHA) |
+| 2026-11-15 | Stream G, review of PR #35: section 17 narrows the documents-only allow-list to the Markdown files directly in `docs/spikes/`, makes Go files, module files, `.gitattributes`, `testdata/` paths and every deletion count as code, runs everything for a stacked pull request (base not the default branch, which closes the retarget hole; the trigger stays without `edited`), adds `//go:embed` to the allow-list guard, and has `ci result` require a `code` output of exactly `true` or `false` |

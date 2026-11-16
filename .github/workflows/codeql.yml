@@ -14,8 +14,8 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request cancels that pull request's older run. Runs on main, tags and
-# schedules each get their own group (the commit SHA) and are never cancelled.
+# A newer push to a pull request cancels that pull request's older codeql run. A run on main or
+# from the weekly schedule has a group of its own (the commit SHA) and is never cancelled.
 concurrency:
   group: codeql-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

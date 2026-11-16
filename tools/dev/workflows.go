@@ -28,9 +28,18 @@ var (
 	prTarget    = regexp.MustCompile(`(^|[\s\[,'"])pull_request_target($|[\s\]:,'"])`)
 )
 
-// cancelOnPR is the only cancel-in-progress expression allowed besides false: a newer push to a
-// pull request cancels its older run, while runs on main, tags and schedules always finish.
+// cancelOnPR is the only cancel-in-progress value allowed besides a bare false: a newer push to a
+// pull request cancels its older run, while other runs finish. With it, the group must hold both
+// the pull request number and the commit SHA, so that each run outside a pull request has a group
+// of its own.
 const cancelOnPR = "${{ github.event_name == 'pull_request' }}"
+
+// The concurrency keys, in block or flow style, with the key quoted or not.
+var (
+	concurrencyKey = regexp.MustCompile(`(^|[\s{,])['"]?concurrency['"]?\s*:`)
+	groupKey       = regexp.MustCompile(`(^|[\s{,])['"]?group['"]?\s*:`)
+	cancelKey      = regexp.MustCompile(`['"]?cancel-in-progress['"]?\s*:\s*(\$\{\{.*?\}\}|'[^']*'|"[^"]*"|[^,}\s]+)`)
+)
 
 // stripComment removes a trailing YAML comment; it is not quote-aware beyond requiring a space
 // before the #, which is how comments are written here.
@@ -61,6 +70,7 @@ func workflowProblems(name string, data []byte, workflow bool) []string {
 		probs = append(probs, where+" "+fmt.Sprintf(format, a...))
 	}
 	perms := false
+	group, groupLine := "", 0 // the concurrency group seen last, for the cancel-in-progress that follows it
 	for i, line := range lines(data) {
 		n := i + 1
 		if m := usesLine.FindStringSubmatch(line); m != nil {
@@ -85,9 +95,21 @@ func workflowProblems(name string, data []byte, workflow bool) []string {
 		if prTarget.MatchString(code) {
 			add(n, "pull_request_target is not allowed")
 		}
-		if v, ok := strings.CutPrefix(strings.TrimSpace(code), "cancel-in-progress:"); ok {
-			if v = strings.TrimSpace(v); v != "false" && v != cancelOnPR {
-				add(n, "cancel-in-progress must be false or %s, so that runs on main and tags are never cancelled", cancelOnPR)
+		if concurrencyKey.MatchString(code) {
+			group, groupLine = "", 0
+		}
+		if loc := groupKey.FindStringIndex(code); loc != nil {
+			group, groupLine = code[loc[1]:], n
+			if i := cancelKey.FindStringIndex(group); i != nil {
+				group = group[:i[0]]
+			}
+		}
+		if m := cancelKey.FindStringSubmatch(code); m != nil {
+			switch v := m[1]; {
+			case v != "false" && v != cancelOnPR:
+				add(n, "cancel-in-progress must be false or %s, so that ci and codeql runs on main are never cancelled", cancelOnPR)
+			case v == cancelOnPR && (groupLine == 0 || !strings.Contains(group, "github.event.pull_request.number") || !strings.Contains(group, "github.sha")):
+				add(n, "the concurrency group of a pull-request cancel must contain github.event.pull_request.number and github.sha")
 			}
 		}
 		if workflow && strings.HasPrefix(code, "permissions:") {
