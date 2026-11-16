@@ -10,14 +10,16 @@ import (
 
 // TestRadiometryConcurrent: TileEqualiser, AnchorPhase, SoftBits and CancelStripes are safe for
 // concurrent use, sharing the layout, constellation, palette and anchors, as a decoder's workers do.
-// Several goroutines run the whole radiometry chain on their own copies of one synthetic capture
-// and must get what one goroutine gets alone. It runs in full under the race detector, which is
+// Several goroutines run the whole radiometry chain many times on their own copies of one small
+// synthetic capture and must get what one goroutine gets alone. The capture is small and repeated
+// so that a shared write made late in a capture's work is still in the race detector's history when
+// another goroutine touches the same memory. It runs in full under the race detector, which is
 // what it is for.
 func TestRadiometryConcurrent(t *testing.T) {
-	s := newSynth(t, 212, 120, 2, 3, 0, 50)
+	s := newSynth(t, 64, 36, 2, 3, 0, 50)
 	addWave(s, 15, 0.21, 0.13)
 	ramp := func(x, y float64) [4]float64 {
-		u := min(1, max(0, (y-40)/40))
+		u := min(1, max(0, (x-20)/30))
 		return [4]float64{1 - u, u, 0, 0}
 	}
 	anchors := synthAnchors(s.l, 2.4, ramp)
@@ -38,14 +40,16 @@ func TestRadiometryConcurrent(t *testing.T) {
 		return out
 	}
 	want := run()
-	const workers = 4
+	const workers, rounds = 4, 20
 	got := make([][]int8, workers)
 	var wg sync.WaitGroup
 	for w := range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			got[w] = run()
+			for range rounds {
+				got[w] = run()
+			}
 		}()
 	}
 	wg.Wait()

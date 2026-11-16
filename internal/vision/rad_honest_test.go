@@ -18,10 +18,11 @@ const calBuckets = 10
 const minBucket = 10000
 
 // overCeil is, per preset, the largest observed error rate relative to the stated one accepted for
-// credited cells that hold some of another frame, and for tables that include them. Above the
-// band's 2 it is a regression bound on a residual the designer accepted on 2026-11-15 and that is
-// revisited with S2: through the geometry pipeline, tripod's partly mixed cells are 9.8 times the
-// stated rate in pooled bucket 1 (4.6 times in bucket 2) and the whole pooled bucket 1 8.7 times.
+// credited cells that hold some of another frame, and through the geometry pipeline for the tables
+// that include them; at true positions the whole tables and the clean ones keep 2. Above 2 it is a
+// regression bound on a residual the designer accepted on 2026-11-15 and that is revisited with S2:
+// through the pipeline, tripod's partly mixed cells are 9.8 times the stated rate in pooled bucket 1
+// (4.6 times in bucket 2) and the whole pooled bucket 1 8.7 times.
 var overCeil = map[string]float64{"tripod": 12, "handheld": 2}
 
 // pointExpected is the expected error count from which a bucket's observed rate itself must lie
@@ -225,7 +226,7 @@ func TestHonestConfidence(t *testing.T) {
 						t.Fatal("no cell credited")
 					}
 					t.Logf("%d captures, %d credited cells\n%s", len(caps), cells, tab)
-					for _, e := range tab.judge(false, overCeil[name]) {
+					for _, e := range tab.check() {
 						t.Error(e)
 					}
 					total.merge(tab)
@@ -236,7 +237,7 @@ func TestHonestConfidence(t *testing.T) {
 			// Pooled over the variants, the buckets are larger and the test stricter.
 			t.Logf("%s %s, all variants:\n%sunderconfident (logged, not asserted): all cells%s clean cells%s partly mixed cells%s",
 				s.mod.Name(), name, total, total.under(), totalClean.under(), totalMixed.under())
-			for _, e := range total.judge(true, overCeil[name]) {
+			for _, e := range total.checkPooled() {
 				t.Errorf("%s %s pooled: %s", s.mod.Name(), name, e)
 			}
 			// Clean cells and the credited cells that hold some of another frame (where the

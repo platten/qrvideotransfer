@@ -56,7 +56,7 @@ func TestGlareUnknown(t *testing.T) {
 				c.Optics.Glare = 0.05
 				glare := s.shoot(t, c, time.Second/30, 4, seed)
 				spacing := float64(219) / float64(s.mod.Levels()-1)
-				var under, missed, away, falsely, missedBits, missedWrong int
+				var under, missed, away, falsely, missedBits, missedWrong, quarter, quarterMissed int
 				b := s.mod.BitsPerCell()
 				soft := make([]int8, len(s.layout.DataCells())*b)
 				for n := range glare {
@@ -97,6 +97,12 @@ func TestGlareUnknown(t *testing.T) {
 							for _, v := range soft[i*b : i*b+b] {
 								stated = stated || v != 0
 							}
+							if d > spacing/4 {
+								quarter++
+								if stated {
+									quarterMissed++
+								}
+							}
 							switch {
 							case d > spacing/2:
 								under++
@@ -120,7 +126,8 @@ func TestGlareUnknown(t *testing.T) {
 					}
 				}
 				miss, fa := float64(missed)/float64(max(under, 1)), float64(falsely)/float64(max(away, 1))
-				t.Logf("%d credited cells under the patch, %d still stated (miss rate %.4f; %d of their %d soft bits wrong); %d away from it, %d made unknown (%.5f)", under, missed, miss, missedWrong, missedBits, away, falsely, fa)
+				t.Logf("%d credited cells under the patch, %d still stated (miss rate %.4f; %d of their %d soft bits wrong); at a quarter of a spacing %d of %d still stated (%.4f, logged only); %d away from it, %d made unknown (%.5f)",
+					under, missed, miss, missedWrong, missedBits, quarterMissed, quarter, float64(quarterMissed)/float64(max(quarter, 1)), away, falsely, fa)
 				if under == 0 {
 					t.Fatal("no cell under the patch")
 				}

@@ -85,7 +85,7 @@ func paletteThrough(f *video.Frame, m *Mesh, l *frame.Layout) []modem.Obs {
 // presets at rolls 0, 30 and 60 with 8 captures each. It also reports how often the code was not
 // found or no mesh fitted. Under the race detector it runs one combination of 2 captures on a 212 x
 // 120 grid with a 1600 x 900 camera, the smoke test of the whole chain through the simulator's
-// goroutines, without the yield floor.
+// goroutines, asserting none of the figures (they are asserted in the non-race step).
 func TestPipelinePhase(t *testing.T) {
 	t.Parallel()
 	ncap := 2
@@ -124,6 +124,9 @@ func TestPipelinePhase(t *testing.T) {
 						ps.captures, ps.notFound, ps.fitFailed, st.cells, st.mixed, st.pocket, st.maxErr, st.maxPocket, st.credited, st.wrong, st.minTrue)
 					if len(caps) == 0 {
 						t.Fatal("no capture went through the pipeline")
+					}
+					if raceEnabled {
+						return // the smoke run walks the chain; its figures are asserted without race
 					}
 					if st.maxErr > maxInnerErrPipeline || st.maxPocket > maxPocketErrPipeline {
 						t.Errorf("largest phase weight error %.4f inner, %.4f pocket, above %.2f and %.2f", st.maxErr, st.maxPocket, maxInnerErrPipeline, maxPocketErrPipeline)
@@ -237,7 +240,7 @@ func TestPipelineGlare(t *testing.T) {
 			glare, _ := s.shootRealAll(t, c, time.Second/30, ncap, seed)
 			spacing := 219.0 / 3
 			gx, gy := s.layout.GridX(), s.layout.GridY()
-			var under, missed, away, falsely, used int
+			var under, missed, away, falsely, used, quarter, quarterMissed int
 			soft := make([]int8, 2*len(s.layout.DataCells()))
 			for n := range glare {
 				if glare[n] == nil || clean[n] == nil {
@@ -272,6 +275,12 @@ func TestPipelineGlare(t *testing.T) {
 						}
 						d := float64(glare[n].obs[i].Y - clean[n].obs[i].Y)
 						stated := soft[2*i] != 0 || soft[2*i+1] != 0
+						if d > spacing/4 {
+							quarter++
+							if stated {
+								quarterMissed++
+							}
+						}
 						switch {
 						case d > spacing/2:
 							under++
@@ -291,7 +300,8 @@ func TestPipelineGlare(t *testing.T) {
 				t.Fatal("no capture found with and without the patch")
 			}
 			miss, fa := float64(missed)/float64(max(under, 1)), float64(falsely)/float64(max(away, 1))
-			t.Logf("%d captures used; %d credited cells under the patch, %d still stated (miss rate %.4f); %d away from it, %d made unknown (%.5f)", used, under, missed, miss, away, falsely, fa)
+			t.Logf("%d captures used; %d credited cells under the patch, %d still stated (miss rate %.4f); at a quarter of a spacing %d of %d still stated (%.4f, logged only); %d away from it, %d made unknown (%.5f)",
+				used, under, missed, miss, quarterMissed, quarter, float64(quarterMissed)/float64(max(quarter, 1)), away, falsely, fa)
 			if miss > maxGlareMissPipeline {
 				t.Errorf("miss rate %.4f above %.3f", miss, maxGlareMissPipeline)
 			}
