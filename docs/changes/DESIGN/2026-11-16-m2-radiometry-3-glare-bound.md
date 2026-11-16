@@ -1,0 +1,1 @@
+Designer's decision of 2026-11-16 on PR #31: section 10 step 5 and section 15's glare row bound the miss rate through the geometry pipeline, where the sampler's clipping flag and the equaliser's rule act together, at 0.06 on `tripod` and `handheld` (measured 0.037 to 0.038 and 0.012 to 0.013), replacing 0.10

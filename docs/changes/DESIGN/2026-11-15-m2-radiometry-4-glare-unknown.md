@@ -1,0 +1,1 @@
+Designer's decision on PR #31: section 10 step 5 makes cells under glare unknown by two stated margins (brighter than the local lightest level; implausible against the neighbours' levels) and gives the measured miss and loss rates

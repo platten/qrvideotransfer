@@ -1,0 +1,1 @@
+Merge of main (PR #38) into PR #31: section 10 step 5 gives the glare miss rate through the pipeline now that the sampler marks clipped cells unknown and the glare rule counts them among the neighbours that read white (`tripod` 0.037 to 0.038, `handheld` 0.012 to 0.013); without that, the sampler's flag hid the patch's core from the rule and the `tripod` miss rate rose to 0.138

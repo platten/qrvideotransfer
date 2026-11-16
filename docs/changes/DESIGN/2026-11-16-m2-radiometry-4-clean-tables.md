@@ -1,0 +1,1 @@
+Round 3 of the review of PR #31, designer's acceptance of 2026-11-16: the honesty tests at true positions judge every case's clean table at twice the stated rate as well as the pooled one; the whole tables keep the 12 times reach of the partly mixed cells (section 10 step 7), which the long version's `tripod` tables need (5.4 times)
