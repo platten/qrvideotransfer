@@ -321,8 +321,13 @@ func TestWindowsRaceExcludesVideo(t *testing.T) {
 	if plainVideo != 1 || raceVideo != 0 || raceFrame != 1 {
 		t.Errorf("windows runs: plain video %d, race video %d, race frame %d; want 1, 0, 1\n%s", plainVideo, raceVideo, raceFrame, strings.Join(*calls, "\n"))
 	}
-	if s := strings.Join(r.summary(false), "\n"); !strings.Contains(s, "NOT RUN windows/amd64 race "+isolated) {
-		t.Errorf("summary does not report video's race tests as not run:\n%s", s)
+	// Accepted as CI-only by the designer: reported as such, and not a failure under -full.
+	if s := strings.Join(r.summary(false), "\n"); !strings.Contains(s, "CI-ONLY windows/amd64 race "+isolated) {
+		t.Errorf("summary does not report video's race tests as CI-only:\n%s", s)
+	}
+	o, _ = parsePlatformArgs([]string{"-full", "-skip", "compile,lint,arm64"})
+	if _, err := runPlatforms(t.Context(), o, d); err != nil {
+		t.Errorf("-full failed on the accepted CI-only exclusion: %v", err)
 	}
 }
 
@@ -330,7 +335,10 @@ func TestArm64EmulationNotice(t *testing.T) {
 	d, calls := fakeDeps(t, module+"/internal/video")
 	d.runTest = func(_ context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
 		*calls = append(*calls, strings.Join(env, " "))
-		return []byte("=== RUN   TestHostileFiles\n    sandbox_test.go:579: nostsd.mp4: 1m5s, over the 60 s bound, logged rather than asserted under emulation\n--- PASS: TestHostileFiles (82.00s)\nPASS\n"), nil
+		// The second line is another package's output that merely quotes the marker (tools/dev's
+		// own tests do): only a test's log line counts.
+		return []byte("=== RUN   TestHostileFiles\n    sandbox_test.go:579: nostsd.mp4: 1m5s, over the 60 s bound, logged rather than asserted under emulation\n" +
+			"platforms: x logged: sandbox_test.go:1: y, logged rather than asserted under emulation\n--- PASS: TestHostileFiles (82.00s)\nPASS\n"), nil
 	}
 	o, _ := parsePlatformArgs([]string{"-full", "-skip", "compile,lint,race,windows"})
 	r, err := runPlatforms(t.Context(), o, d)
@@ -340,6 +348,9 @@ func TestArm64EmulationNotice(t *testing.T) {
 	s := strings.Join(r.summary(true), "\n")
 	if !strings.Contains(s, emulationNotice) || !strings.Contains(s, "nostsd.mp4: 1m5s, over the 60 s bound") {
 		t.Errorf("summary lacks the emulation notice or the logged line:\n%s", s)
+	}
+	if strings.Contains(s, "platforms: x logged") {
+		t.Errorf("a quoted marker was surfaced as a logged bound:\n%s", s)
 	}
 	if len(*calls) != 1 || !strings.Contains((*calls)[0], emulatedEnv) {
 		t.Errorf("the emulated run's environment: %q", *calls)
