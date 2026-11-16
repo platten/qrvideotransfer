@@ -1691,7 +1691,8 @@ by GoReleaser).
     Windows paths, so that tests which start themselves again (engine workers, Job Objects) find
     their binary. The Windows-only tests run there (Job Object, sparse files, path rules);
     `internal/video`'s race tests do not, because its race-enabled engine workers cannot allocate
-    ThreadSanitizer memory under the zig-linked race runtime. Outside WSL the step reports NOT RUN.
+    ThreadSanitizer memory under the zig-linked race runtime; the task reports them as CI-ONLY,
+    which `-full` accepts. Outside WSL the step reports NOT RUN.
   - *arm64*: the linux/arm64 test binaries run natively on an arm64 Linux host, else under user-mode
     emulation through an enabled binfmt entry for aarch64 (`qemu-user-static`, installed by
     `scripts/setup.sh --cross` where the script has usable root rights), with `QRVT_EMULATED=1` and

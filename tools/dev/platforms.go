@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -43,8 +45,9 @@ const emulatedEnv = "QRVT_EMULATED=1"
 // emulationNotice names every assertion that is logged rather than asserted under emulation.
 const emulationNotice = "under emulation (QRVT_EMULATED=1) these bounds are logged, not asserted: internal/video TestHostileFiles, 60 s per hostile file"
 
-// emulationMarker is the text with which those tests log a bound they did not assert.
-const emulationMarker = "logged rather than asserted under emulation"
+// loggedBound matches a test's log line ("    file_test.go:12: …") that reports a bound logged
+// rather than asserted under emulation; output that merely quotes such a line does not match.
+var loggedBound = regexp.MustCompile(`^\s+\w+_test\.go:\d+: .*logged rather than asserted under emulation`)
 
 // notCoveredLocally is what only the CI runners check (DESIGN.md section 17).
 var notCoveredLocally = []string{
@@ -107,8 +110,9 @@ type platformDeps struct {
 	pkgDirs  func(tags string) (map[string]string, error)
 	// listFiles lists the files to copy for the Windows run, relative to the module root.
 	listFiles func() ([]string, error)
-	tags      string // the release build tags
-	tempRoot  string // where the task's own temporary directories go
+	report    io.Writer // where results are printed as they come (nil: not printed)
+	tags      string    // the release build tags
+	tempRoot  string    // where the task's own temporary directories go
 }
 
 type platformJob struct {
@@ -236,6 +240,7 @@ const (
 	kindFail
 	kindNotRun
 	kindSkipped
+	kindCIOnly // not run here, and accepted as CI-only (DESIGN.md section 17)
 )
 
 type reportEntry struct {
@@ -243,13 +248,18 @@ type reportEntry struct {
 	text string
 }
 
-// platformReport collects the task's results.
-type platformReport struct{ entries []reportEntry }
+// platformReport collects the task's results, and prints each as it comes when w is set.
+type platformReport struct {
+	entries []reportEntry
+	w       io.Writer
+}
 
 func (r *platformReport) add(k entryKind, format string, a ...any) {
 	e := reportEntry{k, fmt.Sprintf(format, a...)}
 	r.entries = append(r.entries, e)
-	fmt.Println("platforms:", e.line())
+	if r.w != nil {
+		_, _ = fmt.Fprintln(r.w, "platforms:", e.line())
+	}
 }
 
 func (e reportEntry) line() string {
@@ -260,6 +270,8 @@ func (e reportEntry) line() string {
 		return "NOT RUN " + e.text
 	case kindSkipped:
 		return "SKIPPED " + e.text
+	case kindCIOnly:
+		return "CI-ONLY " + e.text
 	}
 	return e.text
 }
@@ -276,7 +288,7 @@ func (r *platformReport) summary(strict bool) []string {
 	if strict && count[kindNotRun] > 0 {
 		notRun += " (failing: -strict or -full)"
 	}
-	out = append(out, fmt.Sprintf("%d failed, %s, %d steps skipped", count[kindFail], notRun, count[kindSkipped]))
+	out = append(out, fmt.Sprintf("%d failed, %s, %d CI-only, %d steps skipped", count[kindFail], notRun, count[kindCIOnly], count[kindSkipped]))
 	out = append(out, "not covered locally (CI-only): "+strings.Join(notCoveredLocally, "; "))
 	return out
 }
@@ -316,7 +328,7 @@ func buildTests(ctx context.Context, d platformDeps, env []string, tags, ldflags
 
 // runPlatforms runs the steps that opts leaves in.
 func runPlatforms(ctx context.Context, o platformOpts, d platformDeps) (*platformReport, error) {
-	r := &platformReport{}
+	r := &platformReport{w: d.report}
 	steps := map[string]func(){
 		"compile": func() { platformsCompile(ctx, r, d) },
 		"lint":    func() { platformsLint(ctx, r, d) },
@@ -439,7 +451,7 @@ func runBinaries(ctx context.Context, r *platformReport, d platformDeps, label, 
 		npass += len(res.passed)
 		nskip += len(res.skipped)
 		for _, l := range lines(out) {
-			if strings.Contains(l, emulationMarker) {
+			if loggedBound.MatchString(l) {
 				logged = append(logged, strings.TrimSpace(l))
 			}
 		}
@@ -449,7 +461,9 @@ func runBinaries(ctx context.Context, r *platformReport, d platformDeps, label, 
 		}
 		if err != nil {
 			r.add(kindFail, "%s %s; %v, failed: %s", label, detail, err, strings.Join(res.failed, ", "))
-			fmt.Println(lastLines(string(out), 30))
+			if r.w != nil {
+				_, _ = fmt.Fprintln(r.w, lastLines(string(out), 30))
+			}
 		} else {
 			r.add(kindOK, "%s ok %s", label, detail)
 		}
@@ -566,7 +580,7 @@ func platformsWindows(ctx context.Context, r *platformReport, d platformDeps, o 
 	raceDirs := maps.Clone(dirs)
 	if _, ok := raceDirs[isolated]; ok {
 		delete(raceDirs, isolated)
-		r.add(kindNotRun, "windows/amd64 race %s: its engine workers' ThreadSanitizer cannot allocate memory under the zig-linked race runtime; CI's windows-2025 race step runs it", isolated)
+		r.add(kindCIOnly, "windows/amd64 race %s: its engine workers' ThreadSanitizer cannot allocate memory under the zig-linked race runtime; CI's windows-2025 race step runs it", isolated)
 	}
 	runBinaries(ctx, r, d, "windows/amd64 race", raceBin, root, true, nil, raceDirs, o.timeout)
 }
@@ -647,7 +661,7 @@ func realPlatformDeps(tags, tempRoot string) platformDeps {
 			}
 			return strings.FieldsFunc(string(out), func(r rune) bool { return r == 0 }), nil
 		},
-		tags: tags, tempRoot: tempRoot,
+		report: os.Stdout, tags: tags, tempRoot: tempRoot,
 	}
 }
 
