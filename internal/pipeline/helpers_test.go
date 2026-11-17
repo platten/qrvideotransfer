@@ -233,6 +233,14 @@ func preset(t testing.TB, name string, w, h int) channel.Config {
 	return c
 }
 
+// decodeWith decodes with c and returns the decoder's final state.
+func decodeWith(t testing.TB, c DecodeConfig) (*decoder, error) {
+	t.Helper()
+	var d *decoder
+	_, err := decode(context.Background(), c, &d)
+	return d, err
+}
+
 // decodeTo decodes recordings into a new folder and returns it with the result.
 func decodeTo(t testing.TB, recs ...string) (string, *DecodeResult, error) {
 	t.Helper()

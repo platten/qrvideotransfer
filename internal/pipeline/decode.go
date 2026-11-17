@@ -32,6 +32,14 @@ const statsEvery = 16
 // accumulators, the shard store and the events. Reading stops as soon as every block can be
 // reconstructed. Temporary files go in a folder of their own under TempDir, removed on return.
 func Decode(ctx context.Context, c DecodeConfig) (*DecodeResult, error) {
+	return decode(ctx, c, nil)
+}
+
+// processCapture runs the vision chain on one capture; tests replace it to stall a worker.
+var processCapture = (*captureWorker).process
+
+// decode is Decode; when seen is not nil it receives the decoder, for tests to inspect.
+func decode(ctx context.Context, c DecodeConfig, seen **decoder) (*DecodeResult, error) {
 	switch {
 	case len(c.Recordings) == 0:
 		return nil, errors.New("pipeline: no recordings")
@@ -47,6 +55,9 @@ func Decode(ctx context.Context, c DecodeConfig) (*DecodeResult, error) {
 	defer func() { _ = os.RemoveAll(tmp) }()
 	d := &decoder{c: &c, emit: emitter(c.Progress), tmp: tmp, frames: map[uint32]*frameAcc{}, softCap: MaxSoftBytes}
 	defer d.close()
+	if seen != nil {
+		*seen = d
+	}
 	workers := c.Workers
 	if workers <= 0 {
 		workers = runtime.GOMAXPROCS(0)
@@ -112,11 +123,12 @@ type decoder struct {
 	store    *rs.Store
 	ready    int // blocks with at least K shards
 
-	frames    map[uint32]*frameAcc
-	pending   []uint32 // frames with soft bits added since their last attempt
-	softBytes int64
-	softCap   int64 // MaxSoftBytes; lower in tests
-	captures  int   // captures processed, across recordings, with a gap between recordings
+	frames     map[uint32]*frameAcc
+	pending    []uint32 // frames with soft bits added since their last attempt
+	softBytes  int64
+	softCap    int64 // MaxSoftBytes; lower in tests
+	maxWaiting int   // most results held for in-order application at once
+	captures   int   // captures processed, across recordings, with a gap between recordings
 
 	stats            Stats
 	located          int64
@@ -214,7 +226,7 @@ func (d *decoder) recording(ctx context.Context, path string, workers int) error
 			defer wg.Done()
 			var w captureWorker
 			for j := range jobs {
-				r := w.process(j.f, j.index)
+				r := processCapture(&w, j.f, j.index)
 				free <- j.f
 				results <- r
 			}
