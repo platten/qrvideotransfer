@@ -30,15 +30,31 @@ func TestAtPixels(t *testing.T) {
 	}
 }
 
-// TestCalRatios: per bucket of at least minBucket bits, observed over stated error rate; the largest
-// and smallest are reported with their buckets.
+// TestCalRatios: per bucket of at least minBucket bits where at least minExpected errors are
+// stated, observed over stated error rate; the largest and smallest are reported with their buckets.
+// The most confident buckets, where almost no error is stated, are reported apart as an error rate.
 func TestCalRatios(t *testing.T) {
 	var c calTable
-	c.N[2], c.Errs[2], c.Stated[2] = 20000, 40, 10   // 4 times
-	c.N[3], c.Errs[3], c.Stated[3] = 20000, 1, 4     // 0.25 times
-	c.N[4], c.Errs[4], c.Stated[4] = 500, 100, 0.001 // too few bits
+	c.N[2], c.Errs[2], c.Stated[2] = 20000, 40, 10    // 4 times
+	c.N[3], c.Errs[3], c.Stated[3] = 20000, 10, 40    // 0.25 times
+	c.N[4], c.Errs[4], c.Stated[4] = 500, 100, 20     // too few bits
+	c.N[8], c.Errs[8], c.Stated[8] = 50000, 3, 1e-6   // too few errors stated: not a ratio
+	c.N[9], c.Errs[9], c.Stated[9] = 150000, 2, 1e-12 // likewise
 	hi, hiB, lo, loB, ok := calRatios(&c)
 	if !ok || hi != 4 || hiB != 2 || lo != 0.25 || loB != 3 {
 		t.Errorf("ratios %v (bucket %d), %v (bucket %d), %v", hi, hiB, lo, loB, ok)
+	}
+	if got := confidentErrors(&c); math.Abs(got-5.0/200000) > 1e-15 {
+		t.Errorf("error rate in buckets 8 and 9: %g, want %g", got, 5.0/200000)
+	}
+}
+
+// TestNeighbourChance: the chance that a wrong b-bit symbol equals either neighbouring frame's
+// symbol, each uniform and independent: 1 - (1 - 2^-b)^2.
+func TestNeighbourChance(t *testing.T) {
+	for b, want := range map[int]float64{1: 0.75, 2: 0.4375, 3: 1 - 49.0/64} {
+		if got := neighbourChance(b); math.Abs(got-want) > 1e-15 {
+			t.Errorf("b = %d: %v, want %v", b, got, want)
+		}
 	}
 }
