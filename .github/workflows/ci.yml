@@ -128,6 +128,18 @@ jobs:
         env:
           CGO_ENABLED: "0"
 
+      # The detector's hostile-cost ratios (DESIGN.md section 17), logged on a pass too, so that a
+      # near miss can be read from the job log without a measurement run.
+      - name: Hostile-cost ratios
+        timeout-minutes: 5
+        shell: bash
+        run: >-
+          go test -count=1 -v
+          -run '^(TestDetectThreeHostile|TestDetectThreeHostile4K|TestDetectHostileGrid|TestDetectHostileGrid4K)$'
+          ./internal/vision/ | grep -E 'real-code neighbours|^(--- |ok|FAIL|panic)'
+        env:
+          CGO_ENABLED: "0"
+
       - name: Coverage gate (go-test-coverage)
         if: matrix.os == 'ubuntu-24.04'
         timeout-minutes: 5

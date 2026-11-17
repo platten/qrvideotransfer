@@ -1650,6 +1650,9 @@ by GoReleaser).
   the rise came from #38's three-candidate path (the hostile Detect from 260 to 295 ms, the real
   one unchanged at 23 ms). **Residual for the security pass (M7):** the 16-times bound has about 24%
   of quiet headroom (16 against 12.9); any detector change that adds hostile cost re-measures it.
+  A step of the `check` job ("Hostile-cost ratios") runs the four tests again verbosely and keeps
+  their ratio lines, so that every runner's figures, a near miss included, can be read from the job
+  log on a pass too.
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
