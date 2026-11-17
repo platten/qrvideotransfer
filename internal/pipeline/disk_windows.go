@@ -14,5 +14,5 @@ func platformDiskFree(dir string) (int64, error) {
 	if err := windows.GetDiskFreeSpaceEx(p, &avail, &total, &free); err != nil {
 		return 0, err
 	}
-	return int64(min(avail, 1<<62)), nil //nolint:gosec // clamped
+	return int64(min(avail, 1<<62)), nil
 }
