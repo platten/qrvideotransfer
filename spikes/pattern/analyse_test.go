@@ -96,9 +96,9 @@ func TestLocate(t *testing.T) {
 		}
 	}
 	bad := h(plans[0], 0, 3)
-	bad.GridX, bad.GridY = 960, 540
+	bad.GridX, bad.GridY = 240, 135 // a grid of the plan, not of this segment
 	if _, _, ok := locate(plans, bad); ok {
-		t.Error("a 4K grid at a 1080p segment's index was placed")
+		t.Error("a grid that disagrees with the segment was placed")
 	}
 	bad = h(plans[0], 0, 3)
 	bad.Session = 1
@@ -178,33 +178,60 @@ func TestSegmentAccounting(t *testing.T) {
 	rec := func(idx uint32, first int, stated int) frameRec {
 		return frameRec{idx: idx, firstCap: first, cells: 10, clean: 10, stated: stated, captures: 1}
 	}
-	full := 20 // 10 cells x 2 bits, all stated, none wrong: 2 bits per cell
+	full := 20                                                                  // 10 cells x 2 bits, all stated, none wrong: 2 bits per cell
 	recs := []frameRec{rec(100, 0, full), rec(101, 2, full), rec(103, 6, full), // 102 missed
 		rec(100, 1000, full), rec(101, 1002, full)} // a second pass
 	s := summarise(recs, 2, 60)
-	if s.expected != 6 || s.seen != 5 || s.passes != 2 {
+	if s.Expected != 6 || s.Seen != 5 || s.Passes != 2 {
 		t.Fatalf("summary %+v", s)
 	}
-	if want := 2.0 * 5 / 6; math.Abs(s.delivered-want) > 1e-12 {
-		t.Errorf("delivered %.4f, want %.4f", s.delivered, want)
+	if want := 2.0 * 5 / 6; math.Abs(s.Delivered-want) > 1e-12 {
+		t.Errorf("delivered %.4f, want %.4f", s.Delivered, want)
 	}
-	if math.Abs(s.cleanFrame-5.0/6) > 1e-12 {
-		t.Errorf("clean share per code frame %.4f, want %.4f", s.cleanFrame, 5.0/6)
+	if math.Abs(s.CleanFrame-5.0/6) > 1e-12 {
+		t.Errorf("clean share per code frame %.4f, want %.4f", s.CleanFrame, 5.0/6)
 	}
 }
 
 // TestCalibration: confidence buckets as in the honesty tests (ten buckets of |s|, stated error
 // 1 / (1 + e^(|s| / LLRScale))), split by the phase weight of the cell.
+// TestTimeOffset: the recording's offset into the pattern is the median over the placed captures of
+// pattern time less capture time, taken modulo the pattern's length so that a loop counts as one
+// offset; a capture is then placed in the segment showing at its time plus the offset.
+func TestTimeOffset(t *testing.T) {
+	pl := makePlan(1920, 1080, 4) // 108 s
+	// Pattern times of captures at 0.5, 1.0, ... with the recording starting 3 s into the pattern;
+	// one stray value, and one capture from the second loop (pattern time wrapped).
+	var pts, pat []float64
+	for i := 1; i <= 20; i++ {
+		pts, pat = append(pts, float64(i)/2), append(pat, float64(i)/2+3)
+	}
+	pts, pat = append(pts, 50), append(pat, 99)
+	pts, pat = append(pts, 106), append(pat, 1)
+	off := patternOffset(pts, pat, pl.duration())
+	if math.Abs(off-3) > 1e-9 {
+		t.Fatalf("offset %.3f, want 3", off)
+	}
+	for _, k := range []struct {
+		t    float64
+		want int
+	}{{0, 0}, {1.5, 1}, {9.5, 3}, {105.5, 0}, {104.9, 26}} {
+		if got := pl.segmentAt(k.t + off); got != k.want {
+			t.Errorf("capture at %.1f s: segment %d, want %d", k.t, got, k.want)
+		}
+	}
+}
+
 func TestCalibration(t *testing.T) {
 	var c calTable
 	c.add(100, 0)
 	c.add(-100, 0)
 	c.add(5, 1)
-	if c.n[100*calBuckets/128] != 2 || c.errs[100*calBuckets/128] != 1 || c.n[0] != 1 || c.errs[0] != 1 {
+	if c.N[100*calBuckets/128] != 2 || c.Errs[100*calBuckets/128] != 1 || c.N[0] != 1 || c.Errs[0] != 1 {
 		t.Fatalf("table %+v", c)
 	}
-	if want := 2 / (1 + math.Exp(100.0/modem.LLRScale)); math.Abs(c.stated[7]-want) > 1e-15 {
-		t.Errorf("stated %.3g, want %.3g", c.stated[7], want)
+	if want := 2 / (1 + math.Exp(100.0/modem.LLRScale)); math.Abs(c.Stated[7]-want) > 1e-15 {
+		t.Errorf("stated %.3g, want %.3g", c.Stated[7], want)
 	}
 }
 
@@ -248,22 +275,22 @@ func TestAnalyseRendered(t *testing.T) {
 		}
 	}
 	rep := agg.finish()
-	if len(rep.segments) != 3 {
-		t.Fatalf("%d segments reported, want 3", len(rep.segments))
+	if len(rep.Segments) != 3 {
+		t.Fatalf("%d segments reported, want 3", len(rep.Segments))
 	}
-	for _, sr := range rep.segments {
-		b := modBits(pl.Segments[sr.seg].Modulation)
-		if sr.sum.expected != 2 || sr.sum.seen != 2 || math.Abs(sr.sum.delivered-float64(b)) > 1e-9 || sr.sum.cleanFrame != 1 {
-			t.Errorf("segment %d: %+v, want 2 frames seen and %d bits per cell", sr.seg, sr.sum, b)
+	for _, sr := range rep.Segments {
+		b := modBits(pl.Segments[sr.Seg].Modulation)
+		if sr.Sum.Expected != 2 || sr.Sum.Seen != 2 || math.Abs(sr.Sum.Delivered-float64(b)) > 1e-9 || sr.Sum.CleanFrame != 1 {
+			t.Errorf("segment %d: %+v, want 2 frames seen and %d bits per cell", sr.Seg, sr.Sum, b)
 		}
-		if sr.captures != 4 || math.Abs(sr.rateRatio-2.5) > 1e-9 {
-			t.Errorf("segment %d: %d captures, camera-to-display ratio %.2f", sr.seg, sr.captures, sr.rateRatio)
+		if sr.Captures != 4 || math.Abs(sr.RateRatio-2.5) > 1e-9 {
+			t.Errorf("segment %d: %d captures, camera-to-display ratio %.2f", sr.Seg, sr.Captures, sr.RateRatio)
 		}
 	}
 }
 
 // placeRendered puts a rendered yuv420p frame of w x h in the middle of a mid-grey 8-bit capture of
-// cw x ch.
+// cw x ch, its brightness scaled by 0.9 above black, as a camera exposing white below its clip.
 func placeRendered(buf []byte, w, h, cw, ch int) *video.Frame {
 	f := &video.Frame{W: cw, H: ch, Bits: 8, Y: make([]uint16, cw*ch), Cb: make([]uint16, cw/2*(ch/2)), Cr: make([]uint16, cw/2*(ch/2))}
 	for i := range f.Y {
@@ -275,7 +302,7 @@ func placeRendered(buf []byte, w, h, cw, ch int) *video.Frame {
 	x0, y0 := (cw-w)/2&^1, (ch-h)/2&^1
 	for y := range h {
 		for x := range w {
-			f.Y[(y0+y)*cw+x0+x] = uint16(buf[y*w+x])
+			f.Y[(y0+y)*cw+x0+x] = uint16(16 + 0.9*float64(int(buf[y*w+x])-16))
 		}
 	}
 	u, v := buf[w*h:], buf[w*h+(w/2)*(h/2):]
