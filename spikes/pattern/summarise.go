@@ -51,12 +51,13 @@ func atPixels(segs []segReport, rate int, mod uint8, px float64) (pixelFigure, b
 	}, true
 }
 
-// calRatios returns the largest and smallest observed-over-stated error rate among the buckets of
-// at least minBucket bits that state at least minExpected errors, with their buckets.
+// calRatios returns the largest and smallest observed-over-stated error rate among the buckets below
+// the two most confident with at least minBucket bits that state or show at least minExpected
+// errors, with their buckets: a bucket stating few errors but showing many is not hidden.
 func calRatios(c *calTable) (hi float64, hiB int, lo float64, loB int, ok bool) {
 	lo = math.Inf(1)
-	for j := range calBuckets {
-		if c.N[j] < minBucket || c.Stated[j] < minExpected {
+	for j := range calBuckets - 2 {
+		if c.N[j] < minBucket || c.Stated[j] < minExpected && float64(c.Errs[j]) < minExpected || c.Stated[j] <= 0 {
 			continue
 		}
 		r := float64(c.Errs[j]) / c.Stated[j]

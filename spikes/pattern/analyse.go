@@ -381,8 +381,19 @@ type capResult struct {
 	pxPerCell                   float64
 	phases                      []phaseSoft
 	cal                         [2]calTable // credited cells wholly one frame (estimated weight >= 0.999) and partly mixed
+	calIn                       [2]calTable // likewise, cells in the inner 80% of the grid both ways
+	conf                        [10][2]int  // confident bits (|s| >= confidentS) and wrong ones, by column decile
 	credited, wrongCells        int         // credited cells, and those whose hard symbol is wrong
 	neighbour                   int         // wrong cells whose hard symbol is exactly the neighbouring frame's
+}
+
+// confidentS is the smallest |s| counted as a confident bit by position: the honesty tests' bucket 3
+// and up, stated error rate below 6e-5.
+const confidentS = 39
+
+// interior reports whether cell (x, y) lies in the inner 80% of a gx x gy grid both ways.
+func interior(x, y, gx, gy int) bool {
+	return x >= gx/10 && x < gx-gx/10 && y >= gy/10 && y < gy-gy/10
 }
 
 // wholeWeight is the estimated phase weight from which a credited cell counts as wholly one frame,
@@ -487,6 +498,8 @@ func (a *analyser) capture(f *video.Frame, det *vision.FinderDetector, index int
 				continue
 			}
 			credited[i] = true
+			x, y := int(cells[i].X), int(cells[i].Y)
+			col, in := x*10/g.layout.GridX(), interior(x, y, g.layout.GridX(), g.layout.GridY())
 			t := 0
 			if w < wholeWeight {
 				t = 1
@@ -496,9 +509,19 @@ func (a *analyser) capture(f *video.Frame, det *vision.FinderDetector, index int
 				s := soft[i*b+k]
 				bit := scr.Bit(i*b + k)
 				r.cal[t].add(s, bit)
+				if in {
+					r.calIn[t].add(s, bit)
+				}
+				bad := s != 0 && (s > 0) != (bit == 0)
+				if s >= confidentS || s <= -confidentS {
+					r.conf[col][0]++
+					if bad {
+						r.conf[col][1]++
+					}
+				}
 				if s == 0 {
 					stated = false
-				} else if (s > 0) != (bit == 0) {
+				} else if bad {
 					wrong = true
 				}
 			}
@@ -535,7 +558,8 @@ type segCaps struct {
 	captures                   int
 	cleanShare, clipped, glare float64
 	px                         []float64
-	cal                        [2]calTable
+	cal, calIn                 [2]calTable
+	conf                       [10][2]int
 	credited, wrong, neighbour int
 	recs                       []frameRec
 	fittedPts                  []float64 // times of the captures fitted in the segment
@@ -599,6 +623,12 @@ func (g *aggregator) add(r capResult) {
 		s.fittedPts = append(s.fittedPts, r.pts)
 		s.cal[0].merge(&r.cal[0])
 		s.cal[1].merge(&r.cal[1])
+		s.calIn[0].merge(&r.calIn[0])
+		s.calIn[1].merge(&r.calIn[1])
+		for d := range s.conf {
+			s.conf[d][0] += r.conf[d][0]
+			s.conf[d][1] += r.conf[d][1]
+		}
 		s.credited += r.credited
 		s.wrong += r.wrongCells
 		s.neighbour += r.neighbour
@@ -672,6 +702,10 @@ type segReport struct {
 	Neighbour    int         `json:"wrong_cells_matching_a_neighbour"`
 	Sum          segSum      `json:"frames"`
 	Cal          [2]calTable `json:"calibration"` // wholly one frame, partly mixed
+	// CalInterior is Cal over the cells in the inner 80% of the grid both ways, and ConfByColumn
+	// the confident bits (|s| >= confidentS) and how many of them were wrong, by column decile.
+	CalInterior  [2]calTable `json:"calibration_interior"`
+	ConfByColumn [10][2]int  `json:"confident_by_column_decile"`
 }
 
 // report is one recording's analysis.
@@ -715,7 +749,8 @@ func (g *aggregator) finish() report {
 		geom := g.a.geoms[pi][si]
 		sr := segReport{Plan: pi, Seg: si, Rate: sg.Rate, Cell: sg.Cell, Modulation: sg.Modulation,
 			Cells: len(geom.layout.DataCells()), Captures: s.captures, ByTime: byTime[si], RateRatio: g.fps / float64(sg.Rate),
-			Credited: s.credited, WrongCells: s.wrong, Neighbour: s.neighbour, Sum: summarise(s.recs, geom.b, gap), Cal: s.cal}
+			Credited: s.credited, WrongCells: s.wrong, Neighbour: s.neighbour, Sum: summarise(s.recs, geom.b, gap), Cal: s.cal,
+			CalInterior: s.calIn, ConfByColumn: s.conf}
 		sr.Shown = float64(byTime[si]) * float64(sg.Rate) / g.fps
 		if byTime[si] > 0 {
 			sr.Located = float64(s.captures) / float64(byTime[si])

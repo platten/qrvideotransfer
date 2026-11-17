@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"math"
+	"os"
 	"runtime"
 	"slices"
 	"testing"
@@ -376,10 +377,15 @@ func calBits(c *calTable) int {
 // TestAnalyseSimulated rules the analysis itself in or out as a source of overconfidence (S2
 // candidate iii): code frames of the pattern (Gray4, 4-pixel cells, 12 fps) are filmed by the
 // simulator's `tripod` preset with a 1920 x 1080 camera at 30 fps, and every capture goes through
-// the analysis. Each code frame the analysis assigns to a credited phase must be the frame the
-// simulator showed there with that phase; the calibration tables must be honest as the simulator's
-// honesty tests require (at most twice the stated rate for cells wholly one frame, 12 times for
-// partly mixed ones, with Poisson slack), and no bit stated at |s| of 103 or more may be wrong.
+// the analysis: 24 captures, 96 in the long version (QRVT_LONG_TESTS=1).
+//   - Every credited cell's assigned code frame must be the frame the simulator showed there with that
+//     phase.
+//   - Split by the simulator's true weight, as the honesty tests split it, the calibration must be
+//     honest as they require: at most twice the stated rate for cells wholly one frame, 12 times for
+//     partly mixed ones (`tripod`'s accepted residual), with Poisson slack.
+//   - The analysis's own tables (split by the phase field's estimated weight) must hold cells wholly
+//     one frame to twice the stated rate too.
+//   - No bit stated at |s| of 103 or more may be wrong.
 func TestAnalyseSimulated(t *testing.T) {
 	if testing.Short() {
 		t.Skip("simulated captures")
@@ -410,17 +416,25 @@ func TestAnalyseSimulated(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg = cfg.Resize(1920, 1080)
+	captures := 24
+	if os.Getenv("QRVT_LONG_TESTS") == "1" {
+		captures = 96
+	}
 	a := newAnalyser([]plan{pl})
 	agg := newAggregator(a, 30)
+	g := a.geoms[0][si]
+	cells := g.layout.DataCells()
 	var det vision.FinderDetector
+	var truth [2]calTable // by the simulator's true weight: wholly one frame, partly mixed
 	wrongFrame, checked := 0, 0
 	in := channel.Input{Frames: frames, Period: shown * time.Second / 12, Cell: seg.Cell}
-	err = channel.Simulate(context.Background(), in, cfg, channel.Run{Captures: 24, Seed: 0x52, Workers: runtime.NumCPU()},
+	err = channel.Simulate(context.Background(), in, cfg, channel.Run{Captures: captures, Seed: 0x52, Workers: runtime.NumCPU()},
 		func(f *video.Frame, tr *channel.Truth) error {
 			r := a.capture(f, &det, tr.Capture)
 			for _, ph := range r.phases {
-				for i, c := range a.geoms[0][si].layout.DataCells() {
-					if !ph.credited[i] || i%97 != 0 {
+				scr := g.mapping.Scrambler(ph.idx)
+				for i, c := range cells {
+					if !ph.credited[i] {
 						continue
 					}
 					checked++
@@ -432,6 +446,14 @@ func TestAnalyseSimulated(t *testing.T) {
 					}
 					if best != int(ph.idx) {
 						wrongFrame++
+						continue
+					}
+					k := 0
+					if w < wholeWeight {
+						k = 1
+					}
+					for j := range g.b {
+						truth[k].add(ph.soft[i*g.b+j], scr.Bit(i*g.b+j))
 					}
 				}
 			}
@@ -442,32 +464,35 @@ func TestAnalyseSimulated(t *testing.T) {
 		t.Fatal(err)
 	}
 	if checked == 0 || wrongFrame != 0 {
-		t.Errorf("%d of %d sampled credited cells assigned to a frame the simulator did not show with that phase", wrongFrame, checked)
+		t.Errorf("%d of %d credited cells assigned to a frame the simulator did not show with that phase", wrongFrame, checked)
 	}
-	rep := agg.finish()
-	var cal [2]calTable
-	for _, sr := range rep.Segments {
-		cal[0].merge(&sr.Cal[0])
-		cal[1].merge(&sr.Cal[1])
+	var est [2]calTable // the analysis's own split, by the phase field's estimated weight
+	for _, sr := range agg.finish().Segments {
+		est[0].merge(&sr.Cal[0])
+		est[1].merge(&sr.Cal[1])
 	}
-	for k, bound := range []float64{2, 12} {
-		c := &cal[k]
+	judge := func(name string, c *calTable, bound float64) {
+		t.Helper()
 		for j := range calBuckets {
 			if c.N[j] < minBucket {
 				continue
 			}
 			mu := bound * c.Stated[j]
 			if float64(c.Errs[j]) > mu+4*math.Sqrt(mu)+3 {
-				t.Errorf("table %d bucket %d: %d errors in %d bits, stated %.3g: above %.0f times", k, j, c.Errs[j], c.N[j], c.Stated[j], bound)
+				t.Errorf("%s bucket %d: %d errors in %d bits, stated %.3g: above %.0f times", name, j, c.Errs[j], c.N[j], c.Stated[j], bound)
 			}
 		}
 		if c.Errs[8]+c.Errs[9] != 0 {
-			t.Errorf("table %d: %d confident bits wrong", k, c.Errs[8]+c.Errs[9])
+			t.Errorf("%s: %d confident bits wrong", name, c.Errs[8]+c.Errs[9])
 		}
-		t.Logf("table %d: %d bits; per bucket n/errors/stated: %v %v %.3g", k, calBits(c), c.N, c.Errs, c.Stated)
+		t.Logf("%s: %d bits; per bucket bits %v, errors %v, stated %.3g", name, calBits(c), c.N, c.Errs, c.Stated)
 	}
-	if calBits(&cal[0]) < 100000 {
-		t.Errorf("only %d bits wholly one frame judged", calBits(&cal[0]))
+	judge("true weight, wholly one frame", &truth[0], 2)
+	judge("true weight, partly mixed", &truth[1], 12)
+	judge("estimated weight, wholly one frame", &est[0], 2)
+	t.Logf("estimated weight, partly mixed (not judged): bits %v, errors %v, stated %.3g", est[1].N, est[1].Errs, est[1].Stated)
+	if calBits(&truth[0]) < 100000 {
+		t.Errorf("only %d bits wholly one frame judged", calBits(&truth[0]))
 	}
 }
 
