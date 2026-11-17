@@ -104,14 +104,23 @@ func TestVulncheckRuns(t *testing.T) {
 // TestIsolatedRuns: the packages run in two go test invocations, every package but internal/video
 // first and internal/video on its own after them, with the same arguments.
 func TestIsolatedRuns(t *testing.T) {
-	pkgs := []string{module, module + "/internal/fec", module + "/internal/video", module + "/internal/payload"}
+	pkgs := []string{module, module + "/internal/fec", module + "/internal/pipeline", module + "/internal/video", module + "/internal/payload"}
 	got := isolatedRuns([]string{"test", "-race", "./..."}, pkgs)
+	// Every other package, then the end-to-end packages each on its own (the root package and
+	// internal/pipeline, designer's ruling on PR #47), then internal/video alone.
 	want := [][]string{
-		{"test", "-race", module, module + "/internal/fec", module + "/internal/payload"},
+		{"test", "-race", module + "/internal/fec", module + "/internal/payload"},
+		{"test", "-race", module},
+		{"test", "-race", module + "/internal/pipeline"},
 		{"test", "-race", "./internal/video/..."},
 	}
-	if len(got) != 2 || !slices.Equal(got[0], want[0]) || !slices.Equal(got[1], want[1]) {
-		t.Errorf("isolatedRuns = %q, want %q", got, want)
+	if len(got) != len(want) {
+		t.Fatalf("isolatedRuns = %q, want %q", got, want)
+	}
+	for i := range want {
+		if !slices.Equal(got[i], want[i]) {
+			t.Errorf("isolatedRuns run %d = %q, want %q", i, got[i], want[i])
+		}
 	}
 	// Arguments that do not end in ./... are run as they are.
 	if got := isolatedRuns([]string{"test", "./internal/fec"}, pkgs); len(got) != 1 || got[0][1] != "./internal/fec" {
@@ -122,14 +131,14 @@ func TestIsolatedRuns(t *testing.T) {
 // TestSelectRuns: -part runs one half of the split, so that CI can give internal/video under the
 // race detector a step (and a time limit) of its own.
 func TestSelectRuns(t *testing.T) {
-	runs := [][]string{{"test", "a", "b"}, {"test", "./internal/video/..."}}
+	runs := [][]string{{"test", "a", "b"}, {"test", module}, {"test", module + "/internal/pipeline"}, {"test", "./internal/video/..."}}
 	for _, c := range []struct {
 		part string
 		want [][]string
 	}{
 		{"", runs},
-		{"others", runs[:1]},
-		{"isolated", runs[1:]},
+		{"others", runs[:3]},
+		{"isolated", runs[3:]},
 	} {
 		got, err := selectRuns(runs, c.part)
 		if err != nil || len(got) != len(c.want) {
