@@ -99,6 +99,20 @@ func TestDistortionK2(t *testing.T) {
 	}
 }
 
+// A folding lens (k1 = k2 = -0.1, which validate refuses): the distorted radius peaks at r = 1.07
+// (a pinhole radius of about 0.81), so a pinhole point at 1.2 has no preimage. distort stops its
+// Newton steps there and still returns a finite point; inside the fold it inverts undistort.
+func TestDistortionFold(t *testing.T) {
+	cam := &camera{w: 400, h: 300, cx: 200, cy: 150, norm: 200, k1: -0.1, k2: -0.1}
+	if x, y := cam.distort(200+1.2*200, 150); math.IsNaN(x) || math.IsInf(x, 0) || math.IsNaN(y) || math.IsInf(y, 0) {
+		t.Errorf("beyond the fold: %v, %v", x, y)
+	}
+	xu, yu := cam.undistort(300, 170)
+	if x, y := cam.distort(xu, yu); !near(x, 300, 1e-9) || !near(y, 170, 1e-9) {
+		t.Errorf("inside the fold, round trip gives %v, %v", x, y)
+	}
+}
+
 func TestShakeTrack(t *testing.T) {
 	g := GeometryParams{Width: 1000, Shake: 3}
 	tr := shake(g, 50, time.Second, 20000, 4)
