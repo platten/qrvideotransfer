@@ -185,6 +185,9 @@ func TestEvict(t *testing.T) {
 	if d.frames[0].soft[1] != nil || d.frames[2].soft[1] == nil {
 		t.Error("the confident frame was evicted, or the weak one kept")
 	}
+	if err := d.attempt(0, d.frames[0]); err != nil || d.frames[0].left != d.geom.cpf-1 {
+		t.Errorf("an evicted frame's attempt: %v, %d left", err, d.frames[0].left)
+	}
 	d.softCap = -1
 	d.evict()
 	if d.softBytes != 0 {

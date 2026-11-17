@@ -29,6 +29,20 @@ func TestUnusualCaptures(t *testing.T) {
 	if _, err := newGeometry(tiny); err == nil {
 		t.Fatal("a 53 x 30 grid with `robust` holds two codewords")
 	}
+	var w captureWorker
+	if _, err := w.geometry(tiny); err == nil || len(w.geoms) != 0 {
+		t.Errorf("a worker cached a geometry for the tiny grid: %v", err)
+	}
+	k2 := key
+	k2.mod = 1
+	for _, k := range []params{key, k2, key} {
+		if g, err := w.geometry(k); err != nil || g.key != k {
+			t.Fatalf("geometry %+v: %v", k, err)
+		}
+	}
+	if len(w.geoms) != 2 || w.geoms[0].key != key {
+		t.Errorf("worker cache %d entries, first %+v", len(w.geoms), w.geoms[0].key)
+	}
 	other := key
 	other.session++
 	for i, k := range []params{tiny, key, other} {
@@ -97,7 +111,7 @@ func TestCompleteSkipsRest(t *testing.T) {
 type faulty struct {
 	raw                        *video.Raw
 	probe, newEnc, write, next error
-	close                      error
+	close, newDec, concat      error
 }
 
 func (b *faulty) Probe(ctx context.Context, p string) (video.ClipInfo, error) {
@@ -116,6 +130,9 @@ func (b *faulty) NewEncoder(ctx context.Context, p string, c video.EncodeConfig)
 }
 
 func (b *faulty) NewDecoder(ctx context.Context, p string, c video.DecodeConfig) (video.Decoder, error) {
+	if b.newDec != nil {
+		return nil, b.newDec
+	}
 	d, err := b.raw.NewDecoder(ctx, p, c)
 	return &faultyDecoder{d, b.next}, err
 }
@@ -156,6 +173,9 @@ func (d *faultyDecoder) Next(f *video.Frame) error {
 type joining struct{ *faulty }
 
 func (j joining) Concat(ctx context.Context, runs []string, path string, fps int) error {
+	if j.concat != nil {
+		return j.concat
+	}
 	return j.raw.Concat(ctx, runs, path, fps)
 }
 
@@ -168,6 +188,7 @@ func TestBackendFaults(t *testing.T) {
 		"new encoder": joining{&faulty{raw: video.NewRaw(), newEnc: errInjected}},
 		"write":       joining{&faulty{raw: video.NewRaw(), write: errInjected}},
 		"close":       joining{&faulty{raw: video.NewRaw(), close: errInjected}},
+		"concat":      joining{&faulty{raw: video.NewRaw(), concat: errInjected}},
 	} {
 		t.Run("encode "+name, func(t *testing.T) {
 			c := profile480(in)
@@ -184,6 +205,7 @@ func TestBackendFaults(t *testing.T) {
 	for name, b := range map[string]video.Backend{
 		"probe": &faulty{raw: video.NewRaw(), probe: errInjected},
 		"next":  &faulty{raw: video.NewRaw(), next: errInjected},
+		"open":  &faulty{raw: video.NewRaw(), newDec: errInjected},
 	} {
 		t.Run("decode "+name, func(t *testing.T) {
 			tmp := t.TempDir()
@@ -288,5 +310,79 @@ func TestCheckHash(t *testing.T) {
 	}
 	if e := (&ShortError{Blocks: []Shortfall{{0, 3, 5}, {2, 4, 5}}}).Error(); !strings.Contains(e, "2 blocks short by 3 shards") {
 		t.Errorf("message %q", e)
+	}
+}
+
+// TestHostileDescriptorRecording: a recording whose frames carry a descriptor that passes its CRC
+// but contradicts the header stops the decode with that error and writes nothing.
+func TestHostileDescriptorRecording(t *testing.T) {
+	in, _ := writeInputs(t, 21, 3000)
+	c := profile480(in)
+	c.Output, c.Backend, c.TempDir = filepath.Join(t.TempDir(), "x.raw"), video.NewRaw(), t.TempDir()
+	c.Random = &prngReader{}
+	tmp := t.TempDir()
+	spool, err := os.Create(filepath.Join(tmp, "stream"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = spool.Close() }()
+	packed, err := payload.Pack(context.Background(), spool, payload.PackOptions{Inputs: c.Inputs, Compression: c.Compression})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := newEncoding(&c, packed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := e.desc
+	bad.Frames += 4
+	code, _ := ldpc.New(c.Inner)
+	shard := make([]byte, code.ShardSize())
+	b := bad.Marshal()
+	copy(shard, b[:])
+	code.Encode(e.descCW, shard)
+	parity, err := os.Create(filepath.Join(tmp, "parity"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = parity.Close() }()
+	if err := e.protect(context.Background(), nil, spool, parity); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.writeVideo(context.Background(), nil, spool, parity, tmp); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := decodeTo(t, c.Output)
+	if !errors.Is(err, frame.ErrDescriptor) {
+		t.Fatalf("got %v", err)
+	}
+	if fs := filesUnder(t, out); len(fs) != 0 {
+		t.Errorf("files written: %v", fs)
+	}
+}
+
+// TestEmbeddedInProcess: decoding through the embedded engine without engine worker processes (this
+// test binary does not serve them) warns once that the engine ran in process.
+func TestEmbeddedInProcess(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the engine is slow under the race detector")
+	}
+	in, want := writeInputs(t, 22, 3000)
+	be, err := video.NewEmbedded(video.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := profile480(in)
+	c.Output, c.Backend = filepath.Join(t.TempDir(), "code.mp4"), be
+	path, _ := encodeRaw(t, c)
+	out := filepath.Join(t.TempDir(), "out")
+	res, err := Decode(context.Background(), DecodeConfig{Recordings: []string{path}, Backend: be, TempDir: t.TempDir(),
+		Unpack: payload.UnpackOptions{OutputDir: out}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkOutput(t, out, want)
+	if len(res.Warnings) != 1 || res.Warnings[0].Code != WarnEngineInProcess {
+		t.Errorf("warnings %+v", res.Warnings)
 	}
 }

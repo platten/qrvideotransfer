@@ -98,7 +98,7 @@ func matrix() []matrixRow {
 	}
 	for _, m := range []Modulation{Gray2, Gray4} {
 		for _, p := range []Protection{Normal, Robust} {
-			rows = append(rows, matrixRow{"budget-android", 1280, 720, 12, m, p, m == Gray4 && p == Normal})
+			rows = append(rows, matrixRow{"budget-android", 1280, 720, 12, m, p, m == Gray2 && p == Normal})
 		}
 	}
 	return append(rows,

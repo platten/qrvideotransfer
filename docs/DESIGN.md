@@ -1955,6 +1955,47 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   the rendered frame, and the 4K gate header 196 ms, 3.5 times the reference against its bound of
   6 (5.3 times against the rendered frame, before the reference was redefined). The hostile noise
   frame's 301 ms is the figure to beat.
+- **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
+  every row of section 15 through the public API with five repeatable sessions each: the files
+  (6.5 KB) are encoded to an MP4 by the embedded engine, decoded, filmed for two passes (three on
+  `harsh`) by the preset's camera with the pure-Go recorder stand-in, not x264 at the preset's
+  bitrate, and decoded. 21 of the 22 rows decode in all five sessions. `budget-android`, 720p at
+  12 fps, Gray4 `normal` decodes in 1 of 5 (short by 1 to 6 shards of one block), and in 1 of 8
+  further random sessions with 3 passes. The cause is the channel, not the summing: each capture
+  shows a raw bit error rate of about 0.10 (4.8 camera pixels per cell, blur 1.5, sharpening 0.8,
+  quantiser step about 11), and the errors repeat between captures of a frame, so summing them
+  gains little. The row meets section 11's feasibility conditions (camera at 2.5 times the
+  display rate, 4.8 pixels per cell against 4.5, q = 22 against 7.7), so it is a defect to
+  trace in vision or the simulator, not removed. CI runs one row per preset (Gray2 `normal` for
+  `budget-android`), one session each. The matrix's payload is small (F 4 to 12), so it does
+  not exercise many blocks.
+- **Vision under strong simulated noise (M3).** Before the inner code fails, location and the
+  crediting of cells do. On a perfect 480p Gray4 capture with Gaussian noise added per pixel, the
+  credited share is 0.92 at sigma 10 and 0.22 at 12 with no bit error, and nothing at 15; the
+  phase field returns zero weights once anchor quadrants hold a sample at 0 or 255. The `ideal`
+  preset with sensor noise 12 (camera 1080p) credits nothing; `tripod` at 1080p holds to noise
+  12 and fails at 16. With noise on the data cells only, detection fails first. So
+  `TestSoftBitsAddUp` gives the decoder soft bits from a BPSK channel directly instead of a
+  filmed recording.
+- **Real recordings through the decode path (M3, `-tags realdevice`).** The S2 pattern carries
+  no codewords, so the public decode finds no descriptor (recording 1: no blocks known, after
+  255 s) and the check decodes each frame's summed soft bits against the all-zero codeword with
+  the inner code and its CRC (the coset of the all-zero shard; `internal/pipeline`
+  `realdevice_test.go`), with `normal` and, through `robust`'s interleaver, `robust`. Over the
+  six recordings no codeword decoded to anything but zeros. At the settings S2 calls
+  conservative: `normal` at a 12 fps display with Gray2 or Gray4 at 6 or more camera pixels per
+  cell decoded every codeword tried on recordings 1 and 2; at a 30 fps display filmed at 60 fps
+  (recording 6, 7.8 pixels per cell) Gray2 6,786 of 6,842 and Gray4 11,252 of 11,252; `robust` at
+  a 30 fps display filmed at 30 fps decoded 93-100% on recording 1 (Gray4 at 4-pixel cells 13,860
+  of 14,630) and on recording 2 Gray2 at 4-pixel cells 8,827 of 8,932 but Gray4 only 5,381 of
+  18,018 (the 29.98 fps camera beating against the display). RGB8 at 4-pixel cells decoded
+  nothing with `normal` anywhere. Laptop recordings 3 to 5 are limited by location (the corners
+  issue above). No margin recordings exist yet.
+- **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
+  decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
+  the encoder joins runs with one engine instance. The real-device check took 210-500 s per
+  recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
+  1, 255 s); a round-trip matrix row takes 3-14 s alone.
 
 ## 20. Sources
 
