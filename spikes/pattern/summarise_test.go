@@ -51,6 +51,11 @@ func TestCalRatios(t *testing.T) {
 	if hi, hiB, _, _, _ := calRatios(&c); hi != 900 || hiB != 5 {
 		t.Errorf("with bucket 7: largest %v (bucket %d), want 900 (5)", hi, hiB)
 	}
+	// Buckets 0-7 too small to judge that state at least one error: bucket 4 (500 bits, 100 errors
+	// where 20 are stated).
+	if e, st, n := unjudgedErrors(&c); e != 100 || st != 20 || n != 500 {
+		t.Errorf("errors in buckets not judged: %d where %.3g stated in %d bits, want 100, 20, 500", e, st, n)
+	}
 	// Errors in buckets 0-7 that state under one error: buckets 6 and 7.
 	if e, n := unstatedErrors(&c); e != 23 || n != 70000 {
 		t.Errorf("errors where under one is stated: %d in %d bits, want 23 in 70000", e, n)
