@@ -34,7 +34,7 @@ func excluded(rel string) bool {
 // it on the slowest runner (macos-26-intel) beside the end-to-end packages (DESIGN.md section 19);
 // the CI job's 70 minutes and the 30 minutes of non-race steps are the real guard.
 func coverArgs(tags string) []string {
-	return goTest(tags, "-coverprofile=PROFILE", "./...")
+	return goTest(tags, "-timeout=15m", "-coverprofile=PROFILE", "./...")
 }
 
 // cover runs the tests with coverage and enforces a minimum statement coverage per package.

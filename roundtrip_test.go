@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -178,6 +179,9 @@ func roundTrip(t *testing.T, r matrixRow, long bool) error {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !long {
+		c = c.Resize(shortCamera(c, r.w/4))
+	}
 	passes := 2.0
 	if r.preset == "harsh" {
 		passes = 3
@@ -215,6 +219,34 @@ func roundTrip(t *testing.T, r matrixRow, long bool) error {
 	t.Logf("F %d, %d captures, clean %.3f; encode %.1f s, film %.1f s, decode %.1f s", rep.Frames, dr.Captures, dr.CleanFraction,
 		tEnc.Seconds(), tFilm.Seconds(), tDec.Seconds())
 	return nil
+}
+
+// shortCamera is the camera size of a preset in the short matrix (designer's ruling on PR #47): the
+// smallest 16:9 size, in steps of 32 pixels, that gives the untilted code at least 5 camera pixels
+// per cell, the planning point of DESIGN.md section 11, and at least 1080p, never more than the
+// preset's own camera. The frame rate, timing and everything in camera pixels (blur, shake) are
+// the preset's, so a smaller camera makes the blur and shake larger in cells, not smaller; the
+// recorder keeps its quantiser step (channel.Config.Resize). The long version films with the
+// preset's own camera.
+func shortCamera(c channel.Config, gridX int) (w, h int) {
+	w = int(math.Ceil(5*float64(gridX)/c.Geometry.Fill/32)) * 32
+	w = min(max(w, 1920), c.Geometry.Width)
+	return w, w * 9 / 16
+}
+
+// TestShortCamera: the short matrix's cameras give at least 5 pixels per cell and never exceed
+// the preset's.
+func TestShortCamera(t *testing.T) {
+	for _, r := range matrix() {
+		c, err := channel.Preset(r.preset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, h := shortCamera(c, r.w/4)
+		if px := c.Geometry.Fill * float64(w) / float64(r.w/4); px < 5 && w < c.Geometry.Width || w > c.Geometry.Width || h%2 != 0 || w < 1920 && w < c.Geometry.Width {
+			t.Errorf("%s: %dx%d gives %.2f pixels per cell", r.name(), w, h, px)
+		}
+	}
 }
 
 // film records the looping frames, shown at fps, with the simulated camera c into a raw-frame file.
