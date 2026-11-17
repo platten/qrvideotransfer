@@ -58,3 +58,21 @@ func TestNeighbourChance(t *testing.T) {
 		}
 	}
 }
+
+// TestBestSegment: the best segment by a figure, among those with at least the given located share.
+func TestBestSegment(t *testing.T) {
+	segs := []segReport{
+		{Rate: 12, Cells: 1000, DeliveredLocated: 2.0, Located: 0.02}, // the best figure, but 2% located
+		{Rate: 12, Cells: 1000, DeliveredLocated: 1.5, Located: 0.9},
+		{Rate: 12, Cells: 1000, DeliveredLocated: 1.0, Located: 1},
+	}
+	if i := bestSegment(segs, netRate, 0.5); i != 1 {
+		t.Errorf("best with half located: %d, want 1", i)
+	}
+	if i := bestSegment(segs, netRate, 0); i != 0 {
+		t.Errorf("best with no floor: %d, want 0", i)
+	}
+	if i := bestSegment(segs[:1], netRate, 0.5); i != -1 {
+		t.Errorf("no segment qualifies: %d, want -1", i)
+	}
+}
