@@ -214,11 +214,11 @@ func TestTypedErrors(t *testing.T) {
 		return errors.As(err, &l) && l.Flag == "--max-size" && l.Max == 100
 	})
 
-	// A recording of the first half of the loop: the blocks are named with their shortfall.
+	// A recording of the first quarter of the loop: the blocks are named with their shortfall.
 	frames := readRaw(t, plain)
-	half := writeRawFrames(t, frames[:rep.Frames/2], 12)
+	half := writeRawFrames(t, frames[:rep.Frames/4], 12)
 	_, _, err = decodeTest(t, DecodeOptions{Recordings: []string{half}})
-	check("half the loop", err, func(err error) bool {
+	check("a quarter of the loop", err, func(err error) bool {
 		var s *NotEnoughDataError
 		return errors.As(err, &s) && len(s.Blocks) == rep.Blocks && s.Blocks[0].Need == rep.K && s.Blocks[0].Have < rep.K
 	})

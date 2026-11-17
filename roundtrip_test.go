@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/platten/qrvideotransfer/internal/channel"
+	"github.com/platten/qrvideotransfer/internal/prng"
 	"github.com/platten/qrvideotransfer/internal/video"
 )
 
@@ -27,7 +28,7 @@ func readFrames(t testing.TB, b video.Backend, path string) []*video.Frame {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	var out []*video.Frame
 	for {
 		f := &video.Frame{}
@@ -68,7 +69,7 @@ type matrixRow struct {
 	w, h, fps  int
 	mod        Modulation
 	protection Protection
-	always     bool // runs without QRVT_LONG_TESTS
+	always     bool // runs without QRVT_LONG_TESTS: one row per preset
 }
 
 var modName = map[Modulation]string{Gray2: "bw", Gray4: "gray4", RGB8: "color"}
@@ -97,35 +98,65 @@ func matrix() []matrixRow {
 	}
 	for _, m := range []Modulation{Gray2, Gray4} {
 		for _, p := range []Protection{Normal, Robust} {
-			rows = append(rows, matrixRow{"budget-android", 1280, 720, 12, m, p, false})
+			rows = append(rows, matrixRow{"budget-android", 1280, 720, 12, m, p, m == Gray4 && p == Normal})
 		}
 	}
 	return append(rows,
-		matrixRow{"iphone-hdr", 1920, 1080, 30, Gray4, Normal, false},
-		matrixRow{"harsh", 1280, 720, 12, Gray2, Robust, false})
+		matrixRow{"iphone-hdr", 1920, 1080, 30, Gray4, Normal, true},
+		matrixRow{"harsh", 1280, 720, 12, Gray2, Robust, true})
 }
+
+// prngReader is a repeatable source of random bytes for an encode's session and seed.
+type prngReader struct{ g prng.SplitMix64 }
+
+func (r *prngReader) Read(b []byte) (int, error) {
+	for i := range b {
+		b[i] = byte(r.g.Next())
+	}
+	return len(b), nil
+}
+
+// matrixSessions is the number of sessions each row is run with in the long version; the short
+// version runs the always rows with the first.
+const matrixSessions = 5
 
 // TestRoundTripMatrix is the SHA-256 round trip of DESIGN.md section 15 through the public API:
 // the files are encoded to an MP4 by the embedded engine, the video is decoded and filmed by the
 // simulated camera of the row's preset for two passes of the loop (three on `harsh`), with the
-// pure-Go recorder stand-in, and the recording is decoded. Without QRVT_LONG_TESTS=1 only the
-// rows marked always run.
+// pure-Go recorder stand-in (not x264 at the preset's bitrate), and the recording is decoded.
+// Each run uses a fixed session id and outer order seed, so that it can be repeated; the long
+// version (QRVT_LONG_TESTS=1) runs every row with matrixSessions sessions, the short version the
+// rows marked always with one.
 func TestRoundTripMatrix(t *testing.T) {
 	if raceEnabled {
 		t.Skip("the matrix is too slow under the race detector; the pipeline's tests cover its concurrency")
 	}
 	long := os.Getenv("QRVT_LONG_TESTS") == "1"
+	defer func() { testRandom = nil }()
 	for _, r := range matrix() {
 		t.Run(r.name(), func(t *testing.T) {
 			if !r.always && !long {
 				t.Skip("long test: QRVT_LONG_TESTS=1")
 			}
-			roundTrip(t, r)
+			sessions, failed := 1, 0
+			if long {
+				sessions = matrixSessions
+			}
+			for s := range sessions {
+				testRandom = &prngReader{prng.SplitMix64{State: uint64(1000 + s)}}
+				if err := roundTrip(t, r); err != nil {
+					failed++
+					t.Errorf("session %d: %v", s, err)
+				}
+			}
+			t.Logf("%d of %d sessions decoded", sessions-failed, sessions)
 		})
 	}
 }
 
-func roundTrip(t *testing.T, r matrixRow) {
+// roundTrip runs one row once and returns why the decode failed, if it did.
+func roundTrip(t *testing.T, r matrixRow) error {
+	t.Helper()
 	in, want := payloadDir(t, 20, 6000, 500)
 	video1 := filepath.Join(t.TempDir(), "code.mp4")
 	p := Profile{Width: r.w, Height: r.h, Cell: 4, FPS: r.fps, Modulation: r.mod, Protection: r.protection, ParityPercent: 20}
@@ -160,11 +191,12 @@ func roundTrip(t *testing.T, r matrixRow) {
 	out, dr, err := decodeTest(t, DecodeOptions{Recordings: []string{rec}})
 	tDec := time.Since(t0)
 	if err != nil {
-		t.Fatalf("decode (%d frames, %d captures): %v", rep.Frames, captures, err)
+		return fmt.Errorf("decode (%d frames, %d captures): %w", rep.Frames, captures, err)
 	}
 	sameFiles(t, out, want)
 	t.Logf("F %d, %d captures, clean %.3f; encode %.1f s, film %.1f s, decode %.1f s", rep.Frames, dr.Captures, dr.CleanFraction,
 		tEnc.Seconds(), tFilm.Seconds(), tDec.Seconds())
+	return nil
 }
 
 // film records the looping frames, shown at fps, with the simulated camera c into a raw-frame file.

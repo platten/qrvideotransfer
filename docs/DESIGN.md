@@ -838,6 +838,26 @@ For each capture:
 several recordings passed to one `decode` simply add up. With `--state-dir`, recovered shards and
 unresolved soft bits persist, and a later run reads only the new recording.
 
+**As built (M3, `internal/pipeline`).** Recordings are read one after another, each by one video
+decoder whose captures go to a pool of vision workers (one per core, each with its own detector and
+buffers); the workers return each capture's soft bits, descrambled and in codeword order, through a
+channel to the one goroutine that owns the accumulators, the shard store and the events, which
+applies them in capture order. A phase of the capture is credited to the header's frame with that
+phase, else to the frame one step after or before the first header's (wrapping at the seam); two
+steps away is skipped (section 7, rule 1 as the S2 analysis did it). The decode locks onto the
+first located capture's session, grid, modulation, inner code and frame count; other captures are
+counted and ignored (SECURITY.md T2). Soft bits are summed in 8 bits, saturating; a capture of
+the frame the previous capture of the same recording also credited adds half (rule 7). Codeword
+0 of every frame is summed into one descriptor accumulator, tried after each capture until it
+decodes and validates; then the plan and the shard store are made. A frame is attempted once two
+captures have passed without it, and at each recording's end (rule 11). Reading stops as soon as
+every block holds K shards. Beyond `MaxSoftBytes` (256 MB) the frame with the least mean confidence
+loses its soft bits first. The stream is then reconstructed block by block, its hash checked, and
+`internal/payload` verifies and unpacks it. `--state-dir` is not built yet (`ErrNotImplemented`;
+M6). The encoder renders runs of an even number of frames on one worker each, every run to its own
+H.264 elementary stream, joined by `Concat`; parity shards are kept in a file of their own beside
+the spooled stream.
+
 ## 11. Expected performance
 
 Net bytes per frame are fixed by the format: `(C - 1) x shard size x K / (K + M)`, where C is codewords

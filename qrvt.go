@@ -6,16 +6,134 @@
 // callback, and cancellation is by context. See docs/DESIGN.md section 14.
 package qrvt
 
-import "context"
+import (
+	"context"
+	"crypto/ed25519"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"time"
 
-// Encode packs the inputs named in o and writes the code video.
-func Encode(ctx context.Context, o EncodeOptions) (*EncodeReport, error) {
-	return nil, ErrNotImplemented
+	"github.com/platten/qrvideotransfer/internal/payload"
+	"github.com/platten/qrvideotransfer/internal/pipeline"
+)
+
+// Profile defaults: a zero field of EncodeOptions.Profile takes these (DESIGN.md section 13).
+const (
+	defaultWidth, defaultHeight = 1920, 1080
+	defaultCell                 = 4
+	defaultFPS                  = 12
+	defaultParity               = 20
+)
+
+// withDefaults fills the zero fields of p.
+func (p Profile) withDefaults() Profile {
+	if p.Width == 0 && p.Height == 0 {
+		p.Width, p.Height = defaultWidth, defaultHeight
+	}
+	if p.Cell == 0 {
+		p.Cell = defaultCell
+	}
+	if p.FPS == 0 {
+		p.FPS = defaultFPS
+	}
+	if p.Modulation == 0 {
+		p.Modulation = Gray4
+	}
+	if p.Protection == 0 {
+		p.Protection = Normal
+	}
+	if p.ParityPercent == 0 {
+		p.ParityPercent = defaultParity
+	}
+	return p
 }
 
-// Decode recovers the files carried by one or more recordings of a code video.
+// Encode packs the inputs named in o and writes the code video. With DryRun it packs and plans
+// only, writes no video, and reports the video's length, an estimate of its size and the loop's
+// duration.
+func Encode(ctx context.Context, o EncodeOptions) (*EncodeReport, error) {
+	p := o.Profile.withDefaults()
+	if p.Modulation == Gray8 {
+		return nil, fmt.Errorf("%w: eight greys in a 10-bit video (--hdr)", ErrNotImplemented)
+	}
+	var key ed25519.PrivateKey
+	if o.SignKey != nil {
+		k, err := payload.ParsePrivateKey(o.SignKey)
+		if err != nil {
+			return nil, err
+		}
+		key = k
+	}
+	be, err := backend(o.Backend, false)
+	if err != nil {
+		return nil, err
+	}
+	r, err := pipeline.Encode(ctx, pipeline.EncodeConfig{Inputs: o.Inputs, Output: o.Output, Width: p.Width, Height: p.Height,
+		Cell: p.Cell, FPS: p.FPS, Modulation: uint8(p.Modulation), Inner: uint8(p.Protection), Parity: p.ParityPercent,
+		Compression: payload.Compression(o.Compression), Passphrase: o.Passphrase, SignKey: key, DryRun: o.DryRun,
+		Backend: be, Workers: o.Workers, TempDir: o.TempDir, Progress: progress(o.Progress), Random: testRandom})
+	if err != nil {
+		return nil, convertError(err)
+	}
+	rep := &EncodeReport{Output: o.Output, Profile: p, Session: r.Session, Files: r.Files, ArchiveLen: r.ArchiveLen,
+		StreamLen: r.StreamLen, Blocks: r.Blocks, K: r.K, M: r.M, Frames: r.Frames,
+		Duration: time.Duration(int64(r.Frames) * int64(time.Second) / int64(p.FPS)), VideoBytes: r.VideoBytes,
+		Warnings: convertWarnings(r.Warnings)}
+	if o.DryRun {
+		rep.Output = ""
+	}
+	return rep, nil
+}
+
+// Decode recovers the files carried by one or more recordings of a code video. Recordings add up:
+// soft bits and recovered shards are keyed by session and frame index. A decode that lacks data
+// returns a *NotEnoughDataError naming the short blocks (none when not even the stream descriptor
+// could be read) and writes nothing.
 func Decode(ctx context.Context, o DecodeOptions) (*DecodeReport, error) {
-	return nil, ErrNotImplemented
+	if o.StateDir != "" {
+		return nil, fmt.Errorf("%w: resuming with a state folder (--state-dir)", ErrNotImplemented)
+	}
+	if o.OutputDir == "" {
+		return nil, errors.New("qrvt: no output folder")
+	}
+	var keys []ed25519.PublicKey
+	for _, b := range o.VerifyKeys {
+		k, err := payload.ParsePublicKey(b)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	be, err := backend(o.Backend, o.UnsandboxedHEVC)
+	if err != nil {
+		return nil, err
+	}
+	r, err := pipeline.Decode(ctx, pipeline.DecodeConfig{Recordings: o.Recordings, Backend: be, Workers: o.Workers,
+		Unpack: payload.UnpackOptions{OutputDir: o.OutputDir, Passphrase: o.Passphrase, VerifyKeys: keys, MaxSize: o.MaxSize,
+			Overwrite: o.Overwrite, MaxEntries: int64(o.MaxEntries)},
+		Progress: progress(o.Progress)})
+	if err != nil {
+		return nil, convertError(err)
+	}
+	u := r.Unpacked
+	rep := &DecodeReport{OutputDir: o.OutputDir, Session: r.Session, Files: u.Files, Bytes: u.Bytes, Captures: r.Stats.Captures,
+		FramesSeen: r.Stats.FramesSeen, FramesTotal: r.Stats.FramesTotal, CleanFraction: r.Stats.CleanFraction,
+		Encrypted: u.Header.Encrypted, Signed: u.Header.Signed, Warnings: convertWarnings(r.Warnings)}
+	if u.Signer != nil {
+		rep.SignerKey = []byte(u.Signer)
+	}
+	if o.Report != "" {
+		b, err := json.MarshalIndent(rep, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(o.Report, append(b, '\n'), 0o600); err != nil {
+			return nil, err
+		}
+	}
+	return rep, nil
 }
 
 // CalibrationVideo writes a test video that steps through modes, densities and display rates.

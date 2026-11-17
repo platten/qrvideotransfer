@@ -18,9 +18,6 @@ import (
 	"github.com/platten/qrvideotransfer/internal/video"
 )
 
-// longTests reports whether the long versions of the tests run (QRVT_LONG_TESTS=1).
-func longTests() bool { return os.Getenv("QRVT_LONG_TESTS") == "1" }
-
 // writeInputs writes a folder of pseudo-random files of the given sizes (incompressible, so that
 // the stream length follows the sizes) and returns it with the SHA-256 of each file by its path
 // relative to the folder's parent, as a decode recreates it.
@@ -91,6 +88,20 @@ func filesUnder(t testing.TB, dir string) []string {
 	return out
 }
 
+// prngReader is a repeatable source of random bytes for an encode's session and seed.
+type prngReader struct{ g prng.SplitMix64 }
+
+func (r *prngReader) Read(b []byte) (int, error) {
+	for i := range b {
+		b[i] = byte(r.g.Next())
+	}
+	return len(b), nil
+}
+
+// encodes counts encodeRaw's calls, so that each encode of a test run has its own repeatable
+// session.
+var encodes uint64
+
 // encodeRaw encodes inputs as a raw-frame video (the test backend) and returns its path.
 func encodeRaw(t testing.TB, c EncodeConfig) (string, *EncodeResult) {
 	t.Helper()
@@ -102,6 +113,10 @@ func encodeRaw(t testing.TB, c EncodeConfig) (string, *EncodeResult) {
 	}
 	if c.TempDir == "" {
 		c.TempDir = t.TempDir()
+	}
+	if c.Random == nil {
+		encodes++
+		c.Random = &prngReader{prng.SplitMix64{State: 0x5e55 + encodes}}
 	}
 	res, err := Encode(context.Background(), c)
 	if err != nil {
@@ -128,7 +143,7 @@ func readFrames(t testing.TB, b video.Backend, path string) ([]*video.Frame, vid
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	var out []*video.Frame
 	for {
 		f := &video.Frame{}

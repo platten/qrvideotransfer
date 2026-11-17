@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/platten/qrvideotransfer/internal/payload"
 	"github.com/platten/qrvideotransfer/internal/video"
@@ -27,6 +28,9 @@ type EncodeConfig struct {
 	Workers       int    // 0: GOMAXPROCS
 	TempDir       string // "": the system temporary directory
 	Progress      func(Event)
+	// Random supplies the session id and the outer order seed; nil means crypto/rand. Tests fix
+	// it so that a run can be repeated.
+	Random io.Reader
 }
 
 // EncodeResult describes a finished or planned encode.
