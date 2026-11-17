@@ -136,7 +136,7 @@ jobs:
         run: >-
           go test -count=1 -v
           -run '^(TestDetectThreeHostile|TestDetectThreeHostile4K|TestDetectHostileGrid|TestDetectHostileGrid4K)$'
-          ./internal/vision/ | grep -E 'real-code neighbours|^(--- |ok|FAIL|panic)'
+          ./internal/vision/ | grep -E 'real-code neighbours|_test\.go:[0-9]+:|^(--- |ok|FAIL|panic)'
         env:
           CGO_ENABLED: "0"
 

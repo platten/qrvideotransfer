@@ -68,9 +68,9 @@ codeword. The recording is decoded by the system `ffmpeg`, the native backend me
 user made. Nothing from the recording is written: the output names it only by `-label`.
 
 ```sh
-go run ./spikes/pattern -analyse <recording> -patterns recordings/patterns \
-    -label "Phone A, recording 1" -json rec1.json -workers 14
-go run ./spikes/pattern -summarise rec1.json rec2.json ...   # the S2 bars and residuals
+go run ./spikes/pattern -analyse recordings/s2/<file> -patterns recordings/patterns \
+    -label "Phone A, recording 1" -json recordings/s2/rec1.json -workers 14
+go run ./spikes/pattern -summarise recordings/s2/rec1.json recordings/s2/rec2.json ...   # bars, residuals
 ```
 
 For each segment (display rate, cell size, modulation) it reports:
