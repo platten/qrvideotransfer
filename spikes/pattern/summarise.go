@@ -71,6 +71,21 @@ func calRatios(c *calTable) (hi float64, hiB int, lo float64, loB int, ok bool) 
 	return hi, hiB, lo, loB, ok
 }
 
+// bestSegment returns the index of the segment with the largest figure f among those with at least
+// minLocated of their captures located, or -1.
+func bestSegment(segs []segReport, f func(*segReport) float64, minLocated float64) int {
+	best := -1
+	for i := range segs {
+		if segs[i].Located < minLocated {
+			continue
+		}
+		if best < 0 || f(&segs[i]) > f(&segs[best]) {
+			best = i
+		}
+	}
+	return best
+}
+
 // confidentErrors returns the error rate among the bits of the two most confident buckets (|s| of
 // 102 and more), where the stated rate is below 1e-11: any error there is a confident one.
 func confidentErrors(c *calTable) float64 {
@@ -128,27 +143,22 @@ func summariseFiles(paths []string, w io.Writer) error {
 		}
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Bar 3: estimated net rate against the recording's bitrate, best segment per recording")
+	fmt.Fprintln(w, "Bar 3: estimated net rate against the recording's bitrate, best segment per recording (under located captures: among segments at least half located)")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Recording | Mbit/s | Rate | Cell | Mod | Delivered (under located captures) | Net Mbit/s | Share | Delivered (every frame shown) | Net Mbit/s | Share |")
-	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+	fmt.Fprintln(w, "| Recording | Mbit/s | Best under located captures | Delivered | Net Mbit/s | Share | Best over every frame shown | Delivered | Net Mbit/s | Share |")
+	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 	for _, r := range recs {
-		best, bestAll := -1, -1
-		for i := range r.Segments {
-			s := &r.Segments[i]
-			if best < 0 || netRate(s) > netRate(&r.Segments[best]) {
-				best = i
-			}
-			if bestAll < 0 || netRateAll(s) > netRateAll(&r.Segments[bestAll]) {
-				bestAll = i
-			}
-		}
-		if best < 0 {
+		best, bestAll := bestSegment(r.Segments, netRate, 0.5), bestSegment(r.Segments, netRateAll, 0)
+		if bestAll < 0 {
 			continue
 		}
-		s, a := &r.Segments[best], &r.Segments[bestAll]
-		fmt.Fprintf(w, "| %s | %.1f | %d | %d | %s | %.3f | %.2f | %.1f%% | %d/%d/%s: %.3f | %.2f | %.1f%% |\n", r.Label, r.Mbps,
-			s.Rate, s.Cell, modNames[s.Modulation], s.DeliveredLocated, netRate(s), 100*netRate(s)/r.Mbps,
+		loc := "none at least half located | | | "
+		if best >= 0 {
+			s := &r.Segments[best]
+			loc = fmt.Sprintf("%d fps, %d px, %s | %.3f | %.2f | %.1f%%", s.Rate, s.Cell, modNames[s.Modulation], s.DeliveredLocated, netRate(s), 100*netRate(s)/r.Mbps)
+		}
+		a := &r.Segments[bestAll]
+		fmt.Fprintf(w, "| %s | %.1f | %s | %d fps, %d px, %s | %.3f | %.2f | %.1f%% |\n", r.Label, r.Mbps, loc,
 			a.Rate, a.Cell, modNames[a.Modulation], a.DeliveredAll, netRateAll(a), 100*netRateAll(a)/r.Mbps)
 	}
 	fmt.Fprintln(w)
