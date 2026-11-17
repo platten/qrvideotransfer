@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,11 +54,38 @@ func TestDiskSpaceLimit(t *testing.T) {
 			t.Errorf("temporary files left: %v", fs)
 		}
 	}
-	diskFree = func(string) (int64, error) { return 0, errInjected }
-	_, err := Decode(context.Background(), DecodeConfig{Recordings: []string{path}, Backend: video.NewRaw(), TempDir: t.TempDir(),
-		Unpack: payload.UnpackOptions{OutputDir: filepath.Join(t.TempDir(), "out")}})
-	if !errors.Is(err, errInjected) {
-		t.Errorf("failed query: %v", err)
+	// A failed query, at the store and at the stream file, and the space gone by the second check:
+	// each fails closed, with nothing left behind.
+	for name, free := range map[string]func(call int) (int64, error){
+		"query fails": func(int) (int64, error) { return 0, errInjected },
+		"query fails at the stream": func(call int) (int64, error) {
+			if call == 1 {
+				return 1 << 40, nil
+			}
+			return 0, errInjected
+		},
+		"space gone before the stream": func(call int) (int64, error) {
+			if call == 1 {
+				return 1 << 40, nil
+			}
+			return ReserveBytes, nil
+		},
+	} {
+		calls := 0
+		diskFree = func(string) (int64, error) { calls++; return free(calls) }
+		tmp, out := t.TempDir(), filepath.Join(t.TempDir(), "out")
+		_, err := Decode(context.Background(), DecodeConfig{Recordings: []string{path}, Backend: video.NewRaw(), TempDir: tmp,
+			Unpack: payload.UnpackOptions{OutputDir: out}})
+		var lim *payload.LimitError
+		if !errors.Is(err, errInjected) && !errors.As(err, &lim) {
+			t.Errorf("%s: %v", name, err)
+		}
+		if name != "query fails" && calls != 2 {
+			t.Errorf("%s: %d checks, want 2", name, calls)
+		}
+		if fs := append(filesUnder(t, tmp), filesUnder(t, out)...); len(fs) != 0 {
+			t.Errorf("%s: files left: %v", name, fs)
+		}
 	}
 }
 
@@ -72,13 +100,26 @@ func TestReorderBounded(t *testing.T) {
 		long = append(long, frames...)
 	}
 	rec := writeRaw(t, long, info.FPSNum/info.FPSDen)
+	// Capture 0 is held until 20 later captures have been processed, which unbounded reading reaches
+	// at once, or until no later capture has been processed for 2 s, which is how bounded reading
+	// shows: it reads at most workers+2 captures ahead of the one held.
+	const ahead = 20
+	var done atomic.Int64
 	defer func() { processCapture = (*captureWorker).process }()
 	processCapture = func(w *captureWorker, f *video.Frame, i int) captureResult {
-		if i == 0 {
-			time.Sleep(300 * time.Millisecond)
-			return captureResult{index: i} // not located: the decode needs the later captures
+		if i != 0 {
+			r := w.process(f, i)
+			done.Add(1)
+			return r
 		}
-		return w.process(f, i)
+		last, since := done.Load(), time.Now()
+		for done.Load() < ahead && time.Since(since) < 2*time.Second {
+			time.Sleep(10 * time.Millisecond)
+			if n := done.Load(); n != last {
+				last, since = n, time.Now()
+			}
+		}
+		return captureResult{index: i} // not located: the decode needs the later captures
 	}
 	const workers = 4
 	out := filepath.Join(t.TempDir(), "out")

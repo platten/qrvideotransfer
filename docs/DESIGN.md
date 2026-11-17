@@ -1961,7 +1961,7 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   frame's 301 ms is the figure to beat.
 - **Open defect, blocks the M3 exit (designer's ruling, 2026-11-17): `budget-android` 720p12
   Gray4 `normal`.** It decodes in 1 of 5 repeatable sessions and in 1 of 8 random ones (the
-  designer's count of a further run: 0 of 4); the raw bit error rate is about 0.10 per capture,
+  independent review's count: 0 of 4; pooled over random sessions, 1 of 12); the raw bit error rate is about 0.10 per capture,
   and the errors repeat across captures of a frame. Not diagnosed in the first M3 pull request;
   the row stays asserted in the long run, unchanged. Details in the next entry.
 - **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
@@ -2010,7 +2010,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
   the encoder joins runs with one engine instance. Eviction rescans every frame's soft bits each
   time the cap is exceeded, O(frames x C x sent bits) per eviction. Per-frame bookkeeping is
-  outside the 256 MB cap: each frame seen (at most F, and at most two per capture) keeps C
+  outside the 256 MB cap: each frame seen (at most F; a capture can credit up to four frames,
+  three from one header's phases and a fourth from a second header) keeps C
   `done` flags and C slice headers, about 25 C bytes: 3.8 KB at C = 151 (250 MB at F = 67,112),
   and about 200 KB at the largest grid's C, so a long recording claiming that grid could hold
   gigabytes. Bringing it under the cap is the next M3 piece. The real-device check took 210-500 s per
