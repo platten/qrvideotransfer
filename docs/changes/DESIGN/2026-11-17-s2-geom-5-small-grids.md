@@ -1,0 +1,1 @@
+S2 geometry fix: section 19 opens an issue for small grids: fewer than eight anchors in the layout (53 x 30, 80 x 60, 106 x 60 and others) are never located, even on a perfect capture; the fix is a denser anchor lattice, a FORMAT change in its own pull request; encoding does not refuse them

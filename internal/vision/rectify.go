@@ -26,6 +26,14 @@ const (
 	// anchors, within rectifyFinderKeep cells, to stay in the global model's fit.
 	rectifyAnchorsOnly = 8
 	rectifyFinderKeep  = 0.25
+	// rectifyRefitFirst is the number of located anchors at which rectifyLocate first refits the
+	// global model; it refits again each time the number doubles. It is geomLensK2Pairs, the
+	// fewest from which the model's k2 is fitted.
+	rectifyRefitFirst = geomLensK2Pairs
+	// rectifyConsistent is how far, in cells, a saddle found from its neighbours on the lattice
+	// may lie from the global model's prediction: twice the saddle search radius, the reach of a
+	// local prediction plus the search around it.
+	rectifyConsistent = 2 * rectifySearch
 )
 
 // MeshFitter is the Rectifier of docs/DESIGN.md section 10, step 3. The zero value is ready to use
@@ -106,7 +114,7 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 		}
 		if len(s) < rectifyAnchorsOnly {
 			s, d = append(s, src...), append(d, dst...)
-		} else if m0, _, ok := geomFitModelK1(s, d, v.w, v.h); ok {
+		} else if m0, _, ok := geomFitModelLens(s, d, v.w, v.h); ok {
 			for k, c := range src {
 				ex := m0.at(c.add(gpt{0.5, 0})).sub(m0.at(c.sub(gpt{0.5, 0})))
 				ey := m0.at(c.add(gpt{0, 0.5})).sub(m0.at(c.sub(gpt{0, 0.5})))
@@ -117,7 +125,7 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 			}
 		}
 		if len(s) >= 8 {
-			if m, _, ok := geomFitModelK1(s, d, v.w, v.h); ok {
+			if m, _, ok := geomFitModelLens(s, d, v.w, v.h); ok {
 				model = m
 			}
 		}
@@ -137,7 +145,29 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 	if found == 0 || 4*found < inside {
 		return nil, nil, fmt.Errorf("vision: %d of %d anchors inside the capture located, under a quarter", found, inside)
 	}
-	mesh := rectifyMesh(&model, l, cells, obs)
+	// The finders that agree with the anchors as the confirmation requires (within
+	// confirmFinderTolModule modules of where the anchors alone put them) are measured points of the
+	// mesh too: the cells outside the first and the last anchor column and row are then
+	// interpolated between finder and anchor rather than extrapolated.
+	var measured [][2]gpt
+	var s, d []gpt
+	for i := range obs {
+		if obs[i].Found {
+			s, d = append(s, cells[i]), append(d, gpt(obs[i].Corner))
+		}
+	}
+	if m0, _, ok := geomFitModelLens(s, d, v.w, v.h); ok && len(s) >= rectifyAnchorsOnly {
+		uy := c0 / 4.5 // cells per finder module
+		for k, c := range src {
+			ex := m0.at(c.add(gpt{0.5, 0})).sub(m0.at(c.sub(gpt{0.5, 0})))
+			ey := m0.at(c.add(gpt{0, 0.5})).sub(m0.at(c.sub(gpt{0, 0.5})))
+			cell := math.Sqrt(math.Abs(ex.cross(ey)))
+			if m0.at(c).sub(dst[k]).norm() <= confirmFinderTolModule*uy*cell {
+				measured = append(measured, [2]gpt{c, dst[k]})
+			}
+		}
+	}
+	mesh := rectifyMesh(&model, l, cells, obs, measured)
 	for i := range obs {
 		if !obs[i].Found {
 			obs[i].Corner = mesh.At(cells[i].X, cells[i].Y)
@@ -147,9 +177,19 @@ func (MeshFitter) Fit(f *video.Frame, q Quad, l *frame.Layout) (*Mesh, []AnchorO
 	return mesh, obs, nil
 }
 
-// rectifyLocate locates the anchors' saddles, nearest the finders first. With giveUp > 0 it stops
-// once giveUp anchors have been tried and fewer than eight located: the quad is then not a code's,
-// and the rest of a large hostile grid is not searched.
+// rectifyLocate locates the anchors' saddles, nearest the finders first, and refits the global
+// model to the located anchors as they accumulate (rectifyRefitFirst, then each time their number
+// doubles), so that the model is fitted over most of the code by the time the anchors far from
+// the finders are reached. With giveUp > 0 it stops once giveUp anchors have been tried and fewer
+// than eight located: the quad is then not a code's, and the rest of a large hostile grid is not
+// searched.
+//
+// Each saddle is predicted from its located neighbours on the anchor lattice where it has any
+// (rectifyLocal): a local continuation of the lattice does not depend on the shape of the lens
+// distortion, which the global model may not yet have caught near the code's edges. Without
+// located neighbours it is predicted by the model plus the displacement of the anchors located
+// near it. A saddle found from a local prediction must also lie within rectifyConsistent cells of
+// the global model's prediction.
 func rectifyLocate(v *geomLuma, model *geomModel, finders, cells []gpt, obs []AnchorObs, minContrast float32, giveUp int) {
 	order := make([]int, len(cells))
 	near := make([]float64, len(cells))
@@ -169,35 +209,108 @@ func rectifyLocate(v *geomLuma, model *geomModel, finders, cells []gpt, obs []An
 		}
 		return 0
 	})
+	lat := newRectifyLattice(cells)
 	var located []int
+	refit := rectifyRefitFirst
 	for tried, i := range order {
 		if giveUp > 0 && tried >= giveUp && len(located) < 8 {
 			return
 		}
 		c := cells[i]
-		pred := model.at(c)
-		// Displacement of the located anchors within two lattice steps, weighted by inverse distance.
-		var sum gpt
-		wsum := 0.0
-		for _, j := range located {
-			d := cells[j].sub(c).norm()
-			if d > 2*rectifyLatticeX {
-				continue
+		global := model.at(c)
+		pred, local := lat.predict(i, obs)
+		if !local {
+			// Displacement of the located anchors within two lattice steps, weighted by inverse
+			// distance.
+			pred = global
+			var sum gpt
+			wsum := 0.0
+			for _, j := range located {
+				d := cells[j].sub(c).norm()
+				if d > 2*rectifyLatticeX {
+					continue
+				}
+				w := 1 / (d*d + 1)
+				sum = sum.add(gpt(obs[j].Corner).sub(model.at(cells[j])).mul(w))
+				wsum += w
 			}
-			w := 1 / (d*d + 1)
-			sum = sum.add(gpt(obs[j].Corner).sub(model.at(cells[j])).mul(w))
-			wsum += w
-		}
-		if wsum > 0 {
-			pred = pred.add(sum.mul(1 / wsum))
+			if wsum > 0 {
+				pred = pred.add(sum.mul(1 / wsum))
+			}
 		}
 		ex := model.at(c.add(gpt{0.5, 0})).sub(model.at(c.sub(gpt{0.5, 0})))
 		ey := model.at(c.add(gpt{0, 0.5})).sub(model.at(c.sub(gpt{0, 0.5})))
-		if p, ok := rectifySaddle(v, pred, ex, ey, minContrast); ok {
-			obs[i].Found, obs[i].Corner = true, Point(p)
-			located = append(located, i)
+		p, ok := rectifySaddle(v, pred, ex, ey, minContrast)
+		if ok && local && p.sub(global).norm() > rectifyConsistent*math.Sqrt(math.Abs(ex.cross(ey))) {
+			ok = false
+		}
+		if !ok {
+			continue
+		}
+		obs[i].Found, obs[i].Corner = true, Point(p)
+		located = append(located, i)
+		if len(located) == refit {
+			refit *= 2
+			var s, d []gpt
+			for _, j := range located {
+				s, d = append(s, cells[j]), append(d, gpt(obs[j].Corner))
+			}
+			if m, _, ok := geomFitModelLens(s, d, v.w, v.h); ok {
+				*model = m
+			}
 		}
 	}
+}
+
+// rectifyLattice indexes the anchors by their place on the anchor lattice (FORMAT.md section 5.2:
+// every rectifyLatticeX columns from column 12, every rectifyLatticeY rows from row 13).
+type rectifyLattice struct {
+	at  map[[2]int]int // lattice place to anchor index
+	pos [][2]int       // anchor index to lattice place
+}
+
+func newRectifyLattice(cells []gpt) *rectifyLattice {
+	l := &rectifyLattice{at: make(map[[2]int]int, len(cells)), pos: make([][2]int, len(cells))}
+	for i, c := range cells {
+		k := [2]int{int(math.Round((c.X - 14) / rectifyLatticeX)), int(math.Round((c.Y - 15) / rectifyLatticeY))}
+		l.pos[i], l.at[k] = k, i
+	}
+	return l
+}
+
+// predict returns the mean of the local continuations of the lattice at anchor i from its located
+// neighbours: 2 P(k - d) - P(k - 2d) along each row and column direction d, and the parallelogram
+// P(k + dx) + P(k + dy) - P(k + dx + dy) for each diagonal. It reports false when none applies.
+func (l *rectifyLattice) predict(i int, obs []AnchorObs) (gpt, bool) {
+	k := l.pos[i]
+	found := func(dx, dy int) (gpt, bool) {
+		j, ok := l.at[[2]int{k[0] + dx, k[1] + dy}]
+		if !ok || !obs[j].Found {
+			return gpt{}, false
+		}
+		return gpt(obs[j].Corner), true
+	}
+	var sum gpt
+	n := 0
+	for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		a, ok1 := found(d[0], d[1])
+		b, ok2 := found(2*d[0], 2*d[1])
+		if ok1 && ok2 {
+			sum, n = sum.add(a.mul(2).sub(b)), n+1
+		}
+	}
+	for _, d := range [4][2]int{{1, 1}, {1, -1}, {-1, 1}, {-1, -1}} {
+		a, ok1 := found(d[0], 0)
+		b, ok2 := found(0, d[1])
+		c, ok3 := found(d[0], d[1])
+		if ok1 && ok2 && ok3 {
+			sum, n = sum.add(a.add(b).sub(c)), n+1
+		}
+	}
+	if n == 0 {
+		return gpt{}, false
+	}
+	return sum.mul(1 / float64(n)), true
 }
 
 // rectifyResponse returns the saddle response at c, with ex and ey one cell along the grid: the
@@ -346,7 +459,7 @@ func geomMedian(xs []float64) float64 {
 // rectifyMesh builds the mesh: the model plus the located corners' residuals, filled in over the
 // anchor lattice (one ring wider than the grid) by repeated averaging of neighbours, and
 // interpolated bilinearly between lattice points.
-func rectifyMesh(model *geomModel, l *frame.Layout, cells []gpt, obs []AnchorObs) *Mesh {
+func rectifyMesh(model *geomModel, l *frame.Layout, cells []gpt, obs []AnchorObs, finders [][2]gpt) *Mesh {
 	gx, gy := l.GridX(), l.GridY()
 	// Lattice point (a, b) is at cell (14 + 32 (a - 1), 15 + 30 (b - 1)).
 	la, lb := (gx-14)/rectifyLatticeX+3, (gy-15)/rectifyLatticeY+3
@@ -358,6 +471,35 @@ func rectifyMesh(model *geomModel, l *frame.Layout, cells []gpt, obs []AnchorObs
 		}
 		a, b := (int(c.X)-14)/rectifyLatticeX+1, (int(c.Y)-15)/rectifyLatticeY+1
 		res[b*la+a], known[b*la+a] = gpt(obs[i].Corner).sub(model.at(c)), true
+	}
+	// A measured finder sets the unknown nodes of the lattice square that holds it, together, so
+	// that the square's bilinear interpolation gives the finder's residual at its centre.
+	for _, f := range finders {
+		u, v := (f[0].X-14)/rectifyLatticeX+1, (f[0].Y-15)/rectifyLatticeY+1
+		a, b := int(math.Floor(u)), int(math.Floor(v))
+		if a < 0 || b < 0 || a+1 >= la || b+1 >= lb {
+			continue
+		}
+		fu, fv := u-float64(a), v-float64(b)
+		ks := [4]int{b*la + a, b*la + a + 1, (b+1)*la + a, (b+1)*la + a + 1}
+		ws := [4]float64{(1 - fu) * (1 - fv), fu * (1 - fv), (1 - fu) * fv, fu * fv}
+		want := f[1].sub(model.at(f[0]))
+		free := 0.0
+		for j, k := range ks {
+			if known[k] {
+				want = want.sub(res[k].mul(ws[j]))
+			} else {
+				free += ws[j]
+			}
+		}
+		if !(free > 0.05) {
+			continue // the square's known corners already decide its interpolation there
+		}
+		for _, k := range ks {
+			if !known[k] {
+				res[k], known[k] = want.mul(1/free), true
+			}
+		}
 	}
 	next := make([]gpt, len(res))
 	for range 4 * (la + lb) {

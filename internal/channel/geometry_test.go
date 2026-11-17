@@ -80,6 +80,39 @@ func TestDistortion(t *testing.T) {
 	}
 }
 
+// Moustache distortion (k1 and k2 of opposite signs): distort inverts undistort, and at the frame's
+// edge (r = 1) a pinhole point moves by k1 + k2.
+func TestDistortionK2(t *testing.T) {
+	cam := &camera{w: 400, h: 300, cx: 200, cy: 150, norm: 200, k1: -0.05, k2: 0.05}
+	for _, p := range [][2]float64{{0, 0}, {399, 299}, {200, 150}, {250, 100}, {60, 140}} {
+		xu, yu := cam.undistort(p[0], p[1])
+		x, y := cam.distort(xu, yu)
+		if !near(x, p[0], 1e-9) || !near(y, p[1], 1e-9) {
+			t.Errorf("round trip of %v gives %v, %v", p, x, y)
+		}
+	}
+	if x, _ := cam.undistort(400, 150); !near(x, 200+200*(1-0.05+0.05), 1e-12) {
+		t.Errorf("edge maps to %v", x)
+	}
+	if x, _ := cam.undistort(300, 150); !near(x, 200+100*(1-0.05/4+0.05/16), 1e-12) {
+		t.Errorf("half radius maps to %v", x)
+	}
+}
+
+// A folding lens (k1 = k2 = -0.1, which validate refuses): the distorted radius peaks at r = 1.07
+// (a pinhole radius of about 0.81), so a pinhole point at 1.2 has no preimage. distort stops its
+// Newton steps there and still returns a finite point; inside the fold it inverts undistort.
+func TestDistortionFold(t *testing.T) {
+	cam := &camera{w: 400, h: 300, cx: 200, cy: 150, norm: 200, k1: -0.1, k2: -0.1}
+	if x, y := cam.distort(200+1.2*200, 150); math.IsNaN(x) || math.IsInf(x, 0) || math.IsNaN(y) || math.IsInf(y, 0) {
+		t.Errorf("beyond the fold: %v, %v", x, y)
+	}
+	xu, yu := cam.undistort(300, 170)
+	if x, y := cam.distort(xu, yu); !near(x, 300, 1e-9) || !near(y, 170, 1e-9) {
+		t.Errorf("inside the fold, round trip gives %v, %v", x, y)
+	}
+}
+
 func TestShakeTrack(t *testing.T) {
 	g := GeometryParams{Width: 1000, Shake: 3}
 	tr := shake(g, 50, time.Second, 20000, 4)

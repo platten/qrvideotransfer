@@ -119,37 +119,42 @@ func geomSolve8(a *[8][9]float64) ([8]float64, bool) {
 
 // geomLens is radial distortion about the capture's centre: a capture point p, relative to the
 // centre in units of half the capture's width, is seen by an ideal pinhole camera at
-// p (1 + k1 |p|^2). Positive k1 is barrel.
+// p (1 + k1 |p|^2 + k2 |p|^4). Positive k1 is barrel; k1 and k2 of opposite signs give the
+// "moustache" distortion that phone lenses keep after the camera's own correction.
 type geomLens struct {
-	cx, cy, unit, k1 float64
+	cx, cy, unit, k1, k2 float64
 }
 
-func geomNewLens(w, h int, k1 float64) geomLens {
-	return geomLens{cx: float64(w) / 2, cy: float64(h) / 2, unit: float64(w) / 2, k1: k1}
+func geomNewLens(w, h int, k1, k2 float64) geomLens {
+	return geomLens{cx: float64(w) / 2, cy: float64(h) / 2, unit: float64(w) / 2, k1: k1, k2: k2}
 }
 
 // undistort maps a capture point to the pinhole point.
 func (l geomLens) undistort(p gpt) gpt {
 	d := gpt{p.X - l.cx, p.Y - l.cy}
 	r2 := d.dot(d) / (l.unit * l.unit)
-	return d.mul(1 + l.k1*r2).add(gpt{l.cx, l.cy})
+	return d.mul(1 + l.k1*r2 + l.k2*r2*r2).add(gpt{l.cx, l.cy})
 }
 
 // distort maps a pinhole point to the capture point, inverting undistort by Newton's method.
 func (l geomLens) distort(p gpt) gpt {
 	d := gpt{p.X - l.cx, p.Y - l.cy}
 	ru := d.norm() / l.unit
-	if l.k1 == 0 || !(ru > 0) {
+	if (l.k1 == 0 && l.k2 == 0) || !(ru > 0) {
 		return p
 	}
 	r := ru
 	for range 8 {
 		r2 := r * r
-		den := 3*l.k1*r2 + 1
+		den := 3*l.k1*r2 + 5*l.k2*r2*r2 + 1
 		if !(den > 0.1) {
 			break
 		}
-		r -= (l.k1*r2*r + r - ru) / den
+		step := (l.k1*r2*r + l.k2*r2*r2*r + r - ru) / den
+		r -= step
+		if math.Abs(step) <= 1e-12*ru {
+			break
+		}
 	}
 	return d.mul(r / ru).add(gpt{l.cx, l.cy})
 }
@@ -185,25 +190,147 @@ func geomFitModel(src, dst []gpt, lens geomLens) (geomModel, float64, bool) {
 	return m, rms, !math.IsNaN(rms)
 }
 
-// Lens search range for k1 (geomLens units). The simulator's presets reach 0.08; phones that
-// correct distortion in the camera leave it near 0.
-const (
-	geomK1Min = -0.05
-	geomK1Max = 0.2
-)
+// geomLensMax bounds |k1| and |k2| (geomLens units, the radius in half capture widths). It is a
+// statement about consumer camera lenses, not a fit to any recording: a phone or webcam corrects
+// its lens in the camera and leaves at most a few per cent of radial distortion at the frame's
+// edge (r = 1, where k1 + k2 is the relative displacement). A bound of 0.1 on each term admits up
+// to 10% from either alone, with room for the two to oppose (moustache distortion). Where the two
+// together would fold the image near the corner (both near -0.1), distort stops its Newton steps.
+const geomLensMax = 0.1
 
-// geomFitModelK1 fits a model to src -> dst with k1 chosen in [geomK1Min, geomK1Max] by
-// golden-section search on the RMS residual. It needs more than four pairs to tell k1 apart.
-func geomFitModelK1(src, dst []gpt, w, h int) (geomModel, float64, bool) {
-	f := func(k float64) float64 {
-		_, r, ok := geomFitModel(src, dst, geomNewLens(w, h, k))
-		if !ok {
-			return math.Inf(1)
-		}
-		return r
+// geomLensK2Pairs is the fewest pairs from which geomFitModelLens also fits k2: below it, k2 is
+// left at 0, since a handful of points cannot tell the r^4 term from the homography.
+const geomLensK2Pairs = 12
+
+// geomFitModelLens fits a model to src -> dst and returns it with the RMS residual in capture
+// pixels. It needs more than four pairs to tell the lens apart. With fewer than geomLensK2Pairs
+// pairs only k1 is fitted, by golden-section search on the RMS residual in [-geomLensMax,
+// geomLensMax].
+//
+// With k2, the homography and both lens terms are first estimated together by linear least
+// squares (geomLensLinear). The result is kept only when the extra term earns its place by the
+// Bayesian information criterion: with N = 2 len(src) coordinates, N ln(rss1 / rss2) > ln N, rss
+// being the sums of squared residuals with k1 alone and with both. Without that, k2 bends the
+// model to the points' noise, and the model then extrapolates worse beyond them (to a finder left
+// out of the leave-one-out check, say) than with k1 alone. Searching k1 and k2 one at a time does
+// not work: over the points the two terms nearly cancel along k1 = -m k2, and the residual lies in
+// a narrow valley where such a search stalls.
+func geomFitModelLens(src, dst []gpt, w, h int) (geomModel, float64, bool) {
+	m, r, ok := geomFitModelK1(src, dst, w, h)
+	if len(src) < geomLensK2Pairs {
+		return m, r, ok
 	}
-	k := geomGolden(f, geomK1Min, geomK1Max, 40)
-	return geomFitModel(src, dst, geomNewLens(w, h, k))
+	if a, b, lok := geomLensLinear(src, dst, w, h); lok {
+		lens := geomNewLens(w, h, max(-geomLensMax, min(geomLensMax, a)), max(-geomLensMax, min(geomLensMax, b)))
+		n := float64(2 * len(src))
+		if m2, r2, ok2 := geomFitModel(src, dst, lens); ok2 && (!ok || (r2 > 0 && n*math.Log(r*r/(r2*r2)) > math.Log(n))) {
+			return m2, r2, true
+		}
+	}
+	return m, r, ok
+}
+
+// geomFitModelK1 fits a model to src -> dst with k2 = 0 and k1 chosen by golden-section search on
+// the RMS residual in [-geomLensMax, geomLensMax].
+func geomFitModelK1(src, dst []gpt, w, h int) (geomModel, float64, bool) {
+	f := func(k float64) float64 { return geomFitRMS(src, dst, geomNewLens(w, h, k, 0)) }
+	k1 := geomGolden(f, -geomLensMax, geomLensMax, geomLensEvals)
+	return geomFitModel(src, dst, geomNewLens(w, h, k1, 0))
+}
+
+// geomLensIters is the number of linear solves of geomLensLinear.
+const geomLensIters = 4
+
+// geomLensLinear estimates k1 and k2 jointly with the homography. In capture coordinates relative
+// to the lens centre, in its unit, a point D is seen by the pinhole camera at U = D (1 + k1 rho +
+// k2 rho^2), rho = |D|^2, and U = H(S) for the homography H of the (normalised) plane point S. With
+// H's denominator w = h7 Sx + h8 Sy + 1 taken from the previous solve (1 at first), the equations
+// Ux w = h1 Sx + h2 Sy + h3 and Uy w = h4 Sx + h5 Sy + h6 are linear in h1..h8, k1 and k2; they
+// are solved geomLensIters times, each with the last w.
+func geomLensLinear(src, dst []gpt, w, h int) (k1, k2 float64, ok bool) {
+	unit := geomNewLens(w, h, 0, 0)
+	cs, ss := geomNormaliser(src)
+	if !(ss > 0) || math.IsInf(ss, 0) {
+		return 0, 0, false
+	}
+	var x [10]float64
+	for range geomLensIters {
+		var a [10][11]float64
+		for i := range src {
+			s := src[i].sub(cs).mul(ss)
+			d := gpt{(dst[i].X - unit.cx) / unit.unit, (dst[i].Y - unit.cy) / unit.unit}
+			rho := d.dot(d)
+			wp := x[6]*s.X + x[7]*s.Y + 1
+			rows := [2][11]float64{
+				{s.X, s.Y, 1, 0, 0, 0, -d.X * s.X, -d.X * s.Y, -d.X * rho * wp, -d.X * rho * rho * wp, d.X},
+				{0, 0, 0, s.X, s.Y, 1, -d.Y * s.X, -d.Y * s.Y, -d.Y * rho * wp, -d.Y * rho * rho * wp, d.Y},
+			}
+			for _, r := range rows {
+				for j := range 10 {
+					for k := range 11 {
+						a[j][k] += r[j] * r[k]
+					}
+				}
+			}
+		}
+		sol, sok := geomSolve10(&a)
+		if !sok {
+			return 0, 0, false
+		}
+		x = sol
+	}
+	if math.IsNaN(x[8]) || math.IsNaN(x[9]) || math.IsInf(x[8], 0) || math.IsInf(x[9], 0) {
+		return 0, 0, false
+	}
+	return x[8], x[9], true
+}
+
+// geomSolve10 solves the augmented 10 x 10 system a by Gaussian elimination with partial pivoting.
+func geomSolve10(a *[10][11]float64) ([10]float64, bool) {
+	var x [10]float64
+	scale := 0.0
+	for i := range 10 {
+		scale = math.Max(scale, math.Abs(a[i][i]))
+	}
+	for c := range 10 {
+		p := c
+		for r := c + 1; r < 10; r++ {
+			if math.Abs(a[r][c]) > math.Abs(a[p][c]) {
+				p = r
+			}
+		}
+		if !(math.Abs(a[p][c]) > 1e-12*scale) {
+			return x, false
+		}
+		a[c], a[p] = a[p], a[c]
+		for r := c + 1; r < 10; r++ {
+			f := a[r][c] / a[c][c]
+			for k := c; k < 11; k++ {
+				a[r][k] -= f * a[c][k]
+			}
+		}
+	}
+	for c := 9; c >= 0; c-- {
+		s := a[c][10]
+		for k := c + 1; k < 10; k++ {
+			s -= a[c][k] * x[k]
+		}
+		x[c] = s / a[c][c]
+	}
+	return x, true
+}
+
+// geomLensEvals is the golden-section search's evaluations per lens term: the bracket shrinks to
+// 0.618^24 of 0.2, about 2e-6, far below what the anchors resolve.
+const geomLensEvals = 24
+
+// geomFitRMS returns the RMS residual of the model with lens fitted to src -> dst, or +Inf.
+func geomFitRMS(src, dst []gpt, lens geomLens) float64 {
+	_, r, ok := geomFitModel(src, dst, lens)
+	if !ok {
+		return math.Inf(1)
+	}
+	return r
 }
 
 // geomGolden minimises f over [a, b] by golden-section search with n evaluations.

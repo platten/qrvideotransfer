@@ -81,6 +81,8 @@ func geomPairRatios(real, hostile []time.Duration) (lo, med, hi float64) {
 // ratio holds on slow and loaded runners alike, where a wall-clock bound does not. The callers run
 // serially (no t.Parallel): the package's parallel tests would share the cores unevenly between
 // the two runs of a pair.
+//
+// The real code is geomCostReference's: the slowest legitimate frame of its size.
 func geomCostRatio(t *testing.T, name string, real, hostile *video.Frame, hostilePlanes [][]uint16, most float64, limit uint64) {
 	t.Helper()
 	var dr, dh FinderDetector
@@ -108,4 +110,25 @@ func geomCostRatio(t *testing.T, name string, real, hostile *video.Frame, hostil
 	if ratio > most {
 		t.Errorf("%s: median %.2f times a real code's Detect, want at most %.0f", name, ratio, most)
 	}
+}
+
+// Cost reference lens and fill (docs/SECURITY.md section 9.1). The reference of every cost ratio
+// is the slowest legitimate frame the detector is specified to accept: the real code filmed by the
+// ideal camera through a lens at the edge of the supported range, k1 = k2 = +geomLensMax, so that
+// the header's lens search runs on to its later stages and the anchors are refitted, with the
+// code filling 70% of the width so that its finders stay in the frame. Of the range's corners it
+// is the slowest one located (both at -0.1 fold the image and are not a lens). Until the S2
+// geometry fix the reference was the rendered frame itself, whose header reads through the first
+// lens tried.
+const geomCostFill = 0.7
+
+// geomCostReference films code c through the cost reference's lens at the size of its rendered
+// frames.
+func geomCostReference(t *testing.T, c *geomCode) *video.Frame {
+	t.Helper()
+	r := c.input.Frames[0]
+	cfg := geomConfig(t, "ideal", r.W, r.H)
+	cfg.Geometry.Fill, cfg.Geometry.K1, cfg.Geometry.K2 = geomCostFill, geomLensMax, geomLensMax
+	fs, _ := geomFilm(t, c, cfg, 0, 1, 7)
+	return fs[0]
 }

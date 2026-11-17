@@ -1,0 +1,1 @@
+S2 geometry fix, pre-PR review: section 9.1 says the cost reference is the slowest located corner of the lens range, within noise of the slowest located lens, marks the earlier M2 timings as historical (315 against the 375 ms measured in the comparison) and names the old reference as the rendered real code

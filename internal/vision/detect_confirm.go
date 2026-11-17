@@ -14,10 +14,15 @@ const (
 	// finders. It rejects a header claiming a grid far finer than the capture can show before any
 	// allocation is sized by the grid, so the work stays proportional to the image.
 	confirmMinPitch = 1.5
-	// confirmFinderTol is how far, in cells, a finder may lie from where the located anchors and
-	// the other finders put it, and confirmFinderTolModule the same in finder modules; the smaller
-	// applies. A visible finder more than half a module from the truth is a wrong one.
-	confirmFinderTol       = 1.0
+	// confirmFinderTolModule is how far, in finder modules, a finder may lie from where the
+	// located anchors and the other finders put it (docs/DESIGN.md section 10, step 1). The check
+	// is not there to catch a real finder slightly misplaced: the detector locates a finder's
+	// centre to about a pixel. It is there to catch a different, finder-like pattern standing in
+	// for it, and two finder-like patterns cannot both have their centres within half a module of
+	// the same point. In cells it is looser on fine grids (1 cell at 1080p and a cell of 4 pixels,
+	// 1.85 cells on an 800 x 500 grid) and tighter on coarse ones; the S2 recordings, whose corner
+	// finders lie beyond the anchors where the lens model extrapolates, motivated the change from
+	// the smaller of 1 cell and half a module.
 	confirmFinderTolModule = 0.5
 	// confirmMaxLayouts is the most layouts built per Detect: two, so that a header copy decoding
 	// a conflicting grid cannot hide the true one, while the work stays a small multiple of one
@@ -38,6 +43,11 @@ type confirmation struct {
 	as, ad   []gpt // located anchors' saddles, cells and capture
 	inside   int   // anchors the quad's model places inside the capture
 	pitch    float64
+	// k1Only makes predict fit the lens's k1 alone. The three-finder path sets it: with one finder
+	// only predicted, k2's extra freedom lets a decoy among the three visible finders bend the
+	// model enough that a real finder beside it disagrees too, and is then left out of the
+	// candidates that follow (FinderDetector.three).
+	k1Only bool
 }
 
 // locate reads quad q's headers and, for each distinct grid they give (those decoded by more
@@ -150,7 +160,13 @@ func (st *confirmation) predict(k int, with []int, w, h int) (gpt, float64, bool
 	for _, j := range with {
 		s, t = append(s, st.src[j]), append(t, st.dst[j])
 	}
-	m, _, ok := geomFitModelK1(s, t, w, h)
+	var m geomModel
+	var ok bool
+	if st.k1Only {
+		m, _, ok = geomFitModelK1(s, t, w, h)
+	} else {
+		m, _, ok = geomFitModelLens(s, t, w, h)
+	}
 	if !ok {
 		return gpt{}, 0, false
 	}
@@ -162,8 +178,8 @@ func (st *confirmation) predict(k int, with []int, w, h int) (gpt, float64, bool
 }
 
 // disagree returns the finders listed in check that do not agree: a finder agrees when it lies
-// within the smaller of confirmFinderTol cells and confirmFinderTolModule modules of where the
-// located anchors and the other finders listed in check put it.
+// within confirmFinderTolModule modules of where the located anchors and the other finders listed
+// in check put it.
 func (st *confirmation) disagree(check []int, w, h int) []int {
 	var out []int
 	for _, k := range check {
@@ -175,7 +191,7 @@ func (st *confirmation) disagree(check []int, w, h int) []int {
 		}
 		p, cell, ok := st.predict(k, others, w, h)
 		uy := st.src[0].Y / 4.5 // cells per finder module: c0 = 4.5 Uy
-		if !ok || !(p.sub(st.dst[k]).norm() <= min(confirmFinderTol, confirmFinderTolModule*uy)*cell) {
+		if !ok || !(p.sub(st.dst[k]).norm() <= confirmFinderTolModule*uy*cell) {
 			out = append(out, k)
 		}
 	}

@@ -1,0 +1,1 @@
+S2 geometry fix: section 19 records detection time for the performance pass after the end-to-end path works: typical captures no slower (Detect 35-37 ms at 1080p, 70 ms at 4K), the cost reference 33 and 56 ms, the 4K gate header 196 ms (3.5 times the reference against 6), and 301 ms for the hostile noise frame as the figure to beat

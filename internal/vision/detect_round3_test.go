@@ -77,7 +77,7 @@ func TestDetectHostileGrid4K(t *testing.T) {
 	c := geomNewCode(t, 480, 270, 8, 2, 1, 37)
 	a := geomFakeCopies(t, c, 2047, 1393, 0, 1, 2, 3)
 	b := geomFakeCopies(t, c, 2046, 1393, 0, 1, 2, 3)
-	geomCostRatio(t, "4K header at the gate", geomPlain(c, 0), geomPlain(c, 0), [][]uint16{a, b}, 6, 32<<20)
+	geomCostRatio(t, "4K header at the gate", geomCostReference(t, c), geomPlain(c, 0), [][]uint16{a, b}, 6, 32<<20)
 }
 
 // TestHeaderConflictingGrid: when copies 0 and 1 decode a header with the same frame index but

@@ -145,5 +145,5 @@ func TestDetectHostileGrid(t *testing.T) {
 	raceSkipStatistics(t) // a cost ratio: race instrumentation distorts it unevenly
 	c := geomNewCode(t, 212, 120, 4, 2, 1, 26)
 	a, b := geomFakeGrid(t, c, 2047, 2047), geomFakeGrid(t, c, 2047, 2046)
-	geomCostRatio(t, "2047-cell header", geomPlain(c, 0), geomPlain(c, 0), [][]uint16{a, b}, 2, 16<<20)
+	geomCostRatio(t, "2047-cell header", geomCostReference(t, c), geomPlain(c, 0), [][]uint16{a, b}, 2, 16<<20)
 }

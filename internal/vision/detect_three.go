@@ -168,9 +168,15 @@ func threeSearch(v *geomLuma, q Quad, k int) (Quad, bool) {
 		dst[j] = gpt(c)
 	}
 	centre := dst[k]
-	k1 := 0.0
-	if m, ok := headerModel(v, q); ok {
-		k1 = m.lens.k1
+	lens := geomNewLens(v.w, v.h, 0, 0)
+	if m, _, ok := headerModelLens(v, q, false); ok {
+		lens = m.lens
+	}
+	// The finders' black and white, measured once: the visible finders do not move during the
+	// search, and the hidden finder's copy is skipped.
+	refs, ok := headerFinderRefs(v, dst)
+	if !ok {
+		return q, false
 	}
 	step := threeSearchRadius * dst[3].sub(dst[0]).norm() / threeSearchSteps
 	type offset struct{ i, j int }
@@ -183,7 +189,7 @@ func threeSearch(v *geomLuma, q Quad, k int) (Quad, bool) {
 	slices.SortStableFunc(grid, func(a, b offset) int { return a.i*a.i + a.j*a.j - b.i*b.i - b.j*b.j })
 	for _, o := range grid {
 		dst[k] = centre.add(gpt{float64(o.i) * step, float64(o.j) * step})
-		if headerDecodesAt(v, dst, k1, k) {
+		if headerDecodesAt(v, dst, lens, &refs, k) {
 			q.Centres[k] = Point(dst[k])
 			return q, true
 		}
@@ -215,6 +221,7 @@ func (d *FinderDetector) confirmThree(f *video.Frame, v *geomLuma, q Quad, k int
 		if !ok {
 			return Quad{}, false, nil
 		}
+		st.k1Only = true
 		p, _, ok := st.predict(k, found, v.w, v.h)
 		if !ok {
 			return Quad{}, false, nil
@@ -225,6 +232,7 @@ func (d *FinderDetector) confirmThree(f *video.Frame, v *geomLuma, q Quad, k int
 	if !ok {
 		return Quad{}, false, nil
 	}
+	st.k1Only = true
 	if bad := st.disagree(found, v.w, v.h); len(bad) > 0 {
 		return Quad{}, false, bad
 	}
