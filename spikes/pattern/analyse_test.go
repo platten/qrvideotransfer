@@ -313,6 +313,9 @@ func TestAnalyseRendered(t *testing.T) {
 			t.Errorf("segment %d: %d captures located of %d by time, camera-to-display ratio %.2f", sr.Seg, sr.Captures, sr.ByTime, sr.RateRatio)
 		}
 		// The located captures' exposures span code frames 0 and 1 of the segment.
+		if sr.CleanLocated != 1 {
+			t.Errorf("segment %d: clean share over the frames under located captures %.3f, want 1", sr.Seg, sr.CleanLocated)
+		}
 		if sr.LocatedFrames != 2 || math.Abs(sr.DeliveredLocated-float64(b)) > 1e-9 {
 			t.Errorf("segment %d: %d frames under located captures, %.3f bits per cell over them, want 2 and %d", sr.Seg, sr.LocatedFrames, sr.DeliveredLocated, b)
 		}
