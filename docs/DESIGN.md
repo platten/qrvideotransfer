@@ -1855,12 +1855,52 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   | Phone B, recording 5 (4K30) | 4 of 2,257 | 34 | not sampled |
   | Phone B, recording 6 (4K60, 8-bit) | 3 of 4,797 | 814 | 1.1 and 0.5 cells (0.6 and 0.27 module) |
 
+  Over all six recordings (the full S2 analysis, captures located before and after; recording 3
+  regressed and is on record here, not yet diagnosed):
+
+  | Recording | Before | After | Captures |
+  | --- | --- | --- | --- |
+  | Phone A, recording 1 (rescaled playback) | 889 | 3,255 | 3,372 |
+  | Phone A, recording 2 | 2,836 | 2,947 | 3,422 |
+  | Phone A, recording 3 (laptop) | 459 | 352 | 4,674 |
+  | Phone B, recording 4 (laptop) | 0 | 883 | 2,326 |
+  | Phone B, recording 5 (laptop) | 4 | 34 | 2,257 |
+  | Phone B, recording 6 (laptop) | 3 | 814 | 4,797 |
+  | All | 4,191 | 8,285 | 20,848 |
+
   With the check disabled locally, recording 3 was located in 4,290 captures and its left 10% of
   columns fell from 40-49% confident errors to 2-8%. Candidate fix, to evaluate once the
   end-to-end path works: locate from the anchor lattice and a decoded header; treat a corner
   finder that fails the confirmation as absent; mark the cells outside the anchors' hull at that
   corner unknown instead of rejecting the frame. `TestGeometryMoustacheCorner` is skipped until
   then: the simulator's lens is the detector's own model, which extrapolates correctly.
+- **The acceptance measure is not met on rescaled playback (S2, Phone A, recording 1).** After the
+  S2 geometry fix, the confident-error rate (bits with |s| of 39 and more) at the code's edges
+  improved but does not match the interior. By segment, the left 10% of columns went from
+  0.5-8% to 0-1.1e-2 in the Gray2 and Gray4 segments and 3e-2 to 4e-2 in RGB8; the right 10%
+  went from 1.2-22% to 0-3.3e-2 in Gray2 and Gray4 (for example rate 30, 12-pixel cells, Gray4:
+  7.8e-3 against 1.8e-5 inside; rate 60, 12-pixel cells, Gray4: 3.3e-2 against 2.9e-5) and up to
+  7.6e-2 in RGB8. The interior's 60% of columns holds 4e-7 to 4.7e-3. Recording 2's edges match
+  its interior. This does not block the fix; M3's decode attempt on the real recording will
+  decide whether it matters.
+- **Wrong quads below the reliable sizes.** In the long `TestDetectModuleSweep` (200 poses per
+  preset and size), wrong quads occur only below the reliable sizes of section 10, step 1, on
+  M2 (de1d1c4) as on the S2 geometry fix, and the fix has more of them in some cells:
+
+  | Preset, camera pixels per cell | Wrong quads, M2 | Wrong quads, S2 fix |
+  | --- | --- | --- |
+  | handheld, 2.8 | 2 | 2 |
+  | handheld, 3.2 | 4 | 3 |
+  | handheld, 3.6 | 1 | 1 |
+  | budget-android, 2.8 | 0 | 3 |
+  | budget-android, 3.2 | 0 | 3 |
+  | iphone-hdr, 3.2 | 2 | 6 |
+  | iphone-hdr, 3.6 | 1 | 2 |
+  | harsh, 4.8 | 1 | 1 |
+
+  None of their headers was wrong. A wrong quad below the reliable sizes relies on the header's
+  CRC and, downstream, on each codeword's CRC to keep wrong cells out of the payload. Nothing is
+  tuned to move these numbers.
 - **Small grids.** The confirmation needs eight located anchors (section 10, step 1), and the
   anchor lattice (every 32 columns and 30 rows) gives small grids fewer, so they are never located,
   even on a perfect capture where the header reads and every anchor is found:
