@@ -2006,6 +2006,23 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   18,018 (the 29.98 fps camera beating against the display). RGB8 at 4-pixel cells decoded
   nothing with `normal` anywhere. Laptop recordings 3 to 5 are limited by location (the corners
   issue above). No margin recordings exist yet.
+- **CI-size suites near the runner's limits (M3, performance, not optimised now).** PR #47's
+  first run failed on macos-26-intel only: in the coverage step `internal/vision` reached `go
+  test`'s 10-minute default (600.6 s), running beside the two packages M3 adds (root 449.9 s,
+  `internal/pipeline` 344.5 s; `internal/payload` 221.9 s, `spikes/pattern` 79.8 s,
+  `internal/video` 183.3 s after them). The always-on end-to-end tests were trimmed, with every
+  removed row, session and case still asserted with `QRVT_LONG_TESTS=1`: the matrix's short
+  version films half a pass, then a pass, and the whole recording only if those fall short (the
+  simulator's captures are prefix-stable, `TestFilmPrefix`, and decoding stops once complete, so
+  the outcome is the whole recording's); `TestFrameLoss` uses a loop of at least 52 frames (100
+  in the long version) with both losses rounded up; `TestLoopback` runs each modulation and
+  protection once (all nine pairs in the long version); the tests that feed the decoder directly
+  share one encoded transfer. Measured on the development machine with the coverage step pinned
+  to 4 CPUs (`taskset -c 0-3`, GOMAXPROCS 4, uncached), before and after: root 80.8 and 52.5 s,
+  `internal/pipeline` 58.5 and 40.3 s, `internal/vision` 142.7 and 127.1 s (alone: root 21 s,
+  pipeline 16 s). The runner took 5.6 and 5.9 times the pinned baseline for root and pipeline,
+  so they are projected at about 300 s and 240 s there; whether `internal/vision` now finishes
+  under 600 s on that runner is not established by these measurements.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
   the encoder joins runs with one engine instance. Eviction rescans every frame's soft bits each

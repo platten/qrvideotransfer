@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,7 +19,8 @@ import (
 )
 
 // TestLoopback decodes the code video itself, a perfect digital capture of every frame, for each
-// modulation and protection at 480p. It is also the check DESIGN.md section 18 asks of M3: the
+// modulation and protection at 480p (the short version: each modulation and each protection once;
+// all nine pairs with QRVT_LONG_TESTS=1). It is also the check DESIGN.md section 18 asks of M3: the
 // glare rule discards about 2% of black-and-white cells of a perfect frame (section 10, step 4),
 // and the loopback must still pass, here with one capture per frame.
 func TestLoopback(t *testing.T) {
@@ -29,8 +31,11 @@ func TestLoopback(t *testing.T) {
 			combos = append(combos, combo{mod, inner})
 		}
 	}
-	if raceEnabled {
+	switch {
+	case raceEnabled:
 		combos = combos[4:5] // Gray4, normal
+	case os.Getenv("QRVT_LONG_TESTS") != "1":
+		combos = []combo{combos[0], combos[4], combos[8]} // each modulation and each protection once
 	}
 	in, want := writeInputs(t, 1, 9000, 300, 0)
 	for _, c := range combos {
@@ -63,29 +68,43 @@ func TestLoopback(t *testing.T) {
 // carries no repeated packet costs exactly C - 1 shards. It returns the video and its frames.
 func lossPlan(t *testing.T, minFrames int) (string, *EncodeResult, map[string][32]byte) {
 	t.Helper()
-	for size := minFrames * 28 * 128 * 5 / 6; size < minFrames*28*128*2; size += 128 {
-		in, want := writeInputs(t, 7, size)
-		cfg := profile480(in)
-		cfg.DryRun = true
-		_, res := encodeRaw(t, cfg)
-		slack := res.Frames*(res.Codewords-1) - res.Blocks*(res.K+res.M)
-		if res.Frames >= minFrames && res.Blocks == 1 && slack < res.Codewords-1 {
-			cfg.DryRun = false
-			path, res := encodeRaw(t, cfg)
-			return path, res, want
-		}
+	// A dry run gives the codewords per frame and the stream's overhead over the file's size; the
+	// data shards K are then chosen so that the packets K + M fill the last frame but one packet.
+	probe := 1000
+	in, _ := writeInputs(t, 7, probe)
+	cfg := profile480(in)
+	cfg.DryRun = true
+	_, res := encodeRaw(t, cfg)
+	per, overhead := res.Codewords-1, int(res.StreamLen)-probe
+	frames := (minFrames + 3) / 4 * 4
+	k := 1
+	for ; k+(k+4)/5 < frames*per-per+1; k++ { // M = ceil(K/5), parity 20
 	}
-	t.Fatal("no payload size found")
-	return "", nil, nil
+	if k+(k+4)/5 > frames*per {
+		t.Fatalf("test design: no K for %d frames of %d packets", frames, per)
+	}
+	in, want := writeInputs(t, 7, k*128-overhead)
+	cfg = profile480(in)
+	path, res := encodeRaw(t, cfg)
+	slack := res.Frames*per - res.Blocks*(res.K+res.M)
+	if res.Frames < minFrames || res.Blocks != 1 || slack >= per {
+		t.Fatalf("test design: F %d, B %d, slack %d for %d frames", res.Frames, res.Blocks, slack, minFrames)
+	}
+	return path, res, want
 }
 
 // TestFrameLoss drops code frames at random from a perfect recording of every frame (DESIGN.md
 // section 15): with parity 20, whose budget is 16.7% of frames, losing 14.7% of the frames
-// succeeds; losing 18.7% fails with the short block named and nothing written.
+// succeeds; losing 18.7% fails with the short block named and nothing written. Both counts are
+// rounded up, so the share lost is never below the one stated. The loop has at least 52 frames,
+// 100 in the long version (QRVT_LONG_TESTS=1), 28 under the race detector.
 func TestFrameLoss(t *testing.T) {
-	minFrames := 100
-	if raceEnabled {
+	minFrames := 52
+	switch {
+	case raceEnabled:
 		minFrames = 28
+	case os.Getenv("QRVT_LONG_TESTS") == "1":
+		minFrames = 100
 	}
 	path, res, want := lossPlan(t, minFrames)
 	frames, info := readFrames(t, video.NewRaw(), path)
@@ -100,7 +119,7 @@ func TestFrameLoss(t *testing.T) {
 	}
 	// A burst: 14.7% of the frames in one run, as a phone that stalls would lose them.
 	t.Run("burst", func(t *testing.T) {
-		n := int(0.147 * float64(res.Frames))
+		n := int(math.Ceil(0.147 * float64(res.Frames)))
 		first := droppable[len(droppable)/2-n/2]
 		var kept []*video.Frame
 		for i, f := range frames {
@@ -124,10 +143,7 @@ func TestFrameLoss(t *testing.T) {
 		ok    bool
 	}{{0.147, true}, {0.187, false}} {
 		t.Run(fmt.Sprintf("%.1f%%", 100*c.share), func(t *testing.T) {
-			n := int(c.share * float64(res.Frames))
-			if !c.ok {
-				n = int(c.share*float64(res.Frames) + 0.999)
-			}
+			n := int(math.Ceil(c.share * float64(res.Frames)))
 			if lost := n * per; (lost <= res.M) != c.ok {
 				t.Fatalf("test design: %d frames lose %d shards against M = %d", n, lost, res.M)
 			}

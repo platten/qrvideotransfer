@@ -20,9 +20,7 @@ var errInjected = errors.New("injected")
 // TestUnusualCaptures: a capture whose header names a grid too small for two codewords does not
 // lock the decode; once locked, a capture of another transfer adds nothing.
 func TestUnusualCaptures(t *testing.T) {
-	in, _ := writeInputs(t, 17, 3000)
-	path, _ := encodeRaw(t, profile480(in))
-	key, truth := truthOf(t, path)
+	key, truth := fixture(t)
 	d := &decoder{c: &DecodeConfig{}, tmp: t.TempDir(), frames: map[uint32]*frameAcc{}, softCap: MaxSoftBytes}
 	defer d.close()
 	tiny := params{session: 1, gridX: 53, gridY: 30, mod: 1, inner: 4, frames: 4}
@@ -235,9 +233,7 @@ func TestTinyGrid(t *testing.T) {
 // TestExposureWarning: a located capture with no cell credited to a single frame raises the
 // ExposureTooLong warning, once.
 func TestExposureWarning(t *testing.T) {
-	in, _ := writeInputs(t, 15, 3000)
-	path, _ := encodeRaw(t, profile480(in))
-	key, _ := truthOf(t, path)
+	key, _ := fixture(t)
 	var got []Event
 	d := &decoder{c: &DecodeConfig{}, emit: func(e Event) { got = append(got, e) }, tmp: t.TempDir(), frames: map[uint32]*frameAcc{}, softCap: MaxSoftBytes}
 	defer d.close()
@@ -254,9 +250,7 @@ func TestExposureWarning(t *testing.T) {
 // TestHostileDescriptor: a descriptor that passes its CRC but contradicts the header stops the
 // decode (FORMAT.md section 10; SECURITY.md T2).
 func TestHostileDescriptor(t *testing.T) {
-	in, _ := writeInputs(t, 16, 3000)
-	path, _ := encodeRaw(t, profile480(in))
-	key, _ := truthOf(t, path)
+	key, _ := fixture(t)
 	g, err := newGeometry(key)
 	if err != nil {
 		t.Fatal(err)

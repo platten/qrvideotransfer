@@ -30,6 +30,24 @@ func truthOf(t *testing.T, path string) (params, map[uint32][]int8) {
 	return key, truth
 }
 
+// fixtureKey and fixtureTruth are shared by the tests that feed the decoder's owner directly: one
+// encode of a small payload and its truth, made once per test binary. The truth is read only.
+var (
+	fixtureKey   params
+	fixtureTruth map[uint32][]int8
+)
+
+// fixture returns the shared transfer's parameters and truth.
+func fixture(t *testing.T) (params, map[uint32][]int8) {
+	t.Helper()
+	if fixtureTruth == nil {
+		in, _ := writeInputs(t, 5, 3000)
+		path, _ := encodeRaw(t, profile480(in))
+		fixtureKey, fixtureTruth = truthOf(t, path)
+	}
+	return fixtureKey, fixtureTruth
+}
+
 // awgn returns soft bits of a BPSK channel at the given Es/N0 for the signs of ref: each bit's LLR
 // in quarter nats (modem.LLRScale), 2 y / sigma^2 with y = +-1 + noise, rounded and clipped.
 func awgn(g *prng.SplitMix64, ref []int8, esn0dB float64) []int8 {
@@ -107,9 +125,7 @@ func TestSoftBitsAddUp(t *testing.T) {
 // TestAdjacentCapturesHalf: a capture of the same frame as the capture just before it adds half
 // its soft bits; one that is not adjacent adds them whole (DESIGN.md section 7, rule 7).
 func TestAdjacentCapturesHalf(t *testing.T) {
-	in, _ := writeInputs(t, 5, 3000)
-	path, _ := encodeRaw(t, profile480(in))
-	key, truth := truthOf(t, path)
+	key, truth := fixture(t)
 	d := &decoder{c: &DecodeConfig{}, tmp: t.TempDir(), frames: map[uint32]*frameAcc{}, softCap: MaxSoftBytes}
 	defer d.close()
 	g := d.geomFor(t, key)
@@ -161,9 +177,7 @@ func int8Bytes(s []int8) []byte {
 
 // TestEvict: beyond the cap, the least confident frame's soft bits go first.
 func TestEvict(t *testing.T) {
-	in, _ := writeInputs(t, 6, 3000)
-	path, _ := encodeRaw(t, profile480(in))
-	key, truth := truthOf(t, path)
+	key, truth := fixture(t)
 	d := &decoder{c: &DecodeConfig{}, tmp: t.TempDir(), frames: map[uint32]*frameAcc{}, softCap: MaxSoftBytes}
 	defer d.close()
 	weak := make([]int8, len(truth[0]))

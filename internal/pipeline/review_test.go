@@ -137,9 +137,7 @@ func TestReorderBounded(t *testing.T) {
 // TestRule11EveryCapture: a frame is attempted once two captures have passed without it, even when
 // those captures show no code.
 func TestRule11EveryCapture(t *testing.T) {
-	in, _ := writeInputs(t, 32, 3000)
-	path, _ := encodeRaw(t, profile480(in))
-	key, truth := truthOf(t, path)
+	key, truth := fixture(t)
 	d := &decoder{c: &DecodeConfig{}, tmp: t.TempDir(), frames: map[uint32]*frameAcc{}, softCap: MaxSoftBytes}
 	defer d.close()
 	for f := range uint32(4) {

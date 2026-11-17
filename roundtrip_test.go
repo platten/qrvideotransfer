@@ -144,7 +144,7 @@ func TestRoundTripMatrix(t *testing.T) {
 			}
 			for s := range sessions {
 				testRandom = &prngReader{prng.SplitMix64{State: uint64(1000 + s)}}
-				if err := roundTrip(t, r); err != nil {
+				if err := roundTrip(t, r, long); err != nil {
 					failed++
 					t.Errorf("session %d: %v", s, err)
 				}
@@ -155,7 +155,7 @@ func TestRoundTripMatrix(t *testing.T) {
 }
 
 // roundTrip runs one row once and returns why the decode failed, if it did.
-func roundTrip(t *testing.T, r matrixRow) error {
+func roundTrip(t *testing.T, r matrixRow, long bool) error {
 	t.Helper()
 	in, want := payloadDir(t, 20, 6000, 500)
 	video1 := filepath.Join(t.TempDir(), "code.mp4")
@@ -184,12 +184,30 @@ func roundTrip(t *testing.T, r matrixRow) error {
 	}
 	period := time.Duration(rep.Frames) * time.Second / time.Duration(r.fps)
 	captures := int(passes*period.Seconds()*float64(c.Timing.FPS)) + 2
-	t0 = time.Now()
-	rec := film(t, frames, r.fps, c, channel.Run{Captures: captures, Seed: 0x5eed})
-	tFilm := time.Since(t0)
-	t0 = time.Now()
-	out, dr, err := decodeTest(t, DecodeOptions{Recordings: []string{rec}})
-	tDec := time.Since(t0)
+	// The short version films half a pass, then one pass, and the whole recording only if those fall short: the
+	// simulator's captures are prefix-stable (TestFilmPrefix) and decoding stops once complete, so
+	// the outcome equals the whole recording's at a fraction of the filming.
+	tries := []int{captures}
+	if pass := int(period.Seconds()*float64(c.Timing.FPS)) + 2; !long && pass < captures {
+		tries = []int{pass/2 + 2, pass, captures}
+	}
+	var (
+		out         string
+		dr          *DecodeReport
+		tFilm, tDec time.Duration
+	)
+	for _, n := range tries {
+		t0 = time.Now()
+		rec := film(t, frames, r.fps, c, channel.Run{Captures: n, Seed: 0x5eed})
+		tFilm += time.Since(t0)
+		t0 = time.Now()
+		out, dr, err = decodeTest(t, DecodeOptions{Recordings: []string{rec}})
+		tDec += time.Since(t0)
+		var short *NotEnoughDataError
+		if !errors.As(err, &short) {
+			break
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("decode (%d frames, %d captures): %w", rep.Frames, captures, err)
 	}
