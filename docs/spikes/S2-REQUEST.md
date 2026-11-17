@@ -42,7 +42,7 @@ The files are produced in `spikes/pattern/out/` and copied to `recordings/patter
 - Fill about 80% of the phone's frame with the screen.
 - Copy the original file from the phone by cable, AirDrop or a drive. Messaging apps re-compress video
   and ruin it.
-- Name files `<device>-<camera mode>-<hand or tripod>`, for example `iphone15pro-4k60-hdr-hand.mov`.
+- Name files `<device>-<camera mode>-<hand or tripod>`, for example `phone-4k60-hdr-hand.mov`.
 
 ## S2 checklist
 

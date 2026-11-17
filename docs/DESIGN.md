@@ -762,6 +762,11 @@ For each capture:
      (long versions). Underconfidence is the safe direction for the LDPC decoder, but it is lost
      capacity; no lower edge is asserted (designer's ruling of 2026-11-15), and calibrating it is a
      likely gain to look for in the S2 analysis.
+   - **Open (S2 interim, 2026-11-17).** In the simulator at 1080p30 on `tripod` (Gray4, 4-pixel cells,
+     12 fps display; spikes/pattern `TestAnalyseSimulated`), partly mixed cells are 26 and 74 times
+     overconfident, in buckets of 2,850 and 8,871 bits. Those buckets are too small to be judged at
+     10,000 bits, so CI does not catch it. The task is radiometry on real data, after the S2 re-run
+     (docs/spikes/S2.md); no work on it before then.
    M2 settled the two points the M1 review left open. The omitted log-variance term, (planes / 2) times
    the log of the ratio of two levels' variances, measured under `handheld` up to 1.43 nats for Gray4
    (per-tile variance ratio 17.4, the dark level widest) and 3.41 nats for RGB8 (ratio 9.7, three planes),
@@ -1650,6 +1655,9 @@ by GoReleaser).
   the rise came from #38's three-candidate path (the hostile Detect from 260 to 295 ms, the real
   one unchanged at 23 ms). **Residual for the security pass (M7):** the 16-times bound has about 24%
   of quiet headroom (16 against 12.9); any detector change that adds hostile cost re-measures it.
+  A step of the `check` job ("Hostile-cost ratios") runs the four tests again verbosely and keeps
+  their ratio lines, so that every runner's figures, a near miss included, can be read from the job
+  log on a pass too.
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),

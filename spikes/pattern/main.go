@@ -99,7 +99,26 @@ func main() {
 	qp := flag.Int("qp", 32, "x264 quantiser")
 	verifyOnly := flag.Bool("verify-only", false, "only verify an existing file")
 	table := flag.Bool("table", false, "print the segment table as Markdown and exit")
+	analysePath := flag.String("analyse", "", "analyse this recording of the pattern (S2) instead of writing the pattern")
+	patterns := flag.String("patterns", "recordings/patterns", "directory of the pattern-*.json segment tables, for -analyse")
+	label := flag.String("label", "recording", "how -analyse names the recording in its output, for example \"Phone A, recording 1\"")
+	jsonOut := flag.String("json", "", "with -analyse, also write the figures as JSON to this file")
+	summary := flag.Bool("summarise", false, "print the S2 bars and residuals from the -json files given as arguments")
 	flag.Parse()
+	if *summary {
+		if err := summariseFiles(flag.Args(), os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "pattern:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *analysePath != "" {
+		if err := runAnalysis(context.Background(), *analysePath, *patterns, *label, *jsonOut, *workers, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "pattern:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *table {
 		printTable(makePlan(*w, *h, *seconds))
 		return
