@@ -52,12 +52,13 @@ func atPixels(segs []segReport, rate int, mod uint8, px float64) (pixelFigure, b
 }
 
 // calRatios returns the largest and smallest observed-over-stated error rate among the buckets below
-// the two most confident with at least minBucket bits that state or show at least minExpected
-// errors, with their buckets: a bucket stating few errors but showing many is not hidden.
+// the two most confident with at least minBucket bits that state at least one error and state or
+// show at least minExpected, with their buckets: a bucket stating few errors but showing many is not
+// hidden. Buckets stating under one error give no ratio; unstatedErrors reports their errors.
 func calRatios(c *calTable) (hi float64, hiB int, lo float64, loB int, ok bool) {
 	lo = math.Inf(1)
 	for j := range calBuckets - 2 {
-		if c.N[j] < minBucket || c.Stated[j] < minExpected && float64(c.Errs[j]) < minExpected || c.Stated[j] <= 0 {
+		if c.N[j] < minBucket || c.Stated[j] < 1 || c.Stated[j] < minExpected && float64(c.Errs[j]) < minExpected {
 			continue
 		}
 		r := float64(c.Errs[j]) / c.Stated[j]
@@ -103,6 +104,17 @@ func columnRates(c [10][2]int) [5]float64 {
 		}
 	}
 	return out
+}
+
+// unstatedErrors returns the errors and bits of buckets 0-7 that state under one error in all: what
+// no ratio can express. The two most confident buckets are confidentErrors'.
+func unstatedErrors(c *calTable) (errs, bits int) {
+	for j := range calBuckets - 2 {
+		if c.Stated[j] < 1 {
+			errs, bits = errs+c.Errs[j], bits+c.N[j]
+		}
+	}
+	return errs, bits
 }
 
 // confidentErrors returns the error rate among the bits of the two most confident buckets (|s| of
@@ -207,10 +219,10 @@ func summariseFiles(paths []string, w io.Writer) error {
 		}
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Residuals: confidence over the whole code and over the interior (inner 80% of the grid both ways), pooled per recording and modulation. Ratios of observed to stated error rate over buckets 0-7 of at least 10,000 bits that state or show at least 10 errors; confident errors are the error rate among bits with |s| >= 103 (stated below 1e-11)")
+	fmt.Fprintln(w, "Residuals: confidence over the whole code and over the interior (inner 80% of the grid both ways), pooled per recording and modulation. Ratios of observed to stated error rate over buckets 0-7 of at least 10,000 bits that state at least 1 error and state or show at least 10; errors in buckets 0-7 stating under 1 error in all are counted apart; confident errors are the error rate among bits with |s| >= 103 (stated below 1e-11)")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Recording | Mod | Cells | Whole: bits | Largest (bucket) | Smallest (bucket) | Confident errors | Interior: bits | Largest (bucket) | Smallest (bucket) | Confident errors |")
-	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+	fmt.Fprintln(w, "| Recording | Mod | Cells | Whole: bits | Largest (bucket) | Smallest (bucket) | Errors where under 1 stated | Confident errors | Interior: bits | Largest (bucket) | Smallest (bucket) | Errors where under 1 stated | Confident errors |")
+	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 	var pooled, pooledIn [4][2]calTable
 	for _, r := range recs {
 		for _, mod := range []uint8{1, 2, 3} {
@@ -277,11 +289,16 @@ func printCal(w io.Writer, label string, mod uint8, name string, c, ci *calTable
 	}
 	cell := func(c *calTable) string {
 		n := calTotal(c)
+		ue, un := unstatedErrors(c)
+		unstated := "-"
+		if un > 0 {
+			unstated = fmt.Sprintf("%d in %d", ue, un)
+		}
 		hi, hb, lo, lb, ok := calRatios(c)
 		if !ok {
-			return fmt.Sprintf("%d | no bucket to judge | | %.2e", n, confidentErrors(c))
+			return fmt.Sprintf("%d | no bucket to judge | | %s | %.2e", n, unstated, confidentErrors(c))
 		}
-		return fmt.Sprintf("%d | %.2f (%d) | %.3f (%d) | %.2e", n, hi, hb, lo, lb, confidentErrors(c))
+		return fmt.Sprintf("%d | %.2f (%d) | %.3f (%d) | %s | %.2e", n, hi, hb, lo, lb, unstated, confidentErrors(c))
 	}
 	fmt.Fprintf(w, "| %s | %s | %s | %s | %s |\n", label, modNames[mod], name, cell(c), cell(ci))
 }
