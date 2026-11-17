@@ -49,34 +49,6 @@ func (s *radSession) shootReal(t testing.TB, c channel.Config, period time.Durat
 	return out, st
 }
 
-// paletteThrough samples the palette patches through the mesh, over the central 60% of each patch
-// (patch k of strip c at 8c + k), as a decoder would.
-func paletteThrough(f *video.Frame, m *Mesh, l *frame.Layout) []modem.Obs {
-	v, ok := geomView(f)
-	out := make([]modem.Obs, 32)
-	gx, gy := float64(l.GridX()), float64(l.GridY())
-	uy := gy / 135
-	c0, dx, dy := 4.5*uy, gx-9*uy, 126*uy
-	for cp := range 4 {
-		for k := range 8 {
-			if !ok {
-				out[8*cp+k] = modem.Obs{Saturated: true}
-				continue
-			}
-			r := frame.PalettePatch(cp, k)
-			x0, x1 := c0+r.X0*dx, c0+r.X1*dx
-			y0, y1 := c0+r.Y0*dy, c0+r.Y1*dy
-			x, y := (x0+x1)/2, (y0+y1)/2
-			hw, hh := 0.3*(x1-x0), 0.3*(y1-y0)
-			c := gpt(m.At(x, y))
-			hx := gpt(m.At(x+hw, y)).sub(gpt(m.At(x-hw, y))).mul(0.5)
-			hy := gpt(m.At(x, y+hh)).sub(gpt(m.At(x, y-hh))).mul(0.5)
-			out[8*cp+k], _ = v.footprint(c, hx, hy)
-		}
-	}
-	return out
-}
-
 // TestPipelinePhase measures the frame-mixing assertions of TestPhaseWeights through the geometry
 // pipeline, against the same limits: no wrong credit, a credited cell's true weight at least
 // minCreditedWeight, per-preset yield at least minYield, and phase weight error within
@@ -347,7 +319,8 @@ func (s *radSession) shootRealAll(t testing.TB, c channel.Config, period time.Du
 			}
 			rc := &radCapture{f: f, tr: tr, anchors: anchors, obs: make([]modem.Obs, len(s.layout.DataCells()))}
 			FootprintSampler{}.Sample(rc.obs, f, m, s.layout.DataCells())
-			rc.palette = paletteThrough(f, m, s.layout)
+			rc.palette = make([]modem.Obs, 32)
+			SamplePalette(rc.palette, f, m, s.layout)
 			out = append(out, rc)
 			return nil
 		})
