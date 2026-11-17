@@ -189,6 +189,8 @@ func TestValidate(t *testing.T) {
 		func(c *Config) { c.Geometry.Tilt = 90 },
 		func(c *Config) { c.Geometry.K1 = -0.15 },
 		func(c *Config) { c.Geometry.K2 = 0.15 },
+		// The lens folds the image before the frame's corner: 1 + 3 k1 r^2 + 5 k2 r^4 <= 0 there.
+		func(c *Config) { c.Geometry.K1, c.Geometry.K2 = -0.1, -0.1 },
 		func(c *Config) { c.Timing.FPS = 0 },
 		func(c *Config) { c.Timing.Exposure = 0 },
 		func(c *Config) { c.Timing.Drop = 1 },

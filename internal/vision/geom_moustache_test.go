@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/platten/qrvideotransfer/internal/channel"
+	"github.com/platten/qrvideotransfer/internal/frame"
 )
 
 // The moustache lens of the simulator's variant: k1 = -0.05 with k2 = +0.05 (geomLens units, the
@@ -121,13 +122,65 @@ func TestGeometryMoustacheWindow(t *testing.T) {
 	}
 }
 
-// TestGeometryMoustacheCorner is the open issue of docs/DESIGN.md section 19 on the S2 laptop
-// recordings: with the code filling the frame to its corners, the corner finders lie beyond every
-// anchor, where the phones' distortion departs from the k1 + k2 model by up to a finder module,
-// and the leave-one-out check rejects them. The simulator cannot show it: its lens is the
-// detector's own k1 + k2 model, so the model extrapolates correctly to the corners (the case
-// below is located). It stays skipped until the candidate fix of the open issue is built, with a
-// simulator lens whose corners leave the model.
+// TestGeometryMoustacheCorner characterises the open issue of docs/DESIGN.md section 19 on the S2
+// laptop recordings: there a corner finder lies beyond every anchor, where the phones' distortion
+// departs from the k1 + k2 model by up to a finder module, so the anchors put it 0.6 to 1 module
+// from where it is. The simulator's lens is the detector's own model, so the case is built
+// directly: on a rendered 480 x 270 code at 4 pixels per cell, the top-left or the bottom-left
+// finder (the left ones, as on the recordings), with its separator, is moved outwards by 0.6 or 1
+// module, the place it leaves painted in the separator's light. Today the moved finder is never
+// confirmed and the capture is never a wrong quad: the quad is located from the other three
+// finders (the three-finder path), with that corner predicted within a module of the code's own
+// finder. On the recordings the three-finder path did not rescue such frames, whose prediction
+// rests on the same lens model; the open issue's candidate fix must locate them, and must keep
+// this case's outcome.
 func TestGeometryMoustacheCorner(t *testing.T) {
-	t.Skip("open issue (DESIGN section 19): corner finders beyond the anchors on real lenses; the simulator's lens is within the detector's model")
+	c := geomNewCode(t, 480, 270, 4, 2, 1, 46)
+	want := geomPlainQuad(c)
+	plain := geomPlain(c, 0)
+	u := 2 * c.pitch // one finder module, in pixels: Uy is two cells on a 270-row grid
+	for _, corner := range []frame.Corner{frame.TopLeft, frame.BottomLeft} {
+		k := int(corner)
+		sep := c.layout.Separator(corner).Pixels(c.pitch)
+		for _, mod := range []float64{0.6, 1} {
+			d := int(math.Round(mod * float64(u)))
+			dx, dy := -d, -d // outwards: up and to the left
+			if corner == frame.BottomLeft {
+				dy = d
+			}
+			f := geomPlain(c, 0)
+			for y := sep.Min.Y; y < sep.Max.Y; y++ {
+				for x := sep.Min.X; x < sep.Max.X; x++ {
+					f.Y[y*f.W+x] = 235
+				}
+			}
+			for y := sep.Min.Y; y < sep.Max.Y; y++ {
+				for x := sep.Min.X; x < sep.Max.X; x++ {
+					if tx, ty := x+dx, y+dy; tx >= 0 && ty >= 0 && tx < f.W && ty < f.H {
+						f.Y[ty*f.W+tx] = plain.Y[y*plain.W+x]
+					}
+				}
+			}
+			moved := Point{want.Centres[k].X + float64(dx), want.Centres[k].Y + float64(dy)}
+			var det FinderDetector
+			q, ok := det.Detect(f, nil)
+			t.Logf("finder %d moved %.1f module: located %v %v", k, mod, ok, q.Centres)
+			if !ok {
+				t.Errorf("finder %d moved %.1f module: not located", k, mod)
+				continue
+			}
+			if geomDist(q.Centres[k], moved) <= want.Module/2 {
+				t.Errorf("finder %d moved %.1f module: the moved finder was confirmed", k, mod)
+			}
+			for j := range 4 {
+				tol := want.Module / 2
+				if j == k {
+					tol = want.Module
+				}
+				if e := geomDist(q.Centres[j], want.Centres[j]); e > tol {
+					t.Errorf("finder %d moved %.1f module: wrong quad, centre %d at %v, want %v", k, mod, j, q.Centres[j], want.Centres[j])
+				}
+			}
+		}
+	}
 }
