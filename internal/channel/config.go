@@ -49,7 +49,8 @@ type GeometryParams struct {
 	Roll          float64 // in-plane rotation of the screen, degrees
 	Mirror        bool    // the capture is mirrored left to right (a front camera)
 	Shake         float64 // hand-shake, pixels RMS of the movement between captures
-	K1            float64 // radial distortion; positive is barrel
+	K1            float64 // radial distortion, r^2 term; positive is barrel
+	K2            float64 // radial distortion, r^4 term; with K1 of the other sign, mustache distortion
 }
 
 // OpticsParams describe stage 4, the lens.
@@ -216,7 +217,8 @@ func (c *Config) validate() error {
 		{"tilt", in(g.Tilt, 0, 60)},
 		{"roll", in(g.Roll, -360, 360)},
 		{"shake (up to an eighth of the width)", in(g.Shake, 0, float64(g.Width)/8)},
-		{"k1", in(g.K1, 0, 0.2)},
+		{"k1", in(g.K1, -0.1, 0.2)},
+		{"k2", in(g.K2, -0.1, 0.1)},
 		{"blur", in(o.Blur, 0, 20)},
 		{"vignetting", in(o.Vignette, 0, 1)},
 		{"veiling glare", in(o.Veil, 0, 1)},

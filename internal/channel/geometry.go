@@ -66,7 +66,7 @@ type camera struct {
 	f        float64 // focal length, pixels
 	cx, cy   float64 // principal point
 	norm     float64 // distortion radius unit: half the frame width
-	k1       float64
+	k1, k2   float64
 	mirror   bool
 	z0       float64    // screen distance, in panel pixels
 	tilt     [9]float64 // tilt rotation, row-major
@@ -80,7 +80,7 @@ func newCamera(p GeometryParams, s *screen, seed uint64) *camera {
 		w: p.Width, h: p.Height,
 		f:  float64(float64(p.Width) / focalScale),
 		cx: float64(float64(p.Width) / 2), cy: float64(float64(p.Height) / 2), norm: float64(float64(p.Width) / 2),
-		k1: p.K1, mirror: p.Mirror,
+		k1: p.K1, k2: p.K2, mirror: p.Mirror,
 		roll: float64(p.Roll * (math.Pi / 180)),
 		pw2:  float64(float64(s.pw) / 2), ph2: float64(float64(s.ph) / 2),
 	}
@@ -143,6 +143,9 @@ func (c *camera) undistort(x, y float64) (float64, float64) {
 	dx, dy := x-c.cx, y-c.cy
 	r2 := float64((float64(dx*dx) + float64(dy*dy)) / float64(c.norm*c.norm))
 	fac := float64(c.k1*r2) + 1
+	if c.k2 != 0 {
+		fac += float64(c.k2 * float64(r2*r2))
+	}
 	return float64(dx*fac) + c.cx, float64(dy*fac) + c.cy
 }
 
@@ -150,7 +153,17 @@ func (c *camera) undistort(x, y float64) (float64, float64) {
 func (c *camera) distort(x, y float64) (float64, float64) {
 	dx, dy := x-c.cx, y-c.cy
 	ru := float64(math.Sqrt(float64(dx*dx)+float64(dy*dy)) / c.norm)
-	if c.k1 != 0 && ru > 0 {
+	if c.k2 != 0 && ru > 0 {
+		r := ru // Newton's method on r + k1 r^3 + k2 r^5 = ru
+		for range 12 {
+			r2 := float64(r * r)
+			r4 := float64(r2 * r2)
+			fr := float64(c.k1*float64(r2*r)) + float64(c.k2*float64(r4*r)) + r - ru
+			dr := float64(3*float64(c.k1*r2)) + float64(5*float64(c.k2*r4)) + 1
+			r -= fr / dr
+		}
+		dx, dy = float64(float64(dx*r)/ru), float64(float64(dy*r)/ru)
+	} else if c.k1 != 0 && ru > 0 {
 		r := ru // Newton's method on r + k1 r^3 = ru, from the right of the root
 		for range 12 {
 			r2 := float64(r * r)
