@@ -1,0 +1,1 @@
+Section 10, step 7: an open residual from the S2 interim analysis. In the simulator at 1080p30 on tripod (Gray4, 4-pixel cells, 12 fps display), partly mixed cells are 26 and 74 times overconfident in buckets of 2,850 and 8,871 bits, too small to be judged at 10,000 bits, so CI does not catch it; it belongs to radiometry on real data, after the S2 re-run
