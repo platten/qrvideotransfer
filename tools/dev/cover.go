@@ -47,8 +47,9 @@ func cover(args []string) error {
 	if err != nil {
 		return err
 	}
-	// Two runs, as the test task does (isolatedRuns): every package but internal/video, then
-	// internal/video on its own; their profiles are merged into one.
+	// The runs of the test task (isolatedRuns): every other package, then the root package and
+	// internal/pipeline each on its own, then internal/video on its own; their profiles are merged
+	// into one, so the gate covers every package.
 	list, err := packages(tags)
 	if err != nil {
 		return err

@@ -2017,12 +2017,26 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   the outcome is the whole recording's); `TestFrameLoss` uses a loop of at least 52 frames (100
   in the long version) with both losses rounded up; `TestLoopback` runs each modulation and
   protection once (all nine pairs in the long version); the tests that feed the decoder directly
-  share one encoded transfer. Measured on the development machine with the coverage step pinned
-  to 4 CPUs (`taskset -c 0-3`, GOMAXPROCS 4, uncached), before and after: root 80.8 and 52.5 s,
-  `internal/pipeline` 58.5 and 40.3 s, `internal/vision` 142.7 and 127.1 s (alone: root 21 s,
-  pipeline 16 s). The runner took 5.6 and 5.9 times the pinned baseline for root and pipeline,
-  so they are projected at about 300 s and 240 s there; whether `internal/vision` now finishes
-  under 600 s on that runner is not established by these measurements.
+  share one encoded transfer; the short matrix films each row with the smallest 16:9 camera, at
+  least 1080p, that gives the code 5 camera pixels per cell (section 11's planning point), at the
+  preset's rate, timing, blur and shake (ideal 1920 x 1080, tripod 2688 x 1512, handheld and
+  iphone-hdr 3008 x 1692, budget-android its own 1920 x 1080, harsh 2304 x 1296); the long
+  version keeps each preset's own camera. Measured on the development machine with the coverage
+  step pinned to 4 CPUs (`taskset -c 0-3`, GOMAXPROCS 4, uncached), at PR #47's first head and
+  after these trims, before isolation: root 80.8 and 47.2 s, `internal/pipeline` 58.5 and 38.8
+  s, `internal/vision` 142.7 and 126.4 s, the whole step 313 s after; alone, root about 20 s and
+  pipeline about 16 s. The runner took 5.6 and 5.9 times the pinned figures for root and
+  pipeline. Two changes follow (designer's ruling on PR #47). **Isolation:** `tools/dev` runs
+  the root package and `internal/pipeline` each on its own after the other packages, before
+  `internal/video` (`isolatedRuns`; the race step `-part others` holds all three runs, the
+  coverage gate merges every run's profile). That adds roughly 3 to 4 minutes on the slowest
+  runner, (20 + 16) s x 5.7, against the non-race steps' 30 minutes, of which they took about 22
+  before this pull request; it returns `internal/vision` to its conditions before it, about 530
+  s on that runner; and the 5.7-times projection of the whole contended step no longer applies.
+  **Timeout:** the coverage step sets `-timeout=15m` per package (`coverArgs`), because go
+  test's 10-minute default was never a chosen limit; the job's 70 minutes and the 30 for the
+  non-race steps are the real guard. `internal/vision`'s cost at CI size is a performance item,
+  not optimised now.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
   the encoder joins runs with one engine instance. Eviction rescans every frame's soft bits each
