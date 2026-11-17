@@ -307,6 +307,20 @@ func (pl *plan) segmentAt(t float64) int {
 	return 0
 }
 
+// shownDuring returns the code frames of segment s whose display interval meets the window
+// [t, t+period) of pattern time: those a capture exposed then may show.
+func shownDuring(s segment, t, period float64) []uint32 {
+	const eps = 1e-9
+	r := float64(s.Rate)
+	j0 := max(0, int(math.Floor((t-s.Start)*r+eps)))
+	j1 := min(s.CodeFrames-1, int(math.Ceil((t+period-s.Start)*r-eps))-1)
+	var out []uint32
+	for j := j0; j <= j1; j++ {
+		out = append(out, s.FirstIndex+uint32(j)) //nolint:gosec // small
+	}
+	return out
+}
+
 // patternOffset returns the recording's offset into the pattern, in seconds: the median over the
 // placed captures of their pattern time less their capture time, taken on the circle of the
 // pattern's length so that captures of a second loop agree with those of the first.
@@ -523,6 +537,7 @@ type segCaps struct {
 	cal                        [2]calTable
 	credited, wrong, neighbour int
 	recs                       []frameRec
+	fittedPts                  []float64 // times of the captures fitted in the segment
 }
 
 // aggregator collects capture results, sums each code frame's captures and finishes a code frame
@@ -580,6 +595,7 @@ func (g *aggregator) add(r capResult) {
 		s.clipped += float64(r.clipped) / float64(r.cells)
 		s.glare += float64(r.glare) / float64(r.cells)
 		s.px = append(s.px, r.pxPerCell)
+		s.fittedPts = append(s.fittedPts, r.pts)
 		s.cal[0].merge(&r.cal[0])
 		s.cal[1].merge(&r.cal[1])
 		s.credited += r.credited
@@ -635,6 +651,11 @@ type segReport struct {
 	ByTime     int     `json:"captures_by_time"`  // captures taken while the segment showed
 	Located    float64 `json:"located_share"`     // Captures / ByTime
 	Shown      float64 `json:"code_frames_shown"` // ByTime x display rate / camera rate
+	// LocatedFrames is how many code frames were shown while a located capture was exposed, and
+	// DeliveredLocated the delivered bits per cell over them: the channel's figure given that the
+	// code was located.
+	LocatedFrames    int     `json:"code_frames_under_located_captures"`
+	DeliveredLocated float64 `json:"delivered_bits_per_cell_located"`
 	// DeliveredAll is the delivered bits per cell over every code frame shown while the camera
 	// filmed the segment, through the whole chain: a frame never located delivers nothing.
 	DeliveredAll float64     `json:"delivered_bits_per_cell_all_shown"`
@@ -695,6 +716,19 @@ func (g *aggregator) finish() report {
 		sr.Shown = float64(byTime[si]) * float64(sg.Rate) / g.fps
 		if byTime[si] > 0 {
 			sr.Located = float64(s.captures) / float64(byTime[si])
+		}
+		under := map[uint32]bool{}
+		for _, t := range s.fittedPts {
+			for _, idx := range shownDuring(sg, math.Mod(t+off, pl.duration()), 1/g.fps) {
+				under[idx] = true
+			}
+		}
+		for _, r := range s.recs {
+			under[r.idx] = true
+		}
+		sr.LocatedFrames = len(under)
+		if sr.LocatedFrames > 0 {
+			sr.DeliveredLocated = sr.Sum.Total / float64(sr.LocatedFrames)
 		}
 		if d := max(sr.Shown, float64(sr.Sum.Seen)); d > 0 {
 			sr.DeliveredAll = sr.Sum.Total / d

@@ -39,7 +39,7 @@ func atPixels(segs []segReport, rate int, mod uint8, px float64) (pixelFigure, b
 		f = (px - lo.PxPerCell) / (hi.PxPerCell - lo.PxPerCell)
 	}
 	return pixelFigure{
-		located: lo.Sum.Delivered + f*(hi.Sum.Delivered-lo.Sum.Delivered),
+		located: lo.DeliveredLocated + f*(hi.DeliveredLocated-lo.DeliveredLocated),
 		all:     lo.DeliveredAll + f*(hi.DeliveredAll-lo.DeliveredAll),
 		lowPx:   lo.PxPerCell, highPx: hi.PxPerCell,
 	}, true
@@ -82,7 +82,7 @@ func summariseFiles(paths []string, w io.Writer) error {
 	}
 	fmt.Fprintln(w, "Bar 1: Gray4 delivered bits per cell at 5 camera pixels per cell (interpolated between the cell sizes that bracket 5)")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Recording | Display rate | Pixels per cell bracketing 5 | Over the located passes | Over every frame shown |")
+	fmt.Fprintln(w, "| Recording | Display rate | Pixels per cell bracketing 5 | Under located captures | Over every frame shown |")
 	fmt.Fprintln(w, "| --- | --- | --- | --- | --- |")
 	for _, r := range recs {
 		for _, rate := range []int{12, 30, 60} {
@@ -107,7 +107,7 @@ func summariseFiles(paths []string, w io.Writer) error {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Bar 3: estimated net rate against the recording's bitrate, best segment per recording")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Recording | Mbit/s | Rate | Cell | Mod | Delivered (located passes) | Net Mbit/s | Share | Delivered (every frame shown) | Net Mbit/s | Share |")
+	fmt.Fprintln(w, "| Recording | Mbit/s | Rate | Cell | Mod | Delivered (under located captures) | Net Mbit/s | Share | Delivered (every frame shown) | Net Mbit/s | Share |")
 	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 	for _, r := range recs {
 		best, bestAll := -1, -1
@@ -125,7 +125,7 @@ func summariseFiles(paths []string, w io.Writer) error {
 		}
 		s, a := &r.Segments[best], &r.Segments[bestAll]
 		fmt.Fprintf(w, "| %s | %.1f | %d | %d | %s | %.3f | %.2f | %.1f%% | %d/%d/%s: %.3f | %.2f | %.1f%% |\n", r.Label, r.Mbps,
-			s.Rate, s.Cell, modNames[s.Modulation], s.Sum.Delivered, netRate(s), 100*netRate(s)/r.Mbps,
+			s.Rate, s.Cell, modNames[s.Modulation], s.DeliveredLocated, netRate(s), 100*netRate(s)/r.Mbps,
 			a.Rate, a.Cell, modNames[a.Modulation], a.DeliveredAll, netRateAll(a), 100*netRateAll(a)/r.Mbps)
 	}
 	fmt.Fprintln(w)

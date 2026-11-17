@@ -10,10 +10,10 @@ import (
 // no bracket there is no figure.
 func TestAtPixels(t *testing.T) {
 	segs := []segReport{
-		{Captures: 1, Rate: 12, Cell: 4, Modulation: 2, PxPerCell: 3, Sum: segSum{Delivered: 1.0}, DeliveredAll: 0.5},
-		{Captures: 1, Rate: 12, Cell: 8, Modulation: 2, PxPerCell: 7, Sum: segSum{Delivered: 1.8}, DeliveredAll: 0.9},
-		{Captures: 1, Rate: 30, Cell: 8, Modulation: 2, PxPerCell: 7, Sum: segSum{Delivered: 1.9}},
-		{Captures: 1, Rate: 12, Cell: 8, Modulation: 1, PxPerCell: 7, Sum: segSum{Delivered: 0.9}},
+		{Captures: 1, Rate: 12, Cell: 4, Modulation: 2, PxPerCell: 3, DeliveredLocated: 1.0, DeliveredAll: 0.5},
+		{Captures: 1, Rate: 12, Cell: 8, Modulation: 2, PxPerCell: 7, DeliveredLocated: 1.8, DeliveredAll: 0.9},
+		{Captures: 1, Rate: 30, Cell: 8, Modulation: 2, PxPerCell: 7, DeliveredLocated: 1.9},
+		{Captures: 1, Rate: 12, Cell: 8, Modulation: 1, PxPerCell: 7, DeliveredLocated: 0.9},
 	}
 	got, ok := atPixels(segs, 12, 2, 5)
 	if !ok || math.Abs(got.located-1.4) > 1e-12 || math.Abs(got.all-0.7) > 1e-12 {

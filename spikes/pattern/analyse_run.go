@@ -122,9 +122,9 @@ var modNames = map[uint8]string{1: "Gray2", 2: "Gray4", 3: "RGB8"}
 
 // netRate is the estimated net rate of a segment in Mbit/s: delivered bits per cell x data cells per
 // frame x display rate x 0.75 (docs/IMPLEMENTATION_PROMPT.md section 6), with the bits delivered
-// over the located captures' passes.
+// over the code frames shown under located captures.
 func netRate(s *segReport) float64 {
-	return s.Sum.Delivered * float64(s.Cells) * float64(s.Rate) * 0.75 / 1e6
+	return s.DeliveredLocated * float64(s.Cells) * float64(s.Rate) * 0.75 / 1e6
 }
 
 func printRecording(w io.Writer, r *recording) {
@@ -144,7 +144,7 @@ func printRecording(w io.Writer, r *recording) {
 		nr := netRate(s)
 		fmt.Fprintf(w, "| %d | %d | %s | %d/%d | %.2f | %.2f | %.3f | %.3f | %.4f | %.4f | %.2e | %.3f | %.3f | %.2f | %.1f%% |\n",
 			s.Rate, s.Cell, modNames[s.Modulation], s.Captures, s.ByTime, s.RateRatio, s.PxPerCell, s.CleanCapture, s.Sum.CleanFrame,
-			s.Clipped, s.Glare, ber, s.Sum.Delivered, s.DeliveredAll, nr, 100*nr/r.Mbps)
+			s.Clipped, s.Glare, ber, s.DeliveredLocated, s.DeliveredAll, nr, 100*nr/r.Mbps)
 	}
 	fmt.Fprintln(w)
 }
