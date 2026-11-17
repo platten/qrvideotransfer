@@ -50,7 +50,7 @@ type GeometryParams struct {
 	Mirror        bool    // the capture is mirrored left to right (a front camera)
 	Shake         float64 // hand-shake, pixels RMS of the movement between captures
 	K1            float64 // radial distortion, r^2 term; positive is barrel
-	K2            float64 // radial distortion, r^4 term; with K1 of the other sign, mustache distortion
+	K2            float64 // radial distortion, r^4 term; with K1 of the other sign, moustache distortion
 }
 
 // OpticsParams describe stage 4, the lens.

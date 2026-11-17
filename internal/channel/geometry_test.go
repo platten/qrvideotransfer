@@ -80,7 +80,7 @@ func TestDistortion(t *testing.T) {
 	}
 }
 
-// Mustache distortion (k1 and k2 of opposite signs): distort inverts undistort, and at the frame's
+// Moustache distortion (k1 and k2 of opposite signs): distort inverts undistort, and at the frame's
 // edge (r = 1) a pinhole point moves by k1 + k2.
 func TestDistortionK2(t *testing.T) {
 	cam := &camera{w: 400, h: 300, cx: 200, cy: 150, norm: 200, k1: -0.05, k2: 0.05}

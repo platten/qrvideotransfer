@@ -120,7 +120,7 @@ func geomSolve8(a *[8][9]float64) ([8]float64, bool) {
 // geomLens is radial distortion about the capture's centre: a capture point p, relative to the
 // centre in units of half the capture's width, is seen by an ideal pinhole camera at
 // p (1 + k1 |p|^2 + k2 |p|^4). Positive k1 is barrel; k1 and k2 of opposite signs give the
-// "mustache" distortion that phone lenses keep after the camera's own correction.
+// "moustache" distortion that phone lenses keep after the camera's own correction.
 type geomLens struct {
 	cx, cy, unit, k1, k2 float64
 }
@@ -194,7 +194,7 @@ func geomFitModel(src, dst []gpt, lens geomLens) (geomModel, float64, bool) {
 // statement about consumer camera lenses, not a fit to any recording: a phone or webcam corrects
 // its lens in the camera and leaves at most a few per cent of radial distortion at the frame's
 // edge (r = 1, where k1 + k2 is the relative displacement). A bound of 0.1 on each term admits up
-// to 10% from either alone, with room for the two to oppose (mustache distortion). Where the two
+// to 10% from either alone, with room for the two to oppose (moustache distortion). Where the two
 // together would fold the image near the corner (both near -0.1), distort stops its Newton steps.
 const geomLensMax = 0.1
 
