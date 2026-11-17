@@ -55,6 +55,34 @@ go run ./spikes/pattern -table -w 1920 -h 1080
 go run ./spikes/pattern -verify-only -w 3840 -h 2160 -out spikes/pattern/out
 ```
 
+## Analysis of the recordings (S2)
+
+`-analyse` runs a recording of the pattern through the M2 vision chain (docs/spikes/S2.md):
+- the detector, header reader, mesh fitter and sampler;
+- `vision.SamplePalette`;
+- the phase field, the equaliser with stripe cancellation, and `vision.SoftBits`.
+
+Each capture's header gives the code frame's index. Every expected bit is recomputed from that index
+(FORMAT.md section 9 with all codeword bits zero), so the soft bits can be judged without any
+codeword. The recording is decoded by the system `ffmpeg`, the native backend meant for recordings the
+user made. Nothing from the recording is written: the output names it only by `-label`.
+
+```sh
+go run ./spikes/pattern -analyse <recording> -patterns recordings/patterns \
+    -label "Phone A, recording 1" -json rec1.json -workers 14
+go run ./spikes/pattern -summarise rec1.json rec2.json ...   # the S2 bars and residuals
+```
+
+For each segment (display rate, cell size, modulation) it reports:
+- how many captures were located;
+- the camera-to-display rate ratio;
+- camera pixels per cell;
+- the clean share per capture and per code frame;
+- the clipped and glare-flagged shares;
+- the bit error rate;
+- delivered bits per cell, under the located captures and over every frame shown;
+- the estimated net rate.
+
 ## Segment tables
 
 `pattern-1920x1080.mp4`: 6480 video frames (108.0 s), F = 3672 code frames.
