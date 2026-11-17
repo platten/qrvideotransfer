@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -194,6 +195,27 @@ func TestSegmentAccounting(t *testing.T) {
 	}
 }
 
+// TestShownDuring: the code frames of a segment shown while a capture is exposed (from its pattern
+// time for one camera frame period) are those whose display interval meets that window.
+func TestShownDuring(t *testing.T) {
+	s := segment{Rate: 12, FirstIndex: 100, CodeFrames: 48, Start: 10}
+	for _, k := range []struct {
+		t, period float64
+		want      []uint32
+	}{
+		{10.01, 1.0 / 30, []uint32{100}},
+		{10.07, 1.0 / 30, []uint32{100, 101}},
+		{10.0, 1.0 / 6, []uint32{100, 101}},
+		{13.99, 1.0 / 30, []uint32{147}}, // the segment's last frame; the next segment's is not counted
+		{9.99, 1.0 / 30, []uint32{100}},  // the window starts before the segment
+	} {
+		got := shownDuring(s, k.t, k.period)
+		if !slices.Equal(got, k.want) {
+			t.Errorf("pattern time %.2f: frames %v, want %v", k.t, got, k.want)
+		}
+	}
+}
+
 // TestCalibration: confidence buckets as in the honesty tests (ten buckets of |s|, stated error
 // 1 / (1 + e^(|s| / LLRScale))), split by the phase weight of the cell.
 // TestTimeOffset: the recording's offset into the pattern is the median over the placed captures of
@@ -289,6 +311,10 @@ func TestAnalyseRendered(t *testing.T) {
 		}
 		if sr.Captures != 4 || sr.ByTime != 4 || sr.Located != 1 || math.Abs(sr.RateRatio-2.5) > 1e-9 {
 			t.Errorf("segment %d: %d captures located of %d by time, camera-to-display ratio %.2f", sr.Seg, sr.Captures, sr.ByTime, sr.RateRatio)
+		}
+		// The located captures' exposures span code frames 0 and 1 of the segment.
+		if sr.LocatedFrames != 2 || math.Abs(sr.DeliveredLocated-float64(b)) > 1e-9 {
+			t.Errorf("segment %d: %d frames under located captures, %.3f bits per cell over them, want 2 and %d", sr.Seg, sr.LocatedFrames, sr.DeliveredLocated, b)
 		}
 		// 4 captures at 30 fps show 1.6 code frames at 12 fps; 2 were seen, so they count.
 		if math.Abs(sr.DeliveredAll-float64(b)) > 1e-9 {
