@@ -79,3 +79,20 @@ func TestBestSegment(t *testing.T) {
 		t.Errorf("no segment qualifies: %d, want -1", i)
 	}
 }
+
+// TestColumnRates: confident-error rates over the left decile, the second, the inner six, the ninth
+// and the right decile; a group with no confident bit gives -1.
+func TestColumnRates(t *testing.T) {
+	var c [10][2]int
+	c[0] = [2]int{100, 40}
+	c[1] = [2]int{100, 5}
+	for d := 2; d < 8; d++ {
+		c[d] = [2]int{1000, 1}
+	}
+	c[9] = [2]int{50, 1}
+	got := columnRates(c)
+	want := [5]float64{0.4, 0.05, 6.0 / 6000, -1, 0.02}
+	if got != want {
+		t.Errorf("rates %v, want %v", got, want)
+	}
+}
