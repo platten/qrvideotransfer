@@ -850,7 +850,11 @@ counted and ignored (SECURITY.md T2). Soft bits are summed in 8 bits, saturating
 the frame the previous capture of the same recording also credited adds half (rule 7). Codeword
 0 of every frame is summed into one descriptor accumulator, tried after each capture until it
 decodes and validates; then the plan and the shard store are made. A frame is attempted once two
-captures have passed without it, and at each recording's end (rule 11). Reading stops as soon as
+captures have passed without it, located or not, and at each recording's end (rule 11). A capture
+is read only while fewer than workers + 2 results wait to be applied, so a stalled worker holds
+back the reading. Before the shard store is made, the temporary folder's free space less 1 GiB
+must hold the store and the stream, and the stream again before it is written (SECURITY.md
+section 5 and T3; otherwise a `LimitError`). Reading stops as soon as
 every block holds K shards. Beyond `MaxSoftBytes` (256 MB) the frame with the least mean confidence
 loses its soft bits first. The stream is then reconstructed block by block, its hash checked, and
 `internal/payload` verifies and unpacks it. `--state-dir` is not built yet (`ErrNotImplemented`;
@@ -1955,6 +1959,11 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   the rendered frame, and the 4K gate header 196 ms, 3.5 times the reference against its bound of
   6 (5.3 times against the rendered frame, before the reference was redefined). The hostile noise
   frame's 301 ms is the figure to beat.
+- **Open defect, blocks the M3 exit (designer's ruling, 2026-11-17): `budget-android` 720p12
+  Gray4 `normal`.** It decodes in 1 of 5 repeatable sessions and in 1 of 8 random ones (the
+  designer's count of a further run: 0 of 4); the raw bit error rate is about 0.10 per capture,
+  and the errors repeat across captures of a frame. Not diagnosed in the first M3 pull request;
+  the row stays asserted in the long run, unchanged. Details in the next entry.
 - **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
   every row of section 15 through the public API with five repeatable sessions each: the files
   (6.5 KB) are encoded to an MP4 by the embedded engine, decoded, filmed for two passes (three on
@@ -1968,7 +1977,11 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   display rate, 4.8 pixels per cell against 4.5, q = 22 against 7.7), so it is a defect to
   trace in vision or the simulator, not removed. CI runs one row per preset (Gray2 `normal` for
   `budget-android`), one session each. The matrix's payload is small (F 4 to 12), so it does
-  not exercise many blocks.
+  not exercise many blocks. **The matrix does not yet use x264 at the preset's bitrate** as
+  section 15 asks (`video.EncodeConfig` has a quantiser, no bitrate); the next M3 piece adds it
+  (designer's ruling, 2026-11-17; section 15 unchanged). Burst loss is tested on a perfect
+  recording only (14.7% of the frames lost in one run decodes), with one block, where a burst
+  and scattered loss cost the same.
 - **Vision under strong simulated noise (M3).** Before the inner code fails, location and the
   crediting of cells do. On a perfect 480p Gray4 capture with Gaussian noise added per pixel, the
   credited share is 0.92 at sigma 10 and 0.22 at 12 with no bit error, and nothing at 15; the
@@ -1976,7 +1989,9 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   preset with sensor noise 12 (camera 1080p) credits nothing; `tripod` at 1080p holds to noise
   12 and fails at 16. With noise on the data cells only, detection fails first. So
   `TestSoftBitsAddUp` gives the decoder soft bits from a BPSK channel directly instead of a
-  filmed recording.
+  filmed recording. A decode-level version was tried with the whole capture's contrast reduced
+  to 0.3 and noise on the data cells only: at sigma 14 each recording decodes 3 or 4 of 4
+  frames, and from sigma 16 location fails, so no setting isolates the summing; not added.
 - **Real recordings through the decode path (M3, `-tags realdevice`).** The S2 pattern carries
   no codewords, so the public decode finds no descriptor (recording 1: no blocks known, after
   255 s) and the check decodes each frame's summed soft bits against the all-zero codeword with
@@ -1993,7 +2008,12 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   issue above). No margin recordings exist yet.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
-  the encoder joins runs with one engine instance. The real-device check took 210-500 s per
+  the encoder joins runs with one engine instance. Eviction rescans every frame's soft bits each
+  time the cap is exceeded, O(frames x C x sent bits) per eviction. Per-frame bookkeeping is
+  outside the 256 MB cap: each frame seen (at most F, and at most two per capture) keeps C
+  `done` flags and C slice headers, about 25 C bytes: 3.8 KB at C = 151 (250 MB at F = 67,112),
+  and about 200 KB at the largest grid's C, so a long recording claiming that grid could hold
+  gigabytes. Bringing it under the cap is the next M3 piece. The real-device check took 210-500 s per
   recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
   1, 255 s); a round-trip matrix row takes 3-14 s alone.
 

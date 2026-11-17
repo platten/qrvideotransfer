@@ -194,12 +194,20 @@ func (d *decoder) recording(ctx context.Context, path string, workers int) error
 	for range workers + 2 {
 		free <- &video.Frame{}
 	}
+	// A capture is read only with a token, returned once its result has been applied in order, so
+	// a stalled worker holds back the reading and at most workers+2 results wait to be applied.
+	tokens := make(chan struct{}, workers+2)
 	jobs := make(chan job)
 	results := make(chan captureResult, workers)
 	var readErr error
 	go func() {
 		defer close(jobs)
 		for i := 0; ; i++ {
+			select {
+			case tokens <- struct{}{}:
+			case <-rctx.Done():
+				return
+			}
 			var f *video.Frame
 			select {
 			case f = <-free:
@@ -240,12 +248,14 @@ func (d *decoder) recording(ctx context.Context, path string, workers int) error
 	next, read := 0, int64(0)
 	for r := range results {
 		waiting[r.index] = r
+		d.maxWaiting = max(d.maxWaiting, len(waiting))
 		for {
 			r, ok := waiting[next]
 			if !ok {
 				break
 			}
 			delete(waiting, next)
+			<-tokens
 			next++
 			read++
 			if d.complete() || rctx.Err() != nil {
@@ -286,6 +296,14 @@ func (d *decoder) recording(ctx context.Context, path string, workers int) error
 
 // apply adds one capture's soft bits, in capture order.
 func (d *decoder) apply(r captureResult) error {
+	if err := d.add(r); err != nil {
+		return err
+	}
+	return d.attemptDue(r.index)
+}
+
+// add sums one capture's soft bits into the accumulators.
+func (d *decoder) add(r captureResult) error {
 	d.stats.Captures++
 	if !r.located {
 		return nil
@@ -349,11 +367,16 @@ func (d *decoder) apply(r captureResult) error {
 		}
 	}
 	d.evict()
-	// Rule 11: a frame is attempted once two captures have passed without it.
+	return nil
+}
+
+// attemptDue attempts, after capture index, every pending frame that two captures have passed
+// without, whether or not those captures showed the code (rule 11).
+func (d *decoder) attemptDue(index int) error {
 	keep := d.pending[:0]
 	for _, f := range d.pending {
 		fa := d.frames[f]
-		if d.store == nil || fa.last > r.index-2 {
+		if d.store == nil || fa.last > index-2 {
 			keep = append(keep, f)
 			continue
 		}
@@ -385,6 +408,14 @@ func (d *decoder) tryDescriptor() error {
 	}
 	plan, err := fec.NewPlan(desc.StreamLen, desc.ShardSize, desc.M, desc.OrderSeed)
 	if err != nil {
+		return err
+	}
+	size, err := rs.StoreSize(plan)
+	if err != nil {
+		return err
+	}
+	// The store and, later, the stream file.
+	if err := checkDisk(d.tmp, "shard store and stream", size+desc.StreamLen); err != nil {
 		return err
 	}
 	store, err := rs.Create(filepath.Join(d.tmp, "shards"), plan)
@@ -509,6 +540,10 @@ func (d *decoder) shortfall() error {
 func (d *decoder) repair(ctx context.Context) (*os.File, error) {
 	p := d.plan
 	d.emit.stage(StageRepair, KindStarted, 0, int64(p.Blocks), UnitBlocks)
+	// The sparse store may have grown into the space counted for the stream since it was made.
+	if err := checkDisk(d.tmp, "stream", d.desc.StreamLen); err != nil {
+		return nil, err
+	}
 	f, err := os.Create(filepath.Join(d.tmp, "stream"))
 	if err != nil {
 		return nil, err

@@ -98,6 +98,22 @@ func TestFrameLoss(t *testing.T) {
 			droppable = append(droppable, f)
 		}
 	}
+	// A burst: 14.7% of the frames in one run, as a phone that stalls would lose them.
+	t.Run("burst", func(t *testing.T) {
+		n := int(0.147 * float64(res.Frames))
+		first := droppable[len(droppable)/2-n/2]
+		var kept []*video.Frame
+		for i, f := range frames {
+			if i < first || i >= first+n {
+				kept = append(kept, f)
+			}
+		}
+		out, _, err := decodeTo(t, writeRaw(t, kept, info.FPSNum/info.FPSDen))
+		if err != nil {
+			t.Fatalf("a burst of %d of %d frames lost: %v", n, res.Frames, err)
+		}
+		checkOutput(t, out, want)
+	})
 	g := prng.SplitMix64{State: 99}
 	for i := len(droppable) - 1; i > 0; i-- {
 		j := int(g.Next() % uint64(i+1))
