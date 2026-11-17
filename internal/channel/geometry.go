@@ -160,6 +160,9 @@ func (c *camera) distort(x, y float64) (float64, float64) {
 			r4 := float64(r2 * r2)
 			fr := float64(c.k1*float64(r2*r)) + float64(c.k2*float64(r4*r)) + r - ru
 			dr := float64(3*float64(c.k1*r2)) + float64(5*float64(c.k2*r4)) + 1
+			if !(dr > 0) {
+				break // beyond the fold (validate keeps it outside the frame)
+			}
 			r -= fr / dr
 		}
 		dx, dy = float64(float64(dx*r)/ru), float64(float64(dy*r)/ru)

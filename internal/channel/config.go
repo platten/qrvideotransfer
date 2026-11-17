@@ -193,6 +193,15 @@ func (c *Config) validate() error {
 	if t.FPS > 0 {
 		frame = 1 / float64(t.FPS)
 	}
+	// The lens must not fold the image inside the frame: the derivative of the distorted radius,
+	// 1 + 3 k1 r^2 + 5 k2 r^4, stays positive out to the corner, r^2 = 1 + (H / W)^2 in half
+	// widths. With |k1| and |k2| at most 0.1 its minimum inside the frame stays above 0.8, so it
+	// can only reach 0 at the frame's edge, and the corner suffices.
+	folds := true
+	if g.Width > 0 {
+		r2 := 1 + float64(float64(g.Height)*float64(g.Height))/float64(float64(g.Width)*float64(g.Width))
+		folds = !(float64(3*float64(g.K1*r2))+float64(5*float64(g.K2*float64(r2*r2)))+1 > 0)
+	}
 	checks := []struct {
 		name string
 		ok   bool
@@ -219,6 +228,7 @@ func (c *Config) validate() error {
 		{"shake (up to an eighth of the width)", in(g.Shake, 0, float64(g.Width)/8)},
 		{"k1", in(g.K1, -0.1, 0.2)},
 		{"k2", in(g.K2, -0.1, 0.1)},
+		{"lens folding the image before the corner", !folds},
 		{"blur", in(o.Blur, 0, 20)},
 		{"vignetting", in(o.Vignette, 0, 1)},
 		{"veiling glare", in(o.Veil, 0, 1)},
