@@ -121,7 +121,8 @@ func runAnalysis(ctx context.Context, path, patterns, label, jsonOut string, wor
 var modNames = map[uint8]string{1: "Gray2", 2: "Gray4", 3: "RGB8"}
 
 // netRate is the estimated net rate of a segment in Mbit/s: delivered bits per cell x data cells per
-// frame x display rate x 0.75 (docs/IMPLEMENTATION_PROMPT.md section 6).
+// frame x display rate x 0.75 (docs/IMPLEMENTATION_PROMPT.md section 6), with the bits delivered
+// over the located captures' passes.
 func netRate(s *segReport) float64 {
 	return s.Sum.Delivered * float64(s.Cells) * float64(s.Rate) * 0.75 / 1e6
 }
@@ -132,8 +133,8 @@ func printRecording(w io.Writer, r *recording) {
 	c := r.Counts
 	fmt.Fprintf(w, "Captures: %d; located %d; header read %d; placed %d (%d at a segment boundary); mesh fitted %d\n\n",
 		c["total"], c["located"], c["header_read"], c["placed"], c["segment_boundary"], c["mesh_fitted"])
-	fmt.Fprintln(w, "| Rate | Cell | Mod | Captures | Camera/display | Px/cell | Clean/capture | Clean/code frame | Clipped | Glare | Bit errors | Delivered bits/cell | Net Mbit/s | Net/bitrate |")
-	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+	fmt.Fprintln(w, "| Rate | Cell | Mod | Located | Camera/display | Px/cell | Clean/capture | Clean/code frame | Clipped | Glare | Bit errors | Delivered bits/cell (located) | Delivered bits/cell (all shown) | Net Mbit/s | Net/bitrate |")
+	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 	for i := range r.Segments {
 		s := &r.Segments[i]
 		ber := 0.0
@@ -141,9 +142,9 @@ func printRecording(w io.Writer, r *recording) {
 			ber = float64(s.Sum.Wrong) / float64(s.Sum.Stated)
 		}
 		nr := netRate(s)
-		fmt.Fprintf(w, "| %d | %d | %s | %d | %.2f | %.2f | %.3f | %.3f | %.4f | %.4f | %.2e | %.3f | %.2f | %.1f%% |\n",
-			s.Rate, s.Cell, modNames[s.Modulation], s.Captures, s.RateRatio, s.PxPerCell, s.CleanCapture, s.Sum.CleanFrame,
-			s.Clipped, s.Glare, ber, s.Sum.Delivered, nr, 100*nr/r.Mbps)
+		fmt.Fprintf(w, "| %d | %d | %s | %d/%d | %.2f | %.2f | %.3f | %.3f | %.4f | %.4f | %.2e | %.3f | %.3f | %.2f | %.1f%% |\n",
+			s.Rate, s.Cell, modNames[s.Modulation], s.Captures, s.ByTime, s.RateRatio, s.PxPerCell, s.CleanCapture, s.Sum.CleanFrame,
+			s.Clipped, s.Glare, ber, s.Sum.Delivered, s.DeliveredAll, nr, 100*nr/r.Mbps)
 	}
 	fmt.Fprintln(w)
 }

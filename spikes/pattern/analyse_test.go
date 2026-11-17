@@ -3,6 +3,7 @@ package main
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/platten/qrvideotransfer/internal/frame"
 	"github.com/platten/qrvideotransfer/internal/modem"
@@ -258,7 +259,10 @@ func TestAnalyseRendered(t *testing.T) {
 		for k := range uint32(2) {
 			pt.render(s.FirstIndex+k, buf)
 			f := placeRendered(buf, pl.Width, pl.Height, 1200, 900)
-			for range 2 {
+			for j := range 2 {
+				// Pattern time of the code frame, plus 1/30 s per capture: a camera at 30 fps
+				// filming a pattern that started 1 s before the recording.
+				f.PTS = time.Duration((s.Start + float64(k)/float64(s.Rate) + float64(j)/30 - 1) * float64(time.Second))
 				r := a.capture(f, &det, index)
 				if !r.located || r.plan != 0 || r.seg != si {
 					t.Fatalf("segment %d frame %d: capture located %v in plan %d segment %d", si, k, r.located, r.plan, r.seg)
@@ -283,8 +287,12 @@ func TestAnalyseRendered(t *testing.T) {
 		if sr.Sum.Expected != 2 || sr.Sum.Seen != 2 || math.Abs(sr.Sum.Delivered-float64(b)) > 1e-9 || sr.Sum.CleanFrame != 1 {
 			t.Errorf("segment %d: %+v, want 2 frames seen and %d bits per cell", sr.Seg, sr.Sum, b)
 		}
-		if sr.Captures != 4 || math.Abs(sr.RateRatio-2.5) > 1e-9 {
-			t.Errorf("segment %d: %d captures, camera-to-display ratio %.2f", sr.Seg, sr.Captures, sr.RateRatio)
+		if sr.Captures != 4 || sr.ByTime != 4 || sr.Located != 1 || math.Abs(sr.RateRatio-2.5) > 1e-9 {
+			t.Errorf("segment %d: %d captures located of %d by time, camera-to-display ratio %.2f", sr.Seg, sr.Captures, sr.ByTime, sr.RateRatio)
+		}
+		// 4 captures at 30 fps show 1.6 code frames at 12 fps; 2 were seen, so they count.
+		if math.Abs(sr.DeliveredAll-float64(b)) > 1e-9 {
+			t.Errorf("segment %d: %.3f bits per cell over every frame shown, want %d", sr.Seg, sr.DeliveredAll, b)
 		}
 	}
 }

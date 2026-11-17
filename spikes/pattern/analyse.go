@@ -245,6 +245,7 @@ type segSum struct {
 	CleanFrame float64 `json:"clean_share_per_code_frame"`
 	Stated     int     `json:"stated_bits"`
 	Wrong      int     `json:"wrong_bits"`
+	Total      float64 `json:"delivered_bits_per_cell_summed"` // over the seen frames
 }
 
 // summarise groups a segment's frame records into passes (a new pass when the first capture is more
@@ -280,11 +281,51 @@ func summarise(recs []frameRec, b, gap int) segSum {
 		s.Wrong += r.wrong
 	}
 	closePass()
+	s.Total = del
 	s.Expected = max(s.Expected, s.Seen)
 	if s.Expected > 0 {
 		s.Delivered, s.CleanFrame = del/float64(s.Expected), clean/float64(s.Expected)
 	}
 	return s
+}
+
+// duration is the pattern's length in seconds.
+func (pl *plan) duration() float64 { return float64(pl.VideoFrames) / fps }
+
+// segmentAt returns the segment showing at pattern time t (seconds, taken modulo the pattern's
+// length: a player looping it starts again at 0).
+func (pl *plan) segmentAt(t float64) int {
+	t = math.Mod(t, pl.duration())
+	if t < 0 {
+		t += pl.duration()
+	}
+	for i := len(pl.Segments) - 1; i > 0; i-- {
+		if t >= pl.Segments[i].Start {
+			return i
+		}
+	}
+	return 0
+}
+
+// patternOffset returns the recording's offset into the pattern, in seconds: the median over the
+// placed captures of their pattern time less their capture time, taken on the circle of the
+// pattern's length so that captures of a second loop agree with those of the first.
+func patternOffset(pts, pat []float64, dur float64) float64 {
+	if len(pts) == 0 {
+		return 0
+	}
+	wrap := func(v float64) float64 { return v - dur*math.Round(v/dur) } // to (-dur/2, dur/2]
+	ref := pat[0] - pts[0]
+	d := make([]float64, len(pts))
+	for i := range pts {
+		d[i] = ref + wrap(pat[i]-pts[i]-ref)
+	}
+	slices.Sort(d)
+	m := math.Mod(d[len(d)/2], dur)
+	if m < 0 {
+		m += dur
+	}
+	return m
 }
 
 // analyser runs the vision chain on captures of the pattern plans.
@@ -315,6 +356,7 @@ type phaseSoft struct {
 // capResult is what one capture gives.
 type capResult struct {
 	index                       int
+	pts, patTime                float64 // capture time, and for a placed capture the pattern time it shows
 	located, headerRead, placed bool
 	boundary                    bool // headers of two segments
 	fitted                      bool
@@ -335,7 +377,7 @@ const wholeWeight = 0.999
 // capture runs the chain on one capture. det keeps no state between calls here (no previous quad
 // is given), so captures may be analysed in any order.
 func (a *analyser) capture(f *video.Frame, det *vision.FinderDetector, index int) capResult {
-	r := capResult{index: index}
+	r := capResult{index: index, pts: f.PTS.Seconds()}
 	q, ok := det.Detect(f, nil)
 	if !ok {
 		return r
@@ -366,6 +408,7 @@ func (a *analyser) capture(f *video.Frame, det *vision.FinderDetector, index int
 	r.placed, r.plan, r.seg = true, pi, si
 	g := a.geoms[pi][si]
 	seg := a.plans[pi].Segments[si]
+	r.patTime = seg.Start + float64(idxs[0]-seg.FirstIndex)/float64(seg.Rate)
 	m, anchors, err := vision.MeshFitter{}.Fit(f, q, g.layout)
 	if err != nil {
 		return r
@@ -494,11 +537,14 @@ type aggregator struct {
 	counts     struct{ captures, located, headerRead, placed, boundary, fitted int }
 	window     int
 	maxPending int
+	pts        []float64         // every capture's time
+	placedPts  map[int][]float64 // by plan: placed captures' times
+	placedPat  map[int][]float64 // and the pattern times they show
 }
 
 func newAggregator(a *analyser, fps float64) *aggregator {
 	return &aggregator{a: a, fps: fps, accs: map[[3]int]*frameAcc{}, segs: map[[2]int]*segCaps{}, done: map[int]bool{},
-		window: int(fps) + 4}
+		window: int(fps) + 4, placedPts: map[int][]float64{}, placedPat: map[int][]float64{}}
 }
 
 func (g *aggregator) seg(pi, si int) *segCaps {
@@ -514,6 +560,11 @@ func (g *aggregator) seg(pi, si int) *segCaps {
 func (g *aggregator) add(r capResult) {
 	c := &g.counts
 	c.captures++
+	g.pts = append(g.pts, r.pts)
+	if r.placed {
+		g.placedPts[r.plan] = append(g.placedPts[r.plan], r.pts)
+		g.placedPat[r.plan] = append(g.placedPat[r.plan], r.patTime)
+	}
 	for _, x := range []struct {
 		ok bool
 		n  *int
@@ -574,13 +625,19 @@ func (g *aggregator) flush(all bool) {
 
 // segReport is one segment's figures in one recording.
 type segReport struct {
-	Plan         int         `json:"plan"`
-	Seg          int         `json:"segment"`
-	Rate         int         `json:"display_rate"`
-	Cell         int         `json:"cell"`
-	Modulation   uint8       `json:"modulation"`
-	Cells        int         `json:"data_cells"`
-	Captures     int         `json:"captures"`
+	Plan       int     `json:"plan"`
+	Seg        int     `json:"segment"`
+	Rate       int     `json:"display_rate"`
+	Cell       int     `json:"cell"`
+	Modulation uint8   `json:"modulation"`
+	Cells      int     `json:"data_cells"`
+	Captures   int     `json:"captures"`          // located, placed in the segment and fitted
+	ByTime     int     `json:"captures_by_time"`  // captures taken while the segment showed
+	Located    float64 `json:"located_share"`     // Captures / ByTime
+	Shown      float64 `json:"code_frames_shown"` // ByTime x display rate / camera rate
+	// DeliveredAll is the delivered bits per cell over every code frame shown while the camera
+	// filmed the segment, through the whole chain: a frame never located delivers nothing.
+	DeliveredAll float64     `json:"delivered_bits_per_cell_all_shown"`
 	RateRatio    float64     `json:"camera_to_display_rate"`
 	PxPerCell    float64     `json:"camera_pixels_per_cell"`
 	CleanCapture float64     `json:"clean_share_per_capture"`
@@ -602,36 +659,52 @@ type report struct {
 
 func (g *aggregator) finish() report {
 	g.flush(true)
-	var keys [][2]int
-	for k := range g.segs {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		return keys[i][0] < keys[j][0] || keys[i][0] == keys[j][0] && keys[i][1] < keys[j][1]
-	})
 	c := g.counts
 	rep := report{Counts: map[string]int{"total": c.captures, "located": c.located, "header_read": c.headerRead,
 		"placed": c.placed, "segment_boundary": c.boundary, "mesh_fitted": c.fitted}}
+	// The plan most captures were placed in; every capture is placed in its segment by time.
+	pi, most := -1, 0
+	for p, v := range g.placedPts {
+		if len(v) > most || len(v) == most && p < pi {
+			pi, most = p, len(v)
+		}
+	}
+	if pi < 0 {
+		return rep
+	}
+	pl := &g.a.plans[pi]
+	rep.Plan = sizeName(pl.Width, pl.Height)
+	off := patternOffset(g.placedPts[pi], g.placedPat[pi], pl.duration())
+	byTime := make([]int, len(pl.Segments))
+	for _, t := range g.pts {
+		byTime[pl.segmentAt(t+off)]++
+	}
 	gap := int(2*g.fps) + 1
-	for _, k := range keys {
-		s := g.segs[k]
-		if s.captures == 0 {
+	for si, sg := range pl.Segments {
+		s := g.segs[[2]int{pi, si}]
+		if s == nil {
+			s = &segCaps{}
+		}
+		if s.captures == 0 && byTime[si] == 0 {
 			continue
 		}
-		sg := g.a.plans[k[0]].Segments[k[1]]
-		geom := g.a.geoms[k[0]][k[1]]
-		n := float64(s.captures)
-		px := slices.Clone(s.px)
-		slices.Sort(px)
-		sr := segReport{Plan: k[0], Seg: k[1], Rate: sg.Rate, Cell: sg.Cell, Modulation: sg.Modulation,
-			Cells: len(geom.layout.DataCells()), Captures: s.captures, RateRatio: g.fps / float64(sg.Rate),
-			PxPerCell: px[len(px)/2], CleanCapture: s.cleanShare / n, Clipped: s.clipped / n, Glare: s.glare / n,
+		geom := g.a.geoms[pi][si]
+		sr := segReport{Plan: pi, Seg: si, Rate: sg.Rate, Cell: sg.Cell, Modulation: sg.Modulation,
+			Cells: len(geom.layout.DataCells()), Captures: s.captures, ByTime: byTime[si], RateRatio: g.fps / float64(sg.Rate),
 			Credited: s.credited, WrongCells: s.wrong, Neighbour: s.neighbour, Sum: summarise(s.recs, geom.b, gap), Cal: s.cal}
+		sr.Shown = float64(byTime[si]) * float64(sg.Rate) / g.fps
+		if byTime[si] > 0 {
+			sr.Located = float64(s.captures) / float64(byTime[si])
+		}
+		if d := max(sr.Shown, float64(sr.Sum.Seen)); d > 0 {
+			sr.DeliveredAll = sr.Sum.Total / d
+		}
+		if n := float64(s.captures); n > 0 {
+			px := slices.Clone(s.px)
+			slices.Sort(px)
+			sr.PxPerCell, sr.CleanCapture, sr.Clipped, sr.Glare = px[len(px)/2], s.cleanShare/n, s.clipped/n, s.glare/n
+		}
 		rep.Segments = append(rep.Segments, sr)
-	}
-	if len(rep.Segments) > 0 {
-		pl := g.a.plans[rep.Segments[0].Plan]
-		rep.Plan = sizeName(pl.Width, pl.Height)
 	}
 	return rep
 }
