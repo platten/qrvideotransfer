@@ -123,7 +123,7 @@ func summariseFiles(paths []string, w io.Writer) error {
 		for _, s := range r.Segments {
 			if math.Abs(s.RateRatio-2) < 0.05 && s.Captures > 0 {
 				fmt.Fprintf(w, "| %s | %d | %d | %s | %d/%d | %.3f | %.3f |\n", r.Label, s.Rate, s.Cell, modNames[s.Modulation],
-					s.Captures, s.ByTime, s.CleanCapture, s.Sum.CleanFrame)
+					s.Captures, s.ByTime, s.CleanCapture, s.CleanLocated)
 			}
 		}
 	}

@@ -246,6 +246,7 @@ type segSum struct {
 	Stated     int     `json:"stated_bits"`
 	Wrong      int     `json:"wrong_bits"`
 	Total      float64 `json:"delivered_bits_per_cell_summed"` // over the seen frames
+	CleanTotal float64 `json:"clean_share_summed"`             // likewise
 }
 
 // summarise groups a segment's frame records into passes (a new pass when the first capture is more
@@ -281,7 +282,7 @@ func summarise(recs []frameRec, b, gap int) segSum {
 		s.Wrong += r.wrong
 	}
 	closePass()
-	s.Total = del
+	s.Total, s.CleanTotal = del, clean
 	s.Expected = max(s.Expected, s.Seen)
 	if s.Expected > 0 {
 		s.Delivered, s.CleanFrame = del/float64(s.Expected), clean/float64(s.Expected)
@@ -656,6 +657,8 @@ type segReport struct {
 	// code was located.
 	LocatedFrames    int     `json:"code_frames_under_located_captures"`
 	DeliveredLocated float64 `json:"delivered_bits_per_cell_located"`
+	// CleanLocated is the share of a frame's cells some capture credited, over the same frames.
+	CleanLocated float64 `json:"clean_share_per_code_frame_located"`
 	// DeliveredAll is the delivered bits per cell over every code frame shown while the camera
 	// filmed the segment, through the whole chain: a frame never located delivers nothing.
 	DeliveredAll float64     `json:"delivered_bits_per_cell_all_shown"`
@@ -729,6 +732,7 @@ func (g *aggregator) finish() report {
 		sr.LocatedFrames = len(under)
 		if sr.LocatedFrames > 0 {
 			sr.DeliveredLocated = sr.Sum.Total / float64(sr.LocatedFrames)
+			sr.CleanLocated = sr.Sum.CleanTotal / float64(sr.LocatedFrames)
 		}
 		if d := max(sr.Shown, float64(sr.Sum.Seen)); d > 0 {
 			sr.DeliveredAll = sr.Sum.Total / d

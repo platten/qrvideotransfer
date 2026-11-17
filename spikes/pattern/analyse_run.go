@@ -143,7 +143,7 @@ func printRecording(w io.Writer, r *recording) {
 		}
 		nr := netRate(s)
 		fmt.Fprintf(w, "| %d | %d | %s | %d/%d | %.2f | %.2f | %.3f | %.3f | %.4f | %.4f | %.2e | %.3f | %.3f | %.2f | %.1f%% |\n",
-			s.Rate, s.Cell, modNames[s.Modulation], s.Captures, s.ByTime, s.RateRatio, s.PxPerCell, s.CleanCapture, s.Sum.CleanFrame,
+			s.Rate, s.Cell, modNames[s.Modulation], s.Captures, s.ByTime, s.RateRatio, s.PxPerCell, s.CleanCapture, s.CleanLocated,
 			s.Clipped, s.Glare, ber, s.DeliveredLocated, s.DeliveredAll, nr, 100*nr/r.Mbps)
 	}
 	fmt.Fprintln(w)
