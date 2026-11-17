@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/platten/qrvideotransfer/internal/channel"
-	"github.com/platten/qrvideotransfer/internal/frame"
 	"github.com/platten/qrvideotransfer/internal/modem"
 	"github.com/platten/qrvideotransfer/internal/video"
 )
