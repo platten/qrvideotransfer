@@ -117,6 +117,17 @@ func unstatedErrors(c *calTable) (errs, bits int) {
 	return errs, bits
 }
 
+// unjudgedErrors returns the errors, stated errors and bits of buckets 0-7 that state at least one
+// error but hold too few bits (under minBucket) to be judged.
+func unjudgedErrors(c *calTable) (errs int, stated float64, bits int) {
+	for j := range calBuckets - 2 {
+		if c.N[j] < minBucket && c.Stated[j] >= 1 {
+			errs, stated, bits = errs+c.Errs[j], stated+c.Stated[j], bits+c.N[j]
+		}
+	}
+	return errs, stated, bits
+}
+
 // confidentErrors returns the error rate among the bits of the two most confident buckets (|s| of
 // 103 and more), where the stated rate is below 1e-11: any error there is a confident one.
 func confidentErrors(c *calTable) float64 {
@@ -219,10 +230,10 @@ func summariseFiles(paths []string, w io.Writer) error {
 		}
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Residuals: confidence over the whole code and over the interior (inner 80% of the grid both ways), pooled per recording and modulation. Ratios of observed to stated error rate over buckets 0-7 of at least 10,000 bits that state at least 1 error and state or show at least 10; errors in buckets 0-7 stating under 1 error in all are counted apart; confident errors are the error rate among bits with |s| >= 103 (stated below 1e-11)")
+	fmt.Fprintln(w, "Residuals: confidence over the whole code and over the interior (inner 80% of the grid both ways), pooled per recording and modulation. Ratios of observed to stated error rate over buckets 0-7 of at least 10,000 bits that state at least 1 error and state or show at least 10; errors in buckets 0-7 too small to judge (under 10,000 bits) that state at least 1 error, and in buckets 0-7 stating under 1 error in all, are counted apart; confident errors are the error rate among bits with |s| >= 103 (stated below 1e-11)")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Recording | Mod | Cells | Whole: bits | Largest (bucket) | Smallest (bucket) | Errors where under 1 stated | Confident errors | Interior: bits | Largest (bucket) | Smallest (bucket) | Errors where under 1 stated | Confident errors |")
-	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+	fmt.Fprintln(w, "| Recording | Mod | Cells | Whole: bits | Largest (bucket) | Smallest (bucket) | Errors in buckets not judged | Errors where under 1 stated | Confident errors | Interior: bits | Largest (bucket) | Smallest (bucket) | Errors in buckets not judged | Errors where under 1 stated | Confident errors |")
+	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 	var pooled, pooledIn [4][2]calTable
 	for _, r := range recs {
 		for _, mod := range []uint8{1, 2, 3} {
@@ -294,11 +305,16 @@ func printCal(w io.Writer, label string, mod uint8, name string, c, ci *calTable
 		if un > 0 {
 			unstated = fmt.Sprintf("%d in %d", ue, un)
 		}
+		je, js, jn := unjudgedErrors(c)
+		unjudged := "-"
+		if jn > 0 {
+			unjudged = fmt.Sprintf("%d where %.1f stated, in %d", je, js, jn)
+		}
 		hi, hb, lo, lb, ok := calRatios(c)
 		if !ok {
-			return fmt.Sprintf("%d | no bucket to judge | | %s | %.2e", n, unstated, confidentErrors(c))
+			return fmt.Sprintf("%d | no bucket to judge | | %s | %s | %.2e", n, unjudged, unstated, confidentErrors(c))
 		}
-		return fmt.Sprintf("%d | %.2f (%d) | %.3f (%d) | %s | %.2e", n, hi, hb, lo, lb, unstated, confidentErrors(c))
+		return fmt.Sprintf("%d | %.2f (%d) | %.3f (%d) | %s | %s | %.2e", n, hi, hb, lo, lb, unjudged, unstated, confidentErrors(c))
 	}
 	fmt.Fprintf(w, "| %s | %s | %s | %s | %s |\n", label, modNames[mod], name, cell(c), cell(ci))
 }
