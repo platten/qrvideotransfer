@@ -1,0 +1,639 @@
+package main
+
+// The S2 analysis (docs/IMPLEMENTATION_PROMPT.md section 5, after M2): a recording of the pattern
+// is decoded and every capture is run through the M2 vision chain (Detect, the header reader, the
+// mesh fitter, the sampler, the phase field and the equaliser). The pattern's data cells carry only
+// their scramble bits, so every expected bit is recomputed from the header, and the soft bits are
+// judged against them per code frame and per segment.
+
+import (
+	"encoding/json"
+	"math"
+	"os"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strconv"
+
+	"github.com/platten/qrvideotransfer/internal/frame"
+	"github.com/platten/qrvideotransfer/internal/modem"
+	"github.com/platten/qrvideotransfer/internal/video"
+	"github.com/platten/qrvideotransfer/internal/vision"
+)
+
+// segGeom is what the analysis needs of one segment's code: its layout, its scrambling and its
+// constellation.
+type segGeom struct {
+	layout  *frame.Layout
+	mapping *frame.Mapping
+	mod     *modem.Constellation
+	b       int
+}
+
+func newSegGeom(h frame.Header) *segGeom {
+	l, err := frame.NewLayout(int(h.GridX), int(h.GridY))
+	if err != nil {
+		panic(err) // the plans hold valid grids only
+	}
+	m, err := frame.NewMapping(h)
+	if err != nil {
+		panic(err)
+	}
+	c, err := modem.ByID(h.Modulation)
+	if err != nil {
+		panic(err)
+	}
+	return &segGeom{layout: l, mapping: m, mod: c, b: m.BitsPerCell()}
+}
+
+// expectedBit returns the bit painted at data-bit position q of code frame idx: its scramble bit
+// (FORMAT.md section 9 with every codeword bit zero). Position q is bit q mod b of data cell q div b,
+// most significant first, the order of the soft bits.
+func (g *segGeom) expectedBit(idx uint32, q int) uint8 { return g.mapping.Scrambler(idx).Bit(q) }
+
+// loadPlans reads every pattern-*.json segment table in dir.
+func loadPlans(dir string) ([]plan, error) {
+	names, err := filepath.Glob(filepath.Join(dir, "pattern-*.json"))
+	if err != nil {
+		return nil, err
+	}
+	var out []plan
+	for _, n := range names {
+		b, err := os.ReadFile(n)
+		if err != nil {
+			return nil, err
+		}
+		var pl plan
+		if err := json.Unmarshal(b, &pl); err != nil {
+			return nil, err
+		}
+		out = append(out, pl)
+	}
+	return out, nil
+}
+
+// locate returns the plan and segment a header belongs to: the plan with its frame count whose
+// segment holding the frame index has the header's grid and modulation. The pattern's session and
+// inner code are required.
+func locate(plans []plan, h frame.Header) (int, int, bool) {
+	if h.Session != session || h.InnerCode != innerCode {
+		return 0, 0, false
+	}
+	for pi, pl := range plans {
+		if pl.TotalFrames != h.TotalFrames {
+			continue
+		}
+		for si, s := range pl.Segments {
+			if h.FrameIndex < s.FirstIndex || h.FrameIndex >= s.FirstIndex+uint32(s.CodeFrames) { //nolint:gosec // small
+				continue
+			}
+			if int(h.GridX) == s.GridX && int(h.GridY) == s.GridY && h.Modulation == s.Modulation {
+				return pi, si, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// phaseFrame returns the code frame that phase p (frame index mod 4) shows in a capture whose
+// headers read the frame indices hs: a header's own index when its phase is p, else the index one
+// step after or before the first header's. Two steps away is ambiguous and gives nothing.
+func phaseFrame(hs []uint32, p int) (uint32, bool) {
+	for _, h := range hs {
+		if int(h&3) == p {
+			return h, true
+		}
+	}
+	if len(hs) == 0 {
+		return 0, false
+	}
+	h := hs[0]
+	switch (p - int(h&3)) & 3 {
+	case 1:
+		return h + 1, true
+	case 3:
+		if h > 0 {
+			return h - 1, true
+		}
+	}
+	return 0, false
+}
+
+// calBuckets and calTable are the confidence buckets of the honesty tests (DESIGN.md section 15).
+const calBuckets = 10
+
+type calTable struct {
+	N      [calBuckets]int     `json:"n"`
+	Errs   [calBuckets]int     `json:"errors"`
+	Stated [calBuckets]float64 `json:"stated"` // sum of stated error probabilities
+}
+
+// add counts soft bit s for a sent bit: positive means 0, and a zero soft bit counts as an error
+// half the time.
+func (c *calTable) add(s int8, bit uint8) {
+	a := int(s)
+	if a < 0 {
+		a = -a
+	}
+	j := a * calBuckets / 128
+	c.N[j]++
+	c.Stated[j] += 1 / (1 + math.Exp(float64(a)/modem.LLRScale))
+	switch {
+	case s == 0:
+		if c.N[j]%2 == 0 {
+			c.Errs[j]++
+		}
+	case (s > 0) != (bit == 0):
+		c.Errs[j]++
+	}
+}
+
+func (c *calTable) merge(o *calTable) {
+	for j := range calBuckets {
+		c.N[j] += o.N[j]
+		c.Errs[j] += o.Errs[j]
+		c.Stated[j] += o.Stated[j]
+	}
+}
+
+// h2 is the binary entropy in bits.
+func h2(p float64) float64 {
+	if p <= 0 || p >= 1 {
+		return 0
+	}
+	return -p*math.Log2(p) - (1-p)*math.Log2(1-p)
+}
+
+// frameAcc sums, per bit, the soft bits of every capture that credits a cell of one code frame, as a
+// decoder combining its captures would.
+type frameAcc struct {
+	cells, b          int
+	sum               []int16
+	credited          []bool
+	firstCap, lastCap int
+	captures          int
+}
+
+func newFrameAcc(cells, b, capIndex int) *frameAcc {
+	return &frameAcc{cells: cells, b: b, sum: make([]int16, cells*b), credited: make([]bool, cells), firstCap: capIndex, lastCap: capIndex}
+}
+
+func (a *frameAcc) add(soft []int8, credited []bool, capIndex int) {
+	for i, ok := range credited {
+		if !ok {
+			continue
+		}
+		a.credited[i] = true
+		for k := range a.b {
+			a.sum[i*a.b+k] += int16(soft[i*a.b+k])
+		}
+	}
+	a.firstCap, a.lastCap = min(a.firstCap, capIndex), max(a.lastCap, capIndex)
+	a.captures++
+}
+
+// frameRec is one code frame's result: of its cells, how many some capture credited (clean); of its
+// bits, how many the summed soft bits state and how many of those are wrong.
+type frameRec struct {
+	idx      uint32
+	firstCap int
+	cells    int
+	clean    int
+	stated   int
+	wrong    int
+	captures int
+}
+
+func (a *frameAcc) finish(exp func(q int) uint8) frameRec {
+	r := frameRec{cells: a.cells, captures: a.captures, firstCap: a.firstCap}
+	for i, ok := range a.credited {
+		if !ok {
+			continue
+		}
+		r.clean++
+		for k := range a.b {
+			q := i*a.b + k
+			s := a.sum[q]
+			if s == 0 {
+				continue
+			}
+			r.stated++
+			if (s > 0) != (exp(q) == 0) {
+				r.wrong++
+			}
+		}
+	}
+	return r
+}
+
+// delivered is the frame's delivered bits per cell: b x the share of bits stated x (1 - H2(error
+// rate among the stated bits)), the capacity of a binary channel with erasures and errors. A cell no
+// capture credited delivers nothing.
+func (r frameRec) delivered(b int) float64 {
+	if r.cells == 0 || r.stated == 0 {
+		return 0
+	}
+	return float64(b) * float64(r.stated) / float64(r.cells*b) * (1 - h2(float64(r.wrong)/float64(r.stated)))
+}
+
+// segSum is a segment's figures over every pass the recording made through it.
+type segSum struct {
+	Expected   int     `json:"expected_frames"` // code frames shown within the passes
+	Seen       int     `json:"seen_frames"`     // of those, credited by some capture
+	Passes     int     `json:"passes"`
+	Delivered  float64 `json:"delivered_bits_per_cell"`
+	CleanFrame float64 `json:"clean_share_per_code_frame"`
+	Stated     int     `json:"stated_bits"`
+	Wrong      int     `json:"wrong_bits"`
+}
+
+// summarise groups a segment's frame records into passes (a new pass when the first capture is more
+// than gap captures after the previous record's, or the index goes back), counts every index
+// between a pass's first and last as shown, and averages delivered bits per cell and the clean share
+// over the shown frames: a frame no capture credited delivers nothing.
+func summarise(recs []frameRec, b, gap int) segSum {
+	recs = slices.Clone(recs)
+	sort.Slice(recs, func(i, j int) bool { return recs[i].firstCap < recs[j].firstCap })
+	var s segSum
+	var lo, hi uint32
+	prev := -1 << 30
+	closePass := func() {
+		if s.Passes > 0 {
+			s.Expected += int(hi-lo) + 1
+		}
+	}
+	var del, clean float64
+	for _, r := range recs {
+		if r.firstCap-prev > gap || s.Passes > 0 && r.idx+8 < hi {
+			closePass()
+			s.Passes++
+			lo, hi = r.idx, r.idx
+		}
+		lo, hi = min(lo, r.idx), max(hi, r.idx)
+		prev = r.firstCap
+		s.Seen++
+		del += r.delivered(b)
+		if r.cells > 0 {
+			clean += float64(r.clean) / float64(r.cells)
+		}
+		s.Stated += r.stated
+		s.Wrong += r.wrong
+	}
+	closePass()
+	s.Expected = max(s.Expected, s.Seen)
+	if s.Expected > 0 {
+		s.Delivered, s.CleanFrame = del/float64(s.Expected), clean/float64(s.Expected)
+	}
+	return s
+}
+
+// analyser runs the vision chain on captures of the pattern plans.
+type analyser struct {
+	plans []plan
+	geoms [][]*segGeom
+}
+
+func newAnalyser(plans []plan) *analyser {
+	a := &analyser{plans: plans, geoms: make([][]*segGeom, len(plans))}
+	for pi, pl := range plans {
+		for _, s := range pl.Segments {
+			a.geoms[pi] = append(a.geoms[pi], newSegGeom(frame.Header{Version: frame.Version, Session: session,
+				TotalFrames: pl.TotalFrames, GridX: uint16(s.GridX), GridY: uint16(s.GridY), //nolint:gosec // grid <= 2047
+				Modulation: s.Modulation, InnerCode: innerCode}))
+		}
+	}
+	return a
+}
+
+// phaseSoft is one phase's soft bits from one capture, for the code frame it shows.
+type phaseSoft struct {
+	idx      uint32
+	soft     []int8
+	credited []bool
+}
+
+// capResult is what one capture gives.
+type capResult struct {
+	index                       int
+	located, headerRead, placed bool
+	boundary                    bool // headers of two segments
+	fitted                      bool
+	plan, seg                   int
+	cells, clean, clipped       int
+	glare                       int
+	pxPerCell                   float64
+	phases                      []phaseSoft
+	cal                         [2]calTable // credited cells wholly one frame (estimated weight >= 0.999) and partly mixed
+	credited, wrongCells        int         // credited cells, and those whose hard symbol is wrong
+	neighbour                   int         // wrong cells whose hard symbol is exactly the neighbouring frame's
+}
+
+// wholeWeight is the estimated phase weight from which a credited cell counts as wholly one frame,
+// as the honesty tests split clean from partly mixed cells by their true weight.
+const wholeWeight = 0.999
+
+// capture runs the chain on one capture. det keeps no state between calls here (no previous quad
+// is given), so captures may be analysed in any order.
+func (a *analyser) capture(f *video.Frame, det *vision.FinderDetector, index int) capResult {
+	r := capResult{index: index}
+	q, ok := det.Detect(f, nil)
+	if !ok {
+		return r
+	}
+	r.located = true
+	hs, ok := vision.SlotReader{}.Read(f, q)
+	if !ok {
+		return r
+	}
+	r.headerRead = true
+	var idxs []uint32
+	pi, si := -1, -1
+	for _, h := range hs {
+		p, s, ok := locate(a.plans, h)
+		if !ok {
+			continue
+		}
+		if pi >= 0 && (p != pi || s != si) {
+			r.boundary = true
+			return r
+		}
+		pi, si = p, s
+		idxs = append(idxs, h.FrameIndex)
+	}
+	if pi < 0 {
+		return r
+	}
+	r.placed, r.plan, r.seg = true, pi, si
+	g := a.geoms[pi][si]
+	seg := a.plans[pi].Segments[si]
+	m, anchors, err := vision.MeshFitter{}.Fit(f, q, g.layout)
+	if err != nil {
+		return r
+	}
+	r.fitted = true
+	cx, cy := float64(g.layout.GridX())/2, float64(g.layout.GridY())/2
+	p0, px, py := m.At(cx, cy), m.At(cx+1, cy), m.At(cx, cy+1)
+	r.pxPerCell = (math.Hypot(px.X-p0.X, px.Y-p0.Y) + math.Hypot(py.X-p0.X, py.Y-p0.Y)) / 2
+	cells := g.layout.DataCells()
+	r.cells = len(cells)
+	obs := make([]modem.Obs, len(cells))
+	vision.FootprintSampler{}.Sample(obs, f, m, cells)
+	for _, o := range obs {
+		if o.Saturated {
+			r.clipped++
+		}
+	}
+	pal := make([]modem.Obs, 32)
+	vision.SamplePalette(pal, f, m, g.layout)
+	gamma, ok := vision.PaletteGamma(pal, g.mod)
+	if !ok {
+		gamma = 0
+	}
+	pf := vision.AnchorPhase{Gamma: gamma}.Estimate(anchors, g.layout)
+	fld := (&vision.TileEqualiser{Mod: g.mod, Stripes: true}).Fit(obs, pal, g.layout, anchors)
+	sat := 0
+	for _, o := range obs {
+		if o.Saturated {
+			sat++
+		}
+	}
+	r.glare = sat - r.clipped
+	for i := range cells {
+		if _, ok := pf.Phase(i); ok {
+			r.clean++
+		}
+	}
+	b := g.b
+	soft := make([]int8, len(cells)*b)
+	for p := range 4 {
+		if vision.SoftBits(soft, obs, g.layout, fld, g.mod, &pf, p) == 0 {
+			continue
+		}
+		idx, ok := phaseFrame(idxs, p)
+		if !ok || idx < seg.FirstIndex || idx >= seg.FirstIndex+uint32(seg.CodeFrames) { //nolint:gosec // small
+			continue
+		}
+		credited := make([]bool, len(cells))
+		scr := g.mapping.Scrambler(idx)
+		var prev, next frame.Scrambler
+		hasPrev, hasNext := idx > seg.FirstIndex, idx+1 < seg.FirstIndex+uint32(seg.CodeFrames) //nolint:gosec // small
+		if hasPrev {
+			prev = g.mapping.Scrambler(idx - 1)
+		}
+		if hasNext {
+			next = g.mapping.Scrambler(idx + 1)
+		}
+		for i := range cells {
+			w := pf.Weights[i][p]
+			if w < vision.CleanWeight {
+				continue
+			}
+			credited[i] = true
+			t := 0
+			if w < wholeWeight {
+				t = 1
+			}
+			stated, wrong := true, false
+			for k := range b {
+				s := soft[i*b+k]
+				bit := scr.Bit(i*b + k)
+				r.cal[t].add(s, bit)
+				if s == 0 {
+					stated = false
+				} else if (s > 0) != (bit == 0) {
+					wrong = true
+				}
+			}
+			if !stated {
+				continue
+			}
+			r.credited++
+			if !wrong {
+				continue
+			}
+			r.wrongCells++
+			if hasPrev && symbolIs(soft[i*b:i*b+b], prev, i*b) || hasNext && symbolIs(soft[i*b:i*b+b], next, i*b) {
+				r.neighbour++
+			}
+		}
+		r.phases = append(r.phases, phaseSoft{idx: idx, soft: slices.Clone(soft), credited: credited})
+	}
+	return r
+}
+
+// symbolIs reports whether the hard decisions of soft (all non-zero) are the bits of scrambler s
+// at positions q0 onward.
+func symbolIs(soft []int8, s frame.Scrambler, q0 int) bool {
+	for k, v := range soft {
+		if (v > 0) != (s.Bit(q0+k) == 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// segCaps accumulates a segment's per-capture figures.
+type segCaps struct {
+	captures                   int
+	cleanShare, clipped, glare float64
+	px                         []float64
+	cal                        [2]calTable
+	credited, wrong, neighbour int
+	recs                       []frameRec
+}
+
+// aggregator collects capture results, sums each code frame's captures and finishes a code frame
+// once no capture near it is outstanding.
+type aggregator struct {
+	a          *analyser
+	fps        float64
+	accs       map[[3]int]*frameAcc
+	segs       map[[2]int]*segCaps
+	done       map[int]bool
+	watermark  int // every capture below it has been added
+	counts     struct{ captures, located, headerRead, placed, boundary, fitted int }
+	window     int
+	maxPending int
+}
+
+func newAggregator(a *analyser, fps float64) *aggregator {
+	return &aggregator{a: a, fps: fps, accs: map[[3]int]*frameAcc{}, segs: map[[2]int]*segCaps{}, done: map[int]bool{},
+		window: int(fps) + 4}
+}
+
+func (g *aggregator) seg(pi, si int) *segCaps {
+	k := [2]int{pi, si}
+	s := g.segs[k]
+	if s == nil {
+		s = &segCaps{}
+		g.segs[k] = s
+	}
+	return s
+}
+
+func (g *aggregator) add(r capResult) {
+	c := &g.counts
+	c.captures++
+	for _, x := range []struct {
+		ok bool
+		n  *int
+	}{{r.located, &c.located}, {r.headerRead, &c.headerRead}, {r.placed, &c.placed}, {r.boundary, &c.boundary}, {r.fitted, &c.fitted}} {
+		if x.ok {
+			*x.n++
+		}
+	}
+	if r.fitted {
+		s := g.seg(r.plan, r.seg)
+		s.captures++
+		s.cleanShare += float64(r.clean) / float64(r.cells)
+		s.clipped += float64(r.clipped) / float64(r.cells)
+		s.glare += float64(r.glare) / float64(r.cells)
+		s.px = append(s.px, r.pxPerCell)
+		s.cal[0].merge(&r.cal[0])
+		s.cal[1].merge(&r.cal[1])
+		s.credited += r.credited
+		s.wrong += r.wrongCells
+		s.neighbour += r.neighbour
+		geom := g.a.geoms[r.plan][r.seg]
+		for _, ph := range r.phases {
+			k := [3]int{r.plan, r.seg, int(ph.idx)}
+			acc := g.accs[k]
+			if acc == nil {
+				acc = newFrameAcc(len(geom.layout.DataCells()), geom.b, r.index)
+				g.accs[k] = acc
+			}
+			acc.add(ph.soft, ph.credited, r.index)
+		}
+	}
+	g.done[r.index] = true
+	for g.done[g.watermark] {
+		delete(g.done, g.watermark)
+		g.watermark++
+	}
+	g.flush(false)
+}
+
+// flush finishes the code frames whose last capture lies more than window captures below the
+// watermark, or all of them.
+func (g *aggregator) flush(all bool) {
+	for k, acc := range g.accs {
+		if !all && acc.lastCap+g.window >= g.watermark {
+			continue
+		}
+		geom := g.a.geoms[k[0]][k[1]]
+		idx := uint32(k[2]) //nolint:gosec // small
+		scr := geom.mapping.Scrambler(idx)
+		r := acc.finish(scr.Bit)
+		r.idx = idx
+		s := g.seg(k[0], k[1])
+		s.recs = append(s.recs, r)
+		delete(g.accs, k)
+	}
+	g.maxPending = max(g.maxPending, len(g.accs))
+}
+
+// segReport is one segment's figures in one recording.
+type segReport struct {
+	Plan         int         `json:"plan"`
+	Seg          int         `json:"segment"`
+	Rate         int         `json:"display_rate"`
+	Cell         int         `json:"cell"`
+	Modulation   uint8       `json:"modulation"`
+	Cells        int         `json:"data_cells"`
+	Captures     int         `json:"captures"`
+	RateRatio    float64     `json:"camera_to_display_rate"`
+	PxPerCell    float64     `json:"camera_pixels_per_cell"`
+	CleanCapture float64     `json:"clean_share_per_capture"`
+	Clipped      float64     `json:"clipped_share"`
+	Glare        float64     `json:"glare_flagged_share"`
+	Credited     int         `json:"credited_cells"`
+	WrongCells   int         `json:"wrong_cells"`
+	Neighbour    int         `json:"wrong_cells_matching_a_neighbour"`
+	Sum          segSum      `json:"frames"`
+	Cal          [2]calTable `json:"calibration"` // wholly one frame, partly mixed
+}
+
+// report is one recording's analysis.
+type report struct {
+	Plan     string         `json:"plan"`
+	Counts   map[string]int `json:"captures"`
+	Segments []segReport    `json:"segments"`
+}
+
+func (g *aggregator) finish() report {
+	g.flush(true)
+	var keys [][2]int
+	for k := range g.segs {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i][0] < keys[j][0] || keys[i][0] == keys[j][0] && keys[i][1] < keys[j][1]
+	})
+	c := g.counts
+	rep := report{Counts: map[string]int{"total": c.captures, "located": c.located, "header_read": c.headerRead,
+		"placed": c.placed, "segment_boundary": c.boundary, "mesh_fitted": c.fitted}}
+	gap := int(2*g.fps) + 1
+	for _, k := range keys {
+		s := g.segs[k]
+		if s.captures == 0 {
+			continue
+		}
+		sg := g.a.plans[k[0]].Segments[k[1]]
+		geom := g.a.geoms[k[0]][k[1]]
+		n := float64(s.captures)
+		px := slices.Clone(s.px)
+		slices.Sort(px)
+		sr := segReport{Plan: k[0], Seg: k[1], Rate: sg.Rate, Cell: sg.Cell, Modulation: sg.Modulation,
+			Cells: len(geom.layout.DataCells()), Captures: s.captures, RateRatio: g.fps / float64(sg.Rate),
+			PxPerCell: px[len(px)/2], CleanCapture: s.cleanShare / n, Clipped: s.clipped / n, Glare: s.glare / n,
+			Credited: s.credited, WrongCells: s.wrong, Neighbour: s.neighbour, Sum: summarise(s.recs, geom.b, gap), Cal: s.cal}
+		rep.Segments = append(rep.Segments, sr)
+	}
+	if len(rep.Segments) > 0 {
+		pl := g.a.plans[rep.Segments[0].Plan]
+		rep.Plan = sizeName(pl.Width, pl.Height)
+	}
+	return rep
+}
+
+func sizeName(w, h int) string { return strconv.Itoa(w) + "x" + strconv.Itoa(h) }
