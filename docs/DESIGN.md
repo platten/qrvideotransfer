@@ -544,10 +544,23 @@ For each capture:
    content), each grid is tried, the one more copies give first; layouts are cached by grid and at most two
    distinct grids are used per capture, on the three-finder path too. With that grid the anchors are located as in step 3, giving up after 64 tried with
    fewer than eight found (a header claiming the largest grid the gate allows at 4K then costs about
-   11-16 MB and 3.7 times a real code's detection per capture); at least eight, and a quarter of those inside the capture, must be
-   found, and each finder in turn must lie within the smaller of one cell and half a module of where
-   a model fitted to the located anchors and the other three finders puts it (a visible finder more
-   than half a module off is a wrong one). One copy can decode with one finder wrong (it happened once in 200
+   19 MB and about 200 ms per capture at 4K, 3.5 times the cost reference of SECURITY.md section 9.1); at least eight, and a quarter of those inside the capture, must be
+   found, and each finder in turn must lie within half a finder module of where a model fitted to
+   the located anchors and the other three finders puts it. The check is not there to catch a real
+   finder slightly misplaced: the detector locates a real finder's centre to about a pixel (on the
+   S2 laptop recording, the cluster sat within a pixel of the drawn finder's centre while the
+   anchors' model put it 2.5 cells away). It is there to catch a different, finder-like pattern
+   standing in for the finder, and two finder-like patterns cannot both have their centres within
+   half a module of the same point; a visible finder more than half a module from the truth is
+   also what makes a quad wrong. In cells this is looser on fine grids (1 cell at 1080p with
+   4-pixel cells, where it was already 1; 1.85 cells on an 800 x 500 grid, where it was 1) and
+   tighter on coarse ones. The S2 recordings motivated revisiting it: until then a finder had to lie
+   within the smaller of one cell and half a module, and on rescaled playback the corner finders,
+   beyond the anchors' reach, were rejected at 0.55-0.78 cell (most of that came from the k1-only
+   lens model, step 3). The three-finder path fits its leave-one-out model with k1 alone: with one
+   finder only predicted, k2's freedom let a decoy among the visible three bend the model until the
+   real finder beside it disagreed too, and the narrow fix below then left that real finder out.
+   One copy can decode with one finder wrong (it happened once in 200
    poses, with a finder 20 cells off), since a copy is placed mostly by the finders nearest it. An
    earlier rule, requiring one of the two anchors next to each finder, rejected 17 of 200 real harsh
    captures whose anchors there were unreadable. A capture whose four copies all fail is not located
@@ -643,19 +656,45 @@ For each capture:
    copy, then per pair, then all four.
    As built: barrel distortion bows the frame edges between the finders by more than half a slot
    (about 16 pixels against slots of 13 at 4K with k1 = 0.04), so the homography is fitted after
-   radial distortion about the capture's centre, with k1 chosen from 13 values in [0, 0.12] by the
-   slots' total contrast. A finder's black and white come from its centre column (ring 0 and 1 dark,
-   ring 2 light; inverted for the fourth finder), where a module is 1/126 of the finder rectangle
-   whatever the grid. Pairs are tried among the copies that did not decode alone, and all four only
-   when nothing decoded.
+   radial distortion about the capture's centre, k1 r^2 + k2 r^4 (step 3). The lens is searched
+   outwards from no distortion, in steps of 0.02 over [-0.1, 0.1]: k1 with k2 = 0, then k2 with the
+   k1 of the highest slot contrast, then k1 again at a quarter and half a step either side; the
+   first lens through which the header decodes is taken, and when none does, the one of the
+   highest contrast. Preferring the smallest distortion that reads the header matters on damaged
+   headers: with two copies blank, a strong k2 bent their slots into data cells and raised the
+   contrast above the true lens's. A finder's black and white come from its centre column (ring 0
+   and 1 dark, ring 2 light; inverted for the fourth finder), where a module is 1/126 of the finder
+   rectangle whatever the grid, measured through the model without a lens (at the finders the
+   homography alone is exact, and a lens candidate must not move its own references). The
+   three-finder search uses the k1 stage only. Pairs are tried among the copies that did not decode
+   alone, and all four only when nothing decoded.
 3. **Fit the mesh.** Locate every anchor's checker corner to sub-pixel accuracy, reject outliers, and
    interpolate. This absorbs lens distortion, rolling-shutter shear and stabilisation warping.
-   As built: anchors are visited from the finders outwards; each saddle is predicted by the model of
-   step 2 plus the displacement of the anchors already located nearby, found by the strongest saddle
-   response within 1.5 cells and refined where the image gradient is perpendicular to the direction
-   from the corner. The model, k1 included, is refitted to the corners, and a corner more than 0.35 cell
-   from its neighbours' median displacement is rejected. The mesh's nodes, every 4 cells, are the model
-   plus the corners' residuals interpolated over the anchor lattice; cell (x, y) covers
+   As built: anchors are visited from the finders outwards (at first the finders are the only
+   measured points, so prediction is best next to them). Each saddle is predicted from its located
+   neighbours on the anchor lattice (2 P1 - P2 along a row or column, or the parallelogram of a
+   diagonal), which does not depend on the shape of the lens distortion; with no located
+   neighbours, by the model of step 2 plus the displacement of the anchors located nearby. It is
+   found by the strongest saddle response within 1.5 cells and refined where the image gradient is
+   perpendicular to the direction from the corner; a saddle found from its neighbours must also lie
+   within 3 cells of the global model (twice the search radius), a coarser consistency check. The
+   global model is refitted to the located anchors at 12 and each time their number doubles. Its
+   lens is k1 r^2 + k2 r^4, each within +-0.1 (half capture widths; a statement about consumer
+   lenses corrected in the camera, which leave a few per cent at the frame's edge, not a fit to a
+   recording). The S2 recordings motivated k2: on both phones the anchors fitted k1 near -0.07 and
+   k2 near +0.06 ("moustache" distortion), 0.2-0.9 pixel RMS, against 0.5-2.2 with k1 alone, whose
+   error at the code's left edge put the anchors there outside the search. k1, k2 and the
+   homography are estimated together by iterated linear least squares (searching one term at a time
+   stalls: over the points the two nearly cancel), and k2 is kept only when the Bayesian information
+   criterion favours it over k1 alone (N ln(rss1 / rss2) > ln N, N coordinates); without that, k2
+   follows the points' noise and extrapolates worse. The model is refitted to the corners, and a
+   corner more than 0.35 cell from its neighbours' median displacement is rejected. The mesh's
+   nodes, every 4 cells, are the model plus the corners' residuals interpolated over the anchor
+   lattice; finders within half a module of where the anchors alone put them (step 1's rule) are
+   measured points of that interpolation too, setting the unknown nodes of the lattice square that
+   holds them, so the cells outside the first and last anchor column and row lie between finder and
+   anchor rather than beyond the anchors (simulated moustache lens, 4K handheld: 0.0179 to 0.0161
+   cell RMS in those columns, 0.0144 elsewhere); cell (x, y) covers
    [x, x+1) x [y, y+1) of the mesh's coordinates. The fit fails unless at least one anchor, and at
    least a quarter of those the model places inside the capture, are located. Once eight anchors are
    located, a finder stays in the global model's fit only while it lies within a quarter cell of
@@ -1482,7 +1521,10 @@ How the parameters are read, and the values every preset shares:
   y), pulled back by a factor 0.95 per step, plus a rotation whose steps move the frame's edge by
   about half as much; the pose is linear between steps, so a moving camera shears the rows of a
   rolling shutter. Distortion maps a capture point p, relative to the centre in units of half the
-  frame width, to the pinhole point p (1 + k1 |p|^2); positive k1 is barrel.
+  frame width, to the pinhole point p (1 + k1 |p|^2 + k2 |p|^4); positive k1 is barrel. The presets
+  have k2 = 0. The tests' moustache variant (k1 = -0.05, k2 = +0.05: -1.2% at r = 0.7, +2.1% in a
+  16:9 corner) is a plausible corrected phone lens; the S2 recordings motivated adding the term,
+  and the simulator stays uncalibrated.
 - *Optics.* Defocus is a Gaussian; motion during the exposure widens it along x and y by the motion's
   length over the square root of 12. Corner vignetting falls off with the squared distance from the
   centre. Veiling glare is added light; the specular patch is a disc at 1.5 times white, at a random
@@ -1795,6 +1837,56 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 | Miscalibrated confidence or a wrong LDPC table | Honest-confidence test; published-threshold test | Both tests in M1 and M2 |
 | 1 GB scale: 8.5 GB video, 13 GB recording, hours of processing, clip-length limits on phones | Streaming stages, disk stores, resume, merging split recordings | Nightly 1 GB run |
 | One maintainer behind go-ffmpreg; GPL source obligations for the embedded binary | Version and checksum pinned; build script and licence notice in the repository | Release checklist |
+
+### Open issues
+
+- **The laptop recordings' corners (S2).** When the code fills the frame to its corners, as on the
+  S2 laptop recordings (a 3200 x 2000 screen filmed by two phones), the corner finders lie beyond
+  every anchor, where the phones' distortion departs from the k1 + k2 lens model (section 10, step
+  3) by up to a finder module; the leave-one-out check then rejects a real finder, and the frame is
+  not located. A third lens term, or a tolerance wider than half a module, were ruled out
+  (2026-11-17). Located captures before (M2 at de1d1c4) and after the S2 geometry fix, and the
+  left finders' offsets from the anchors' prediction on 30 frames:
+
+  | Recording | Located before | Located after | Left finders' offsets |
+  | --- | --- | --- | --- |
+  | Phone A, recording 3 (4K60) | 459 of 4,674 | 352 | 3.6 and 2.2 cells (1.0 and 0.6 module) |
+  | Phone B, recording 4 (1080p30) | 0 of 2,326 | 883 | 2.3-2.6 and 1.3-1.4 cells (0.65 and 0.35 module) |
+  | Phone B, recording 5 (4K30) | 4 of 2,257 | 34 | not sampled |
+  | Phone B, recording 6 (4K60, 8-bit) | 3 of 4,797 | 814 | 1.1 and 0.5 cells (0.6 and 0.27 module) |
+
+  With the check disabled locally, recording 3 was located in 4,290 captures and its left 10% of
+  columns fell from 40-49% confident errors to 2-8%. Candidate fix, to evaluate once the
+  end-to-end path works: locate from the anchor lattice and a decoded header; treat a corner
+  finder that fails the confirmation as absent; mark the cells outside the anchors' hull at that
+  corner unknown instead of rejecting the frame. `TestGeometryMoustacheCorner` is skipped until
+  then: the simulator's lens is the detector's own model, which extrapolates correctly.
+- **Small grids.** The confirmation needs eight located anchors (section 10, step 1), and the
+  anchor lattice (every 32 columns and 30 rows) gives small grids fewer, so they are never located,
+  even on a perfect capture where the header reads and every anchor is found:
+
+  | Grid | Presets | Anchors | Located |
+  | --- | --- | --- | --- |
+  | 53 x 30 | 480p at 16-pixel cells | 2 | no |
+  | 80 x 45 | 720p at 16 | 2 | no |
+  | 80 x 60 | a 960 x 720 test plan at 12 | 4 | no |
+  | 106 x 60 | 480p at 8, 720p at 12 | 6 | no |
+  | 120 x 90 | | 12 | yes |
+
+  A finder module is H/135 pixels whatever the cell, so the finders and the header are large
+  enough; the fix is a denser anchor lattice for small grids, a FORMAT change with its own pull
+  request. `TestDetectSmallGrids` characterises today's behaviour. Encoding does not refuse these
+  grids.
+- **Detection time, for the performance pass after the end-to-end path works.** The S2 geometry
+  fix widened the header's lens search (up to 25 candidates with k2, against 13) and refits the
+  global model as anchors accumulate. On typical captures it is no slower: Detect's median on 12
+  handheld poses went from 33-39 to 35-37 ms at 1080p and from 75-78 to 70 ms at 4K (with header
+  and mesh, 42-51 to 43-45 and 95-98 to 85 ms). The cost falls on frames whose header reads only
+  through a strong lens or never: the cost reference (the real code through a lens at the edge of
+  the range, SECURITY.md section 9.1) takes 33 ms at 1080p and 56 ms at 4K, against 18 and 44 for
+  the rendered frame, and the 4K gate header 196 ms, 3.5 times the reference against its bound of
+  6 (5.3 times against the rendered frame, before the reference was redefined). The hostile noise
+  frame's 301 ms is the figure to beat.
 
 ## 20. Sources
 
