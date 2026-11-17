@@ -97,13 +97,11 @@ func lossPlan(t *testing.T, minFrames int) (string, *EncodeResult, map[string][3
 // section 15): with parity 20, whose budget is 16.7% of frames, losing 14.7% of the frames
 // succeeds; losing 18.7% fails with the short block named and nothing written. Both counts are
 // rounded up, so the share lost is never below the one stated. The loop has at least 52 frames,
-// 100 in the long version (QRVT_LONG_TESTS=1), 28 under the race detector.
+// 100 in the long version (QRVT_LONG_TESTS=1); fewer would make a frame too large a step (at 28,
+// five frames are 17.9%, beyond the budget).
 func TestFrameLoss(t *testing.T) {
 	minFrames := 52
-	switch {
-	case raceEnabled:
-		minFrames = 28
-	case os.Getenv("QRVT_LONG_TESTS") == "1":
+	if os.Getenv("QRVT_LONG_TESTS") == "1" {
 		minFrames = 100
 	}
 	path, res, want := lossPlan(t, minFrames)
