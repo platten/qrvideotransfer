@@ -30,8 +30,8 @@ func TestAtPixels(t *testing.T) {
 	}
 }
 
-// TestCalRatios: per bucket of at least minBucket bits where at least minExpected errors are stated
-// or observed, observed over stated error rate; the largest and smallest are reported with their
+// TestCalRatios: per bucket of at least minBucket bits stating at least one error, where at least
+// minExpected errors are stated or observed, observed over stated error rate; the largest and smallest are reported with their
 // buckets. A bucket stating few errors but showing many is therefore not hidden. The two most
 // confident buckets, where almost no error is stated, are reported apart as an error rate.
 func TestCalRatios(t *testing.T) {
@@ -46,6 +46,14 @@ func TestCalRatios(t *testing.T) {
 	hi, hiB, lo, loB, ok := calRatios(&c)
 	if !ok || hi != 900 || hiB != 5 || lo != 0.25 || loB != 3 {
 		t.Errorf("ratios %v (bucket %d), %v (bucket %d), %v", hi, hiB, lo, loB, ok)
+	}
+	c.N[7], c.Errs[7], c.Stated[7] = 40000, 20, 1e-4 // shows errors but states under one: no ratio
+	if hi, hiB, _, _, _ := calRatios(&c); hi != 900 || hiB != 5 {
+		t.Errorf("with bucket 7: largest %v (bucket %d), want 900 (5)", hi, hiB)
+	}
+	// Errors in buckets 0-7 that state under one error: buckets 6 and 7.
+	if e, n := unstatedErrors(&c); e != 23 || n != 70000 {
+		t.Errorf("errors where under one is stated: %d in %d bits, want 23 in 70000", e, n)
 	}
 	if got := confidentErrors(&c); math.Abs(got-32.0/200000) > 1e-15 {
 		t.Errorf("error rate in buckets 8 and 9: %g, want %g", got, 32.0/200000)
