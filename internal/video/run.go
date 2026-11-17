@@ -111,7 +111,7 @@ func run(ctx context.Context, r runner, j job) error {
 	if timeout == 0 {
 		timeout = stallTimeout
 	}
-	now := time.Now().UnixNano()
+	now := meterStamp(time.Now())
 	m.start.Store(now)
 	m.progressAt.Store(now)
 	go watch(m, timeout, j.check, cancel, done)

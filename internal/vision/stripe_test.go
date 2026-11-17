@@ -68,6 +68,7 @@ func addWave(s *synth, amp, fx, fy float64) {
 }
 
 func TestCancelStripes(t *testing.T) {
+	t.Parallel()
 	for _, k := range []struct {
 		gx, gy int
 		mod    uint8
@@ -100,6 +101,7 @@ func TestCancelStripesNone(t *testing.T) {
 // TestEqualiserStripes: the equaliser with Stripes set cancels the stripes in place and fits the
 // levels as if there were none.
 func TestEqualiserStripes(t *testing.T) {
+	t.Parallel()
 	s := newSynth(t, 480, 270, 2, 3, 0, 22)
 	// 15 stays below half the narrowest level spacing of the synthetic grid (37 in its corner), so
 	// the levels are decidable everywhere.

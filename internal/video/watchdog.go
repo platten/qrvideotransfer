@@ -21,14 +21,14 @@ type meter struct {
 	blocked atomic.Int32
 	extra   func() int64 // further progress, such as an output file's size; may be nil
 
-	// For a time-bound error's breakdown, as Unix nanoseconds (0: not yet): when run started the
+	// For a time-bound error's breakdown, as meterStamp offsets (0: not yet): when run started the
 	// job, when the instance was ready (a worker's ready message, or an in-process instance's turn),
 	// its first read of the input, and the last progress the watchdog saw; and the input's read
 	// calls and bytes. Kept with a few atomic operations; the text is built only for an error.
 	start, readyAt, firstIn, progressAt atomic.Int64
 	inCalls, inBytes                    atomic.Int64
-	// In a worker, the phases between readiness and the first read: when the instance's linear
-	// memory was reserved and when it opened its input.
+	// The phases between readiness and the first read: when the instance's linear memory was
+	// reserved and when it opened its input. Both apply to a worker and to an in-process instance.
 	memAt, openAt atomic.Int64
 	// loading is set when the instance starts loading (a worker process's start, an in-process
 	// instance's turn). Until its linear memory is reserved (memAt), it is loading, not stalled:
@@ -46,11 +46,11 @@ type meter struct {
 }
 
 // ready records that the instance is ready to run.
-func (m *meter) ready() { m.readyAt.CompareAndSwap(0, time.Now().UnixNano()) }
+func (m *meter) ready() { m.readyAt.CompareAndSwap(0, meterStamp(time.Now())) }
 
 // reserved records that the instance's linear memory has been reserved.
 func (m *meter) reserved() {
-	if m.memAt.CompareAndSwap(0, time.Now().UnixNano()) && m.onReserve != nil {
+	if m.memAt.CompareAndSwap(0, meterStamp(time.Now())) && m.onReserve != nil {
 		m.onReserve()
 	}
 }
@@ -59,19 +59,19 @@ func (m *meter) reserved() {
 func (m *meter) reserving() bool { return m.loading.Load() && m.memAt.Load() == 0 }
 
 // opened records that the instance opened its input file.
-func (m *meter) opened() { m.openAt.CompareAndSwap(0, time.Now().UnixNano()) }
+func (m *meter) opened() { m.openAt.CompareAndSwap(0, meterStamp(time.Now())) }
 
 // input records a read of n bytes from the input file.
 func (m *meter) input(n int) {
 	if m.inCalls.Add(1) == 1 {
-		m.firstIn.CompareAndSwap(0, time.Now().UnixNano())
+		m.firstIn.CompareAndSwap(0, meterStamp(time.Now()))
 	}
 	m.inBytes.Add(int64(n))
 }
 
 // breakdown says where an instance's time went, at now.
 func (m *meter) breakdown(now time.Time) string {
-	at := func(v *atomic.Int64) time.Time { return time.Unix(0, v.Load()) }
+	at := func(v *atomic.Int64) time.Time { return meterTime(v.Load()) }
 	secs := func(d time.Duration) string { return fmt.Sprintf("%.1f s", d.Seconds()) }
 	s := "wall " + secs(now.Sub(at(&m.start)))
 	if m.readyAt.Load() == 0 {
@@ -157,21 +157,21 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 			}
 			if check != nil {
 				if err := check(m, active); err != nil {
-					m.cancelledAt.Store(time.Now().UnixNano())
+					m.cancelledAt.Store(meterStamp(time.Now()))
 					cancel(err)
 					return
 				}
 			}
 			if v := m.value(); v != last || waiting {
 				if v != last {
-					m.progressAt.Store(now.UnixNano())
+					m.progressAt.Store(meterStamp(now))
 				}
 				last, since = v, now
-			} else if at := m.memAt.Load(); m.loading.Load() && at > since.UnixNano() {
-				since = reservedAt(now, at) // the stall clock starts when the reservation completed
+			} else if at := m.memAt.Load(); m.loading.Load() && at > meterStamp(since) {
+				since = meterTime(at) // the stall clock starts when the reservation completed
 			}
 			if now.Sub(since) >= timeout {
-				m.cancelledAt.Store(time.Now().UnixNano())
+				m.cancelledAt.Store(meterStamp(time.Now()))
 				cancel(stallError(timeout))
 				return
 			}
@@ -179,13 +179,23 @@ func watch(m *meter, timeout time.Duration, check func(*meter, time.Duration) er
 	}
 }
 
-// reservedAt is the reservation time at (Unix nanoseconds) as a time the watchdog can compare with
-// now, the tick's time: now less the wall-clock time since the reservation, so it keeps now's
-// monotonic reading and the stall is measured on the monotonic clock. Only a clock step between the
-// reservation and this tick (at most one tick) can move it.
-func reservedAt(now time.Time, at int64) time.Time {
-	return now.Add(-time.Duration(now.UnixNano() - at))
+// meterBase is the fixed time from which the meter's times are offsets. time.Now carries a
+// monotonic reading, so the offsets are measured on the monotonic clock, as the watchdog's timers
+// are: a wall-clock step cannot move them (review of PR #42, F1; a wall-clock reading once put a
+// cancellation microseconds before EngineLoadLimit on windows-2025).
+var meterBase = time.Now()
+
+// meterStamp returns t as a meter time: its monotonic offset from meterBase in nanoseconds, never
+// 0, which means not yet.
+func meterStamp(t time.Time) int64 {
+	if d := int64(t.Sub(meterBase)); d != 0 {
+		return d
+	}
+	return 1
 }
+
+// meterTime returns the time a meter time stands for, with a monotonic reading.
+func meterTime(v int64) time.Time { return meterBase.Add(time.Duration(v)) }
 
 // meterWriter counts bytes written through it, unless count is false; a blocked Write counts as
 // waiting.

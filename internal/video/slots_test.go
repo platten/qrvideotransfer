@@ -51,7 +51,7 @@ func TestWatchdogUnderLoad(t *testing.T) {
 		slots = old
 		var lateCancel, lateStop time.Duration
 		for i, m := range ms {
-			ready, cancelled := time.Unix(0, m.readyAt.Load()), time.Unix(0, m.cancelledAt.Load())
+			ready, cancelled := meterTime(m.readyAt.Load()), meterTime(m.cancelledAt.Load())
 			if m.readyAt.Load() == 0 || m.cancelledAt.Load() == 0 {
 				t.Errorf("%d slots, instance %d: never ready or never cancelled by the watchdog", k, i)
 				continue

@@ -1,0 +1,1 @@
+Vision follow-up, review of PR #31 round 4 (L-b): section 10 step 5 gives the glare-with-fringes figures since the sampler and the rule count clipped cells (2.75% on `tripod`, 0.05% on `handheld`, was 6% and 26%), bounded at 5% instead of 30%

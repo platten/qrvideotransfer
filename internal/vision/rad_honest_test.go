@@ -23,12 +23,14 @@ const minBucket = 10000
 // one variant cannot hide under the partly mixed cells' reach (the long version's whole tripod
 // tables reach 5.4 times through those cells, so they cannot keep 2 themselves). Above 2 it is a
 // regression bound on a residual the designer accepted on 2026-11-15 and that is revisited with S2:
-// through the pipeline, tripod's partly mixed cells are 9.8 times the stated rate in pooled bucket 1
-// (4.6 times in bucket 2) and the whole pooled bucket 1 8.7 times.
+// through the pipeline, in pooled bucket 1, tripod's partly mixed cells are 9.76 times the stated
+// rate and the whole table 8.69 times at CI size (partly mixed bucket 2: 4.6 times); in the long
+// version 11.08 and 10.25 times, a margin of only 1.08 under 12.
 var overCeil = map[string]float64{"tripod": 12, "handheld": 2}
 
-// pointExpected is the expected error count from which a bucket's observed rate itself must lie
-// within half and twice the stated rate.
+// pointExpected is the expected error count from which, in the pooled tables, a bucket's observed
+// rate itself must be at most its upper bound (twice the stated rate, or overCeil); no lower edge is
+// asserted.
 const pointExpected = 100
 
 // calTable accumulates soft bits by stated confidence: bucket j holds |s| in
@@ -194,9 +196,12 @@ func (s *radSession) calibrate(t testing.TB, caps []*radCapture, stripes bool) (
 // pixels per cell), 6 captures per case (8 frames shown at 30 fps, camera 60 fps, fixed seeds): about
 // 180,000 to 230,000 credited Gray4 bits per case. Every case is judged alone and then pooled over
 // the variants of a modulation and preset. The long version films a 480 x 270 grid with the
-// presets' own 4K cameras, 12 captures per case. Statistical: skipped under the race detector.
+// presets' own 4K cameras, 12 captures per case. The CI version keeps its full size: trimming it
+// left buckets unjudged that the assertion needs (RGB8 handheld's partly mixed cells above all).
+// Statistical: skipped under the race detector.
 func TestHonestConfidence(t *testing.T) {
 	raceSkipStatistics(t)
+	t.Parallel()
 	grid, pitch, cw, ch, ncap := [2]int{212, 120}, 4, 1600, 900, 6
 	if longTests() {
 		grid, pitch, cw, ch, ncap = [2]int{480, 270}, 4, 3840, 2160, 12
@@ -292,7 +297,7 @@ func TestCalTable(t *testing.T) {
 		}
 	}
 	// 40 errors where 18 are expected is consistent with twice the stated rate but not below
-	// pointExpected; 400 where 180 are expected is outside the band.
+	// pointExpected; 400 where 180 are expected is above twice the stated rate.
 	for _, k := range []struct {
 		errs int
 		mu   float64

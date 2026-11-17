@@ -486,6 +486,24 @@ func TestFastPathTests(t *testing.T) {
 	}
 }
 
+// TestFastPathStopsWhenInterrupted: after an interrupt the fast-path run builds and runs nothing
+// (review of PR #42, F2).
+func TestFastPathStopsWhenInterrupted(t *testing.T) {
+	d, calls := fakeDeps(t, module+"/internal/video")
+	builds := 0
+	d.run = func(context.Context, []string, string, ...string) error {
+		builds++
+		return nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	r := &platformReport{}
+	fastPathRun(ctx, r, d, "linux/arm64", nil, t.TempDir(), t.TempDir(), false, nil, map[string]string{isolated: "internal/video"}, time.Minute)
+	if builds != 0 || len(*calls) != 0 || len(r.entries) != 0 {
+		t.Errorf("interrupted fast path: %d builds, calls %v, entries %v", builds, *calls, r.entries)
+	}
+}
+
 func TestCopyFiles(t *testing.T) {
 	got := copyable([]string{"go.mod", "recordings/a.mp4", "internal/x.go", "recordings"})
 	if !slices.Equal(got, []string{"go.mod", "internal/x.go"}) {

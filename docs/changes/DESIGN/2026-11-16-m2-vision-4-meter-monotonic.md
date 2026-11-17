@@ -1,0 +1,1 @@
+Vision follow-up, review of PR #42 (F1): section 17 says the engine's meter records monotonic offsets from a fixed base, so `TestReservationLoadLimit` asserts EngineLoadLimit exactly instead of allowing 50 ms; the watchdog's restart of the stall clock at the reservation uses the same offsets

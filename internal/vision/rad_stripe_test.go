@@ -86,23 +86,28 @@ const fringeAmp = 24
 // of amplitude fringeAmp, Gray4 frames with the `normal` inner code decode with stripe cancellation
 // on (every codeword whose bits are at least 90% stated) and fail with it off (fewer than half do).
 // The CI version films a 212 x 120 grid (29 codewords per frame) with a 1600 x 900 camera, 3
-// recordings with different fringe periods and directions (fixed seeds), 6 captures each of 8
-// frames shown at 15 fps. The long version also sweeps the amplitude and logs both success rates.
+// recordings with different fringe periods and directions (fixed seeds), 2 captures each of 8
+// frames shown at 15 fps (6 in the long version). The long version also sweeps the amplitude and
+// logs both success rates.
 // Statistical: skipped under the race detector (raceSkipStatistics).
 func TestStripeCancellation(t *testing.T) {
 	raceSkipStatistics(t)
+	t.Parallel()
 	s := newRadSession(t, 212, 120, 4, 2, 8, 0x5719, true)
 	amps := []float64{fringeAmp}
 	if longTests() {
 		amps = []float64{0, 4, 8, 12, 16, 20, 24, 28, 32, 40, 48}
 	}
 	for _, amp := range amps {
-		seeds := uint64(3)
+		seeds, stripeCaps := uint64(3), 2 // CI; the long version films 6 captures per recording
+		if longTests() {
+			stripeCaps = 6
+		}
 		for seed := uint64(1); seed <= seeds; seed++ {
 			t.Run(fmt.Sprintf("amp%.0f/seed%d", amp, seed), func(t *testing.T) {
 				c := preset(t, "handheld", 1600, 900)
 				c.Sensor.Fringe = amp
-				caps := s.shoot(t, c, time.Second/15, 6, 0x900+seed)
+				caps := s.shoot(t, c, time.Second/15, stripeCaps, 0x900+seed)
 				offT, offG := s.decodeCaptures(t, caps, false)
 				onT, onG := s.decodeCaptures(t, caps, true)
 				t.Logf("amplitude %.0f: decoded %d of %d codewords with stripe cancellation off, %d of %d with it on", amp, offG, offT, onG, onT)

@@ -101,3 +101,53 @@ func iabs(v int) int {
 	}
 	return v
 }
+
+// TestGlareSeveralLevelsClip: when an overexposed capture clips more than the lightest level, the
+// cells that read as the lightest level are more common than one in L everywhere, which is no glare.
+// The glare rule must not erase the cells that did not clip (it erased 3.9% of them with two Gray4
+// levels clipped and 93% with three), yet still find a patch that lifts everything to white.
+func TestGlareSeveralLevelsClip(t *testing.T) {
+	for _, k := range []struct {
+		clipped int     // Gray4 levels, from the top, at the clip
+		maxLoss float64 // share of unclipped cells allowed to be made unknown
+	}{{2, 0.002}, {3, 0.002}} {
+		s := newSynth(t, 212, 120, 2, 2, 0, 70+uint64(k.clipped))
+		for i, lv := range s.levels {
+			if lv >= 4-k.clipped {
+				// Clipped data cells are scattered, so the sampler does not mark them (it marks
+				// clipped areas): they read 235 and stay usable.
+				s.obs[i].Y = 235
+			}
+		}
+		// A glare patch around (60, 60): every cell under it at the clip.
+		for i, c := range s.l.DataCells() {
+			if max(iabs(int(c.X)-60), iabs(int(c.Y)-60)) <= 6 {
+				s.obs[i].Y = 235
+			}
+		}
+		(&TileEqualiser{Mod: s.c}).Fit(s.obs, s.palette, s.l, s.anchors)
+		unclipped, lost, patch, patchFlagged := 0, 0, 0, 0
+		for i, c := range s.l.DataCells() {
+			r := max(iabs(int(c.X)-60), iabs(int(c.Y)-60))
+			switch {
+			case r <= 4:
+				patch++
+				if s.obs[i].Saturated {
+					patchFlagged++
+				}
+			case r > 10 && s.levels[i] < 4-k.clipped:
+				unclipped++
+				if s.obs[i].Saturated {
+					lost++
+				}
+			}
+		}
+		t.Logf("%d levels clipped: %d of %d unclipped cells away from the patch made unknown; %d of %d patch cells unknown", k.clipped, lost, unclipped, patchFlagged, patch)
+		if float64(lost) > k.maxLoss*float64(unclipped) {
+			t.Errorf("%d levels clipped: %d of %d unclipped cells made unknown", k.clipped, lost, unclipped)
+		}
+		if k.clipped == 2 && patchFlagged < patch*9/10 {
+			t.Errorf("%d levels clipped: the patch went unnoticed (%d of %d cells unknown)", k.clipped, patchFlagged, patch)
+		}
+	}
+}

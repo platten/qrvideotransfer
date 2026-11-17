@@ -2,6 +2,7 @@ package vision
 
 import (
 	"math"
+	"slices"
 
 	"github.com/platten/qrvideotransfer/internal/frame"
 	"github.com/platten/qrvideotransfer/internal/modem"
@@ -19,11 +20,16 @@ const (
 	// A cell is implausible when, in the 5 x 5 cells around it, so many of the usable data cells
 	// read as the lightest level (or brighter) that chance would give that many less than once in
 	// 1/chanceTail: scrambling makes every level equally likely, so each cell is the lightest with
-	// probability 1/L. A glare patch lifts every cell it covers to white or beyond. At least
-	// minAround usable cells must be seen.
+	// probability 1/L, or with the median share over the tiles when several levels clip together.
+	// A glare patch lifts every cell it covers to white or beyond. At least minAround usable cells
+	// must be seen. A known limit: with three of four levels clipped (chance 0.75), 25 lit cells of
+	// 25 are no longer unlikely enough, and a patch goes unnoticed.
 	chanceTail = 1e-6
 	minAround  = 12
-	around     = 2 // cells on each side
+	// clipShare: a median tile share of lit cells this many times 1/L means another level clips
+	// too (two levels of L clipped give 2/L).
+	clipShare = 1.5
+	around    = 2 // cells on each side
 	// grow is how many rings of cells around a flagged region are flagged too: a glare patch fades
 	// out over a quarter of its radius, lifting the cells there without making them white.
 	grow = 2
@@ -79,6 +85,37 @@ func flagUnknown(obs []modem.Obs, l *frame.Layout, f *Field, c *modem.Constellat
 			state[g] = other
 		}
 	}
+	// The chance that a cell reads as the lightest level: 1/L, or the median over the tiles of
+	// their share when that is at least clipShare times larger, as when an overexposed capture
+	// clips more than the lightest level and those levels all read lightest. A patch is local and
+	// moves few tiles' shares; the median follows the capture, not the patch.
+	nt := (gx + TileW - 1) / TileW * ((gy + TileH - 1) / TileH)
+	tileSeen, tileLit := make([]int, nt), make([]int, nt)
+	for g, st := range state {
+		if st == none {
+			continue
+		}
+		t := g%gx/TileW + g/gx/TileH*((gx+TileW-1)/TileW)
+		tileSeen[t]++
+		if st == top || st == bright {
+			tileLit[t]++
+		}
+	}
+	var shares []float64
+	for t := range nt {
+		if tileSeen[t] >= minAround {
+			shares = append(shares, float64(tileLit[t])/float64(tileSeen[t]))
+		}
+	}
+	chance := 1 / float64(c.Levels())
+	if len(shares) > 0 {
+		// Only a median well above 1/L (another level at the clip) replaces it: noise around 1/L
+		// would otherwise weaken the test on every capture.
+		slices.Sort(shares)
+		if m := shares[len(shares)/2]; m >= clipShare*chance {
+			chance = m
+		}
+	}
 	flagged := make([]bool, gx*gy)
 	for i := range n {
 		cl := cells[i]
@@ -101,7 +138,7 @@ func flagUnknown(obs []modem.Obs, l *frame.Layout, f *Field, c *modem.Constellat
 					}
 				}
 			}
-			flag = seen >= minAround && binomialTail(lit, seen, 1/float64(c.Levels())) < chanceTail
+			flag = seen >= minAround && chance < 1 && binomialTail(lit, seen, chance) < chanceTail
 		}
 		flagged[y*gx+x] = flag
 	}
