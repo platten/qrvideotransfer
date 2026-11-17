@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -507,4 +508,56 @@ func yuvFrame(buf []byte, w, h int) *video.Frame {
 		f.Cb[i], f.Cr[i] = uint16(u[i]), uint16(v[i])
 	}
 	return f
+}
+
+// TestAnalysePerfectPattern is the perfect-capture baseline: one code frame of every segment of the
+// 1920 x 1080 pattern (every display rate, cell size and modulation, the grids filmed in S2), rendered
+// and captured head-on at one camera pixel per display pixel. Every capture must be located, and
+// every segment must state every bit with no error: the analysis and the M2 chain add no error of
+// their own where the capture is perfect. (The S2 review ran -analyse on the whole pattern file in
+// the same way: all 6,480 captures located, no error in any of the 27 segments.)
+func TestAnalysePerfectPattern(t *testing.T) {
+	pl := makePlan(1920, 1080, 4)
+	a := newAnalyser([]plan{pl})
+	results := make([]capResult, len(pl.Segments))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, runtime.NumCPU())
+	for si, s := range pl.Segments {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			pt, err := newPainter(pl.Width, pl.Height, s.Cell, s.Modulation, pl.TotalFrames)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			buf := make([]byte, pt.frameSize())
+			pt.render(s.FirstIndex+1, buf)
+			f := placeRendered(buf, pl.Width, pl.Height, 2240, 1260)
+			f.PTS = time.Duration((s.Start + 1.25/float64(s.Rate)) * float64(time.Second))
+			var det vision.FinderDetector
+			results[si] = a.capture(f, &det, si)
+		}()
+	}
+	wg.Wait()
+	agg := newAggregator(a, 30)
+	for _, r := range results {
+		if !r.fitted {
+			t.Errorf("capture of segment %d not located", r.index)
+		}
+		agg.add(r)
+	}
+	rep := agg.finish()
+	if len(rep.Segments) != len(pl.Segments) {
+		t.Fatalf("%d segments reported, want %d", len(rep.Segments), len(pl.Segments))
+	}
+	for _, sr := range rep.Segments {
+		b := modBits(sr.Modulation)
+		if sr.Sum.Wrong != 0 || sr.Sum.Stated != sr.Cells*b || sr.Captures != 1 {
+			t.Errorf("segment %d (%d fps, %d px, modulation %d): %d captures, %d of %d bits stated, %d wrong",
+				sr.Seg, sr.Rate, sr.Cell, sr.Modulation, sr.Captures, sr.Sum.Stated, sr.Cells*b, sr.Sum.Wrong)
+		}
+	}
 }
