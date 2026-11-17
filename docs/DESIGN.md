@@ -552,7 +552,9 @@ For each capture:
    anchors' model put it 2.5 cells away). It is there to catch a different, finder-like pattern
    standing in for the finder, and two finder-like patterns cannot both have their centres within
    half a module of the same point; a visible finder more than half a module from the truth is
-   also what makes a quad wrong. In cells this is looser on fine grids (1 cell at 1080p with
+   also what makes a quad wrong. On fine grids that leaves no margin below the wrong-quad line: a
+   finder-like pattern just beyond half a module from a hidden finder's place, standing in for it,
+   could be accepted, and such a quad then relies on the header's CRC and the codewords' CRCs. In cells this is looser on fine grids (1 cell at 1080p with
    4-pixel cells, where it was already 1; 1.85 cells on an 800 x 500 grid, where it was 1) and
    tighter on coarse ones. The S2 recordings motivated revisiting it: until then a finder had to lie
    within the smaller of one cell and half a module, and on rescaled playback the corner finders,
@@ -588,12 +590,12 @@ For each capture:
    studies, long tests on a 480 x 270 code that never give a wrong quad (designer's rule,
    2026-11-15: keep this only if neither study gets worse than before):
 
-   | Study | Cases | Not located: finders excluded after the four-finder check (round 2) | none excluded (round 3) | this rule |
-   | --- | --- | --- | --- | --- |
-   | `TestDecoyMatrix`: every finder visible, a copy of one finder (with or without its separator, either polarity) 0 to 16 cells inward horizontally, vertically or diagonally | 816 | 30 | 20 | 18 |
-   | `TestDecoyMatrixReview`: a copy with its separator (either polarity) 1 to 8 cells left, right, up or down, the real finder covered or visible | 512 | 24 | 30 | 10 |
+   | Study | Cases | Not located: finders excluded after the four-finder check (round 2) | none excluded (round 3) | this rule | this rule with the S2 geometry fix |
+   | --- | --- | --- | --- | --- | --- |
+   | `TestDecoyMatrix`: every finder visible, a copy of one finder (with or without its separator, either polarity) 0 to 16 cells inward horizontally, vertically or diagonally | 816 | 30 | 20 | 18 | 14 |
+   | `TestDecoyMatrixReview`: a copy with its separator (either polarity) 1 to 8 cells left, right, up or down, the real finder covered or visible | 512 | 24 | 30 | 10 | 3 |
 
-   A known limit, left to M5: the cases still not located are decoys of normal polarity 4 to 6
+   A known limit, left to M5: the cases not located before the S2 geometry fix were decoys of normal polarity 4 to 6
    cells diagonally or vertically inward at the bottom-left and top-right, 7 or 8 cells right of a
    covered top-left finder, 6 to 8 cells below the top-right finder, covered or visible, and 10 cells
    right of the top-left finder or diagonally in from the top-right; and inverted decoys 7 or 8 cells
@@ -666,7 +668,9 @@ For each capture:
    and 1 dark, ring 2 light; inverted for the fourth finder), where a module is 1/126 of the finder
    rectangle whatever the grid, measured through the model without a lens (at the finders the
    homography alone is exact, and a lens candidate must not move its own references). The
-   three-finder search uses the k1 stage only. Pairs are tried among the copies that did not decode
+   three-finder search uses the k1 stage only. Each lens candidate, up to 25, is decoded, which
+   widens the exposure to a false header; it is bounded by the header's CRC-16, its validation
+   and the eight-anchor confirmation, and the hostile and decoy studies saw no wrong header. Pairs are tried among the copies that did not decode
    alone, and all four only when nothing decoded.
 3. **Fit the mesh.** Locate every anchor's checker corner to sub-pixel accuracy, reject outliers, and
    interpolate. This absorbs lens distortion, rolling-shutter shear and stabilisation warping.
@@ -681,7 +685,9 @@ For each capture:
    global model is refitted to the located anchors at 12 and each time their number doubles. Its
    lens is k1 r^2 + k2 r^4, each within +-0.1 (half capture widths; a statement about consumer
    lenses corrected in the camera, which leave a few per cent at the frame's edge, not a fit to a
-   recording). The S2 recordings motivated k2: on both phones the anchors fitted k1 near -0.07 and
+   recording). The supported range is that box minus the region where the lens folds the image
+   before the frame's corner (1 + 3 k1 r^2 + 5 k2 r^4 <= 0 there, near k1 = k2 = -0.1), which
+   the simulator refuses. The S2 recordings motivated k2: on both phones the anchors fitted k1 near -0.07 and
    k2 near +0.06 ("moustache" distortion), 0.2-0.9 pixel RMS, against 0.5-2.2 with k1 alone, whose
    error at the code's left edge put the anchors there outside the search. k1, k2 and the
    homography are estimated together by iterated linear least squares (searching one term at a time
@@ -1877,7 +1883,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 - **The acceptance measure is not met on rescaled playback (S2, Phone A, recording 1).** After the
   S2 geometry fix, the confident-error rate (bits with |s| of 39 and more) at the code's edges
   improved but does not match the interior. By segment, the left 10% of columns went from
-  0.5-8% to 0-1.1e-2 in the Gray2 and Gray4 segments and 3e-2 to 4e-2 in RGB8; the right 10%
+  0.5-8% to 0-1.1e-2 in the Gray2 and Gray4 segments, and in RGB8 to up to 4.4e-2 at 4-pixel
+  cells and at most 4.1e-3 at 8 and 12; the right 10%
   went from 1.2-22% to 0-3.3e-2 in Gray2 and Gray4 (for example rate 30, 12-pixel cells, Gray4:
   7.8e-3 against 1.8e-5 inside; rate 60, 12-pixel cells, Gray4: 3.3e-2 against 2.9e-5) and up to
   7.6e-2 in RGB8. The interior's 60% of columns holds 4e-7 to 4.7e-3. Recording 2's edges match
@@ -1898,7 +1905,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   | iphone-hdr, 3.6 | 1 | 2 |
   | harsh, 4.8 | 1 | 1 |
 
-  None of their headers was wrong. A wrong quad below the reliable sizes relies on the header's
+  None of their headers was wrong. The located counts there fell slightly too (budget-android at
+  3.2: 192 to 186; iphone-hdr at 3.2: 81 to 71). A wrong quad below the reliable sizes relies on the header's
   CRC and, downstream, on each codeword's CRC to keep wrong cells out of the payload. Nothing is
   tuned to move these numbers.
 - **Small grids.** The confirmation needs eight located anchors (section 10, step 1), and the
