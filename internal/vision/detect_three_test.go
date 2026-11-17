@@ -108,7 +108,7 @@ func TestDetectThreeHostile(t *testing.T) {
 	draw(1700, 150, frame.TopRight)
 	draw(1700, 930, frame.BottomRight)
 	c := geomNewCode(t, 240, 135, 8, 2, 1, 39) // a real code of the same size, for the reference
-	geomCostRatio(t, "three finder patterns on noise", geomPlain(c, 0), f, [][]uint16{f.Y}, 16, 32<<20)
+	geomCostRatio(t, "three finder patterns on noise", geomCostReference(t, c), f, [][]uint16{f.Y}, 16, 32<<20)
 }
 
 // TestDetectThreeHostile4K: the costly three-finder path at 4K. A real 480 x 270 code at 8 pixels
@@ -127,7 +127,7 @@ func TestDetectThreeHostile4K(t *testing.T) {
 		geomPaintDisc(g, q.Centres[3].X, q.Centres[3].Y, 12*float64(c.pitch), 235)
 		planes = append(planes, g.Y)
 	}
-	geomCostRatio(t, "4K three-finder hostile header", geomPlain(c, 0), geomPlain(c, 0), planes, 6, 32<<20)
+	geomCostRatio(t, "4K three-finder hostile header", geomCostReference(t, c), geomPlain(c, 0), planes, 6, 32<<20)
 }
 
 // TestThreeFindersConflictingCopy: with finder k covered and header copy j repainted to claim a
