@@ -80,6 +80,25 @@ func TestDistortion(t *testing.T) {
 	}
 }
 
+// Mustache distortion (k1 and k2 of opposite signs): distort inverts undistort, and at the frame's
+// edge (r = 1) a pinhole point moves by k1 + k2.
+func TestDistortionK2(t *testing.T) {
+	cam := &camera{w: 400, h: 300, cx: 200, cy: 150, norm: 200, k1: -0.05, k2: 0.05}
+	for _, p := range [][2]float64{{0, 0}, {399, 299}, {200, 150}, {250, 100}, {60, 140}} {
+		xu, yu := cam.undistort(p[0], p[1])
+		x, y := cam.distort(xu, yu)
+		if !near(x, p[0], 1e-9) || !near(y, p[1], 1e-9) {
+			t.Errorf("round trip of %v gives %v, %v", p, x, y)
+		}
+	}
+	if x, _ := cam.undistort(400, 150); !near(x, 200+200*(1-0.05+0.05), 1e-12) {
+		t.Errorf("edge maps to %v", x)
+	}
+	if x, _ := cam.undistort(300, 150); !near(x, 200+100*(1-0.05/4+0.05/16), 1e-12) {
+		t.Errorf("half radius maps to %v", x)
+	}
+}
+
 func TestShakeTrack(t *testing.T) {
 	g := GeometryParams{Width: 1000, Shake: 3}
 	tr := shake(g, 50, time.Second, 20000, 4)
