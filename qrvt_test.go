@@ -10,12 +10,8 @@ import (
 func TestNotImplemented(t *testing.T) {
 	ctx := context.Background()
 	var errs []error
-	_, err := Encode(ctx, EncodeOptions{})
-	errs = append(errs, err)
-	_, err = Decode(ctx, DecodeOptions{})
-	errs = append(errs, err)
 	errs = append(errs, CalibrationVideo(ctx, CalibrationOptions{}))
-	_, err = AnalyzeCalibration(ctx, AnalyzeOptions{})
+	_, err := AnalyzeCalibration(ctx, AnalyzeOptions{})
 	errs = append(errs, err)
 	_, err = Inspect(ctx, InspectOptions{})
 	errs = append(errs, err)
