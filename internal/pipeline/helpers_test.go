@@ -160,7 +160,13 @@ func readFrames(t testing.TB, b video.Backend, path string) ([]*video.Frame, vid
 // writeRaw writes frames to a raw-frame file at fps and returns its path.
 func writeRaw(t testing.TB, frames []*video.Frame, fps int) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "rec.raw")
+	return writeRawIn(t, t.TempDir(), frames, fps)
+}
+
+// writeRawIn writes frames to rec.raw in dir at fps and returns its path.
+func writeRawIn(t testing.TB, dir string, frames []*video.Frame, fps int) string {
+	t.Helper()
+	path := filepath.Join(dir, "rec.raw")
 	f0 := frames[0]
 	e, err := video.NewRaw().NewEncoder(context.Background(), path, video.EncodeConfig{Width: f0.W, Height: f0.H, FPS: fps, BitDepth: int(f0.Bits)})
 	if err != nil {
