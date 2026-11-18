@@ -624,3 +624,9 @@ func checkHash(ctx context.Context, r io.ReaderAt, n int64, want [16]byte) error
 	}
 	return nil
 }
+
+// frameRecordBytes is the bookkeeping a frame record holds, beside its soft bits.
+func frameRecordBytes(cpf int) int64 { return 0 }
+
+// usedBytes returns the soft bits and frame records held.
+func (d *decoder) usedBytes() int64 { return d.softBytes }
