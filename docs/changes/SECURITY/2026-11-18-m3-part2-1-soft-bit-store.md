@@ -1,0 +1,1 @@
+M3 part 2: section 5's soft-bit store counts the per-frame records with the soft bits under the same 256 MB, and records as open, for M7, that a recording keeping the decode at the cap makes every capture evict, rescan and decode again, work no limit bounds per capture

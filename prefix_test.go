@@ -22,8 +22,8 @@ func TestFilmPrefix(t *testing.T) {
 			t.Fatal(err)
 		}
 		c = c.Resize(960, 540)
-		short := readRaw(t, film(t, frames, 12, c, channel.Run{Captures: 7, Seed: 3}))
-		long := readRaw(t, film(t, frames, 12, c, channel.Run{Captures: 12, Seed: 3}))
+		short := readRaw(t, film(t, frames, 12, c, channel.Run{Captures: 7, Seed: 3}, false))
+		long := readRaw(t, film(t, frames, 12, c, channel.Run{Captures: 12, Seed: 3}, false))
 		if len(short) == 0 || len(long) < len(short) {
 			t.Fatalf("%s: %d and %d captures", name, len(short), len(long))
 		}

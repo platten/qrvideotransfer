@@ -1456,7 +1456,7 @@ What the named types carry:
 | `Field` | vision | `LocalStats` per tile, with interpolation |
 | `PhaseField` | vision | For each cell, a weight for each of the four phase values |
 | `ClipInfo` | video | Codec, size, bit depth, frame rate, duration, rotation, transfer function |
-| `EncodeConfig`, `DecodeConfig` | video | Size, rate, quantiser, bit depth; time slice and brightness-only for decoding |
+| `EncodeConfig`, `DecodeConfig` | video | Size, rate, quantiser, bit depth, and a bitrate (M3, for the simulated recorder only; 0 keeps the constant quantiser, and the public API does not reach it; refused with a quantiser and by the raw-frame backend; its MP4 is written like the display video's, without an edit list, since the recorder uses no B-frames, section 15); time slice and brightness-only for decoding |
 | `StreamInfo`, reports, `Stats`, `Warning` | root | What `inspect`, `--report` and the dashboard show |
 
 **GUI readiness** rests on three rules. The core does no terminal I/O and never exits the process. All
@@ -1494,7 +1494,26 @@ passes results through channels to a single goroutine that owns the accumulators
    optics because their amplitude is given in code values.
 6. **Recorder codec**: in integration tests, x264 through the embedded engine (the engine has no HEVC
    encoder) at the bitrates below, which are the HEVC figures of section 11 times 1.4; in unit tests, a
-   pure-Go quantiser stand-in.
+   pure-Go quantiser stand-in. x264 stands in for the phone's HEVC recorder: an approximation of a
+   real phone, not a measurement of one. As built (M3): `video.EncodeConfig.Bitrate` selects x264's
+   defaults at `veryfast`, a GOP of one second at the camera's rate, single-pass average bitrate
+   capped at the bitrate with a two-second buffer, BT.709 tags, High 10 for 10-bit captures
+   (`TestRoundTripMatrixX264`), except two settings: no lookahead and no B-frames
+   (`rc-lookahead=0:bframes=0`). Those are forced by the engine's 512 MiB memory bound
+   (SECURITY.md section 5), and were chosen before any row's result at 4K was known (designer's
+   ruling, 2026-11-18): x264's defaults could not encode a 4K capture inside it. Measured at
+   3840 x 2160, 30 frames at 74 Mbit/s:
+
+   | x264 settings | 8-bit | 10-bit |
+   | --- | --- | --- |
+   | defaults (`veryfast`: lookahead 10, 3 B-frames) | fails at frame 13 (an allocation of 44,008,576 bytes) | fails at frame 6 (48,303,424) |
+   | `rc-lookahead=5` | fails | fails |
+   | `rc-lookahead=5:bframes=1` | fits | fails |
+   | `rc-lookahead=10:bframes=0` | fits | fails |
+   | `rc-lookahead=0:bframes=0` | fits | fits |
+
+   Without B-frames the MP4 needs no edit list, so the recorder writes the display video's
+   container; with them, and no edit list, the reader lost a clip's first frame.
 
 The presets below are starting values chosen to bracket the simulated cases of section 4. Measurements
 from steps S2 and G1 replace them.
@@ -1964,7 +1983,22 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   Gray4 `normal`.** It decodes in 1 of 5 repeatable sessions and in 1 of 8 random ones (the
   independent review's count: 0 of 4; pooled over random sessions, 1 of 12); the raw bit error rate is about 0.10 per capture,
   and the errors repeat across captures of a frame. Not diagnosed in the first M3 pull request;
-  the row stays asserted in the long run, unchanged. Details in the next entry.
+  the row stays asserted in the long run, unchanged. Details in the next entry. **With x264 as the
+  recorder (M3 part 2)** it is worse: 0 of 3 sessions, short by 41 to 49 shards with x264's
+  defaults and by 52 or 53 with the settings the memory bound forces (section 15), against 1 to 6
+  with the stand-in; it stays asserted in `TestRoundTripMatrixX264`'s long version, out of the
+  short version, and is not diagnosed in that pull request.
+- **Round-trip matrix with x264 (M3 part 2).** `TestRoundTripMatrixX264` with `QRVT_LONG_TESTS=1`
+  runs the 13 rows that have a recorder bitrate (not `ideal`, whose recorder is lossless) with
+  x264 at the preset's bitrate and camera, three sessions each, 855 s on the development machine:
+  12 rows decode in 3 of 3 sessions; `budget-android` Gray4 `normal` in none (previous entry).
+  Filming dominates the cost: about 18 to 21 s a session at 4K, 53 s for `harsh` (3 passes,
+  4K30), 5 to 11 s at `budget-android`'s 1080p. The short version runs two rows with the smaller
+  cameras of the stand-in's short matrix, `tripod` Gray4 `normal` and `budget-android` Gray2
+  `normal`, about 21 s pinned to 4 CPUs. Also measured, not asserted: `iphone-hdr` Gray4 `normal`
+  with x264 at the short version's camera (3008 x 1692, the bitrate scaled with the pixels to
+  about 45 Mbit/s) falls short by 55 shards, where the stand-in at that camera and x264 at the
+  preset's 4K camera both decode; so it is not in the short version.
 - **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
   every row of section 15 through the public API with five repeatable sessions each: the files
   (6.5 KB) are encoded to an MP4 by the embedded engine, decoded, filmed for two passes (three on
@@ -2055,12 +2089,21 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
   the encoder joins runs with one engine instance. Eviction rescans every frame's soft bits each
-  time the cap is exceeded, O(frames x C x sent bits) per eviction. Per-frame bookkeeping is
+  time the cap is exceeded, O(frames x C x sent bits) per eviction. Per-frame bookkeeping was
   outside the 256 MB cap: each frame seen (at most F; a capture can credit up to four frames,
   three from one header's phases and a fourth from a second header) keeps C
   `done` flags and C slice headers, about 25 C bytes: 3.8 KB at C = 151 (250 MB at F = 67,112),
-  and about 200 KB at the largest grid's C, so a long recording claiming that grid could hold
-  gigabytes. Bringing it under the cap is the next M3 piece. The real-device check took 210-500 s per
+  and about 200 KB at the largest grid's C, so a long recording claiming that grid could have held
+  gigabytes. **Under the cap since M3 part 2:** a record counts 96 + 25 C bytes beside the soft
+  bits; over the cap the least confident frame's soft bits go first, then the record of the frame
+  seen least recently; the frames seen are counted in a bitset of F bits (at most 512 KiB, beside
+  the cap). A frame seen again after its record went is decoded again, and its shards, already
+  stored, are not counted twice (`TestBookkeepingUnderCap`, `TestDroppedRecordCountsOnce`).
+  **Open, for M7:** a hostile or looping recording can keep the decode at the cap, so that every
+  capture forces an eviction, a rescan of everything held (up to 256 MB) and the re-decoding of
+  codewords whose records went. No existing limit bounds that work per capture; the decoded-pixel
+  limit bounds the captures, not the work each costs here (SECURITY.md section 5). The
+  real-device check took 210-500 s per
   recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
   1, 255 s); a round-trip matrix row takes 3-14 s alone.
 
