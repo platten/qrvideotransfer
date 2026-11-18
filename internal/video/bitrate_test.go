@@ -29,22 +29,64 @@ func TestEncodeArgsQuantiserUnchanged(t *testing.T) {
 // TestEncodeArgsBitrate: with a bitrate the encoder stands in for a phone's recorder (DESIGN.md
 // section 15): x264's defaults at veryfast, a GOP of one second at the frame rate, single-pass
 // average bitrate capped at the bitrate with a two-second buffer, the BT.709 tags, High 10 for
-// 10-bit input; neither the constant quantiser nor the intra-only parameters.
+// 10-bit input; neither the constant quantiser nor the intra-only parameters, and the MP4 keeps its
+// edit list, as a phone's does (without it the B-frames' delay cost the first frame on reading).
 func TestEncodeArgsBitrate(t *testing.T) {
 	for _, bits := range []int{8, 10} {
 		a := encodeArgs(EncodeConfig{Width: 3840, Height: 2160, FPS: 60, BitDepth: bits, Bitrate: 74_000_000}, "o/x.mp4", "mp4")
 		s := strings.Join(a, " ")
 		for _, want := range []string{"-c:v libx264", "-preset veryfast", "-b:v 74000000", "-maxrate 74000000", "-bufsize 148000000",
-			"-g 60", "-color_trc bt709", "-use_editlist 0"} {
+			"-g 60", "-color_trc bt709"} {
 			if !strings.Contains(s, want) {
 				t.Errorf("%d-bit: arguments lack %q: %s", bits, want, s)
 			}
 		}
-		if slices.Contains(a, "-qp") || slices.Contains(a, "-x264-params") {
+		if slices.Contains(a, "-qp") || slices.Contains(a, "-x264-params") || slices.Contains(a, "-use_editlist") {
 			t.Errorf("%d-bit: constant quantiser or intra-only parameters with a bitrate: %s", bits, s)
 		}
 		if high10 := strings.Contains(s, "-profile:v high10"); high10 != (bits == 10) {
 			t.Errorf("%d-bit: High 10 %v", bits, high10)
+		}
+	}
+}
+
+// TestEncodeBitrateRoundTrip: the engine takes the recorder's arguments: 8- and 10-bit clips at a
+// bitrate are written, probed and read back whole.
+func TestEncodeBitrateRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	b := embedded(t)
+	for _, bits := range []int{8, 10} {
+		path := filepath.Join(t.TempDir(), "rec.mp4")
+		c := EncodeConfig{Width: 320, Height: 240, FPS: 30, BitDepth: bits, Bitrate: 2_000_000}
+		e, err := b.NewEncoder(ctx, path, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range 12 {
+			f := &Frame{W: 320, H: 240, Bits: uint8(bits), Y: make([]uint16, 320*240), Cb: make([]uint16, 160*120), Cr: make([]uint16, 160*120)}
+			for j := range f.Y {
+				f.Y[j] = uint16((16 + (j+i*7)%200) << (bits - 8))
+			}
+			for j := range f.Cb {
+				f.Cb[j], f.Cr[j] = 128<<(bits-8), 128<<(bits-8)
+			}
+			if err := e.WriteFrame(f); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := e.Close(); err != nil {
+			t.Fatal(err)
+		}
+		info, err := b.Probe(ctx, path)
+		if err != nil || info.BitDepth != bits || info.Width != 320 {
+			t.Fatalf("%d-bit probe %+v: %v", bits, info, err)
+		}
+		d, err := b.NewDecoder(ctx, path, DecodeConfig{BitDepth: bits})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := decodeAll(t, d); len(got) != 12 {
+			t.Errorf("%d-bit: %d frames read back, want 12", bits, len(got))
 		}
 	}
 }

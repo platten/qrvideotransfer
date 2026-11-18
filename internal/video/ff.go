@@ -45,14 +45,21 @@ func encodeArgs(c EncodeConfig, out, format string) []string {
 	a := []string{"-nostdin", "-hide_banner", "-nostats", "-loglevel", "error",
 		"-f", "rawvideo", "-pix_fmt", pix, "-s", fmt.Sprintf("%dx%d", c.Width, c.Height), "-framerate", strconv.Itoa(c.FPS)}
 	a = append(a, bt709...)
-	a = append(a, "-i", "pipe:0", "-map", "0:v:0", "-c:v", "libx264", "-preset", "veryfast", "-qp", strconv.Itoa(q),
-		"-x264-params", x264Params)
+	a = append(a, "-i", "pipe:0", "-map", "0:v:0", "-c:v", "libx264", "-preset", "veryfast")
+	if c.Bitrate > 0 {
+		// A phone's recorder stand-in (DESIGN.md section 15): x264's defaults, a GOP of one second,
+		// single-pass average bitrate capped at the bitrate with a two-second buffer.
+		b := strconv.Itoa(c.Bitrate)
+		a = append(a, "-b:v", b, "-maxrate", b, "-bufsize", strconv.Itoa(2*c.Bitrate), "-g", strconv.Itoa(c.FPS))
+	} else {
+		a = append(a, "-qp", strconv.Itoa(q), "-x264-params", x264Params)
+	}
 	if c.BitDepth == 10 {
 		a = append(a, "-profile:v", "high10")
 	}
 	a = append(a, bt709...)
 	a = append(a, "-pix_fmt", pix)
-	if format == "mp4" {
+	if format == "mp4" && c.Bitrate == 0 { // a recorder stand-in writes an edit list, as a phone does
 		a = append(a, "-use_editlist", "0")
 	}
 	return append(a, "-f", format, "-y", out)
