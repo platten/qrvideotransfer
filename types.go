@@ -191,7 +191,7 @@ type Stats struct {
 	FramesTotal   int     // F, from the header
 	CleanFraction float64 // share of cells assigned to a single code frame
 	RawBitErrors  float64 // raw bit error rate before the inner code
-	CodewordsOK   int64   // inner codewords that passed their CRC
+	CodewordsOK   int64   // inner codewords that passed their CRC and added a new shard (RawBitErrors is over every decoded codeword)
 	BlocksReady   int     // outer-code blocks that can be reconstructed
 	BlocksTotal   int
 }

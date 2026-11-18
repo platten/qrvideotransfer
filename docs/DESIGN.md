@@ -1985,9 +1985,13 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   and the errors repeat across captures of a frame. Not diagnosed in the first M3 pull request;
   the row stays asserted in the long run, unchanged. Details in the next entry. **With x264 as the
   recorder (M3 part 2)** it is worse: 0 of 3 sessions, short by 41 to 49 shards with x264's
-  defaults and by 52 or 53 with the settings the memory bound forces (section 15), against 1 to 6
-  with the stand-in; it stays asserted in `TestRoundTripMatrixX264`'s long version, out of the
-  short version, and is not diagnosed in that pull request.
+  defaults and by 48 to 54 with the settings the memory bound forces (section 15; 52 or 53 in one
+  run, 48 to 54 over the review's three runs of the same sessions), against 1 to 6 with the
+  stand-in; it stays asserted in `TestRoundTripMatrixX264`'s long version, out of the short
+  version, and is not diagnosed in that pull request. x264 recordings differ between runs of the
+  same sessions, so the shortfall is a range; the likely cause, not established, is x264's frame
+  threading under average-bitrate control. Threads are not pinned: that would change the
+  encoder's memory and time.
 - **Round-trip matrix with x264 (M3 part 2).** `TestRoundTripMatrixX264` with `QRVT_LONG_TESTS=1`
   runs the 13 rows that have a recorder bitrate (not `ideal`, whose recorder is lossless) with
   x264 at the preset's bitrate and camera, three sessions each, 855 s on the development machine:
@@ -2002,6 +2006,9 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   the pixel count by `channel.Config.Resize`: 74 Mbit/s x (3008 x 1692) / (3840 x 2160), about
   45.4 Mbit/s, the same bits per camera pixel, so whether the scaling (fewer bits per cell than
   at 4K, since a cell then covers fewer pixels) or the channel is at fault is open.
+  Also open: no 10-bit x264 recording runs end to end outside the long version (`iphone-hdr` is
+  its only 10-bit row, and the engine's 10-bit round trip of a recording,
+  `TestEncodeBitrateRoundTrip`, decodes a synthetic clip).
 - **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
   every row of section 15 through the public API with five repeatable sessions each: the files
   (6.5 KB) are encoded to an MP4 by the embedded engine, decoded, filmed for two passes (three on
