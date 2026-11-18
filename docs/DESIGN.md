@@ -949,13 +949,19 @@ which section 5 favours colour, and colour's camera-pixels-per-cell figure was n
 linear-light blur.
 
 **On a tripod** (fill 0.90; the steady four-grey figure of 3.5 from section 4, with `normal`
-re-checked at 3.6 and `fast` and `robust` not re-derived), the earlier figures stand:
+re-checked at 3.6 and `fast` and `robust` not re-derived). This table is **simulated only and
+indicative**:
+- S2 has no tripod take.
+- The handheld real recordings are a lower bound for tripod use and do not establish any tripod-only
+  setting.
+- It is not used for recommendations until a tripod take is filmed at G1.
+- Four greys `fast` is not established on a tripod either, so no row uses it.
 
 | Camera (tripod) | Recommended | s | Planning rate | 10 MB | 1 GB |
 | --- | --- | --- | --- | --- | --- |
 | 1080p30 | 720p at 12 fps, four greys, `normal` | 5.4 | about 50 KB/s | about 3.5 min | about 5.5 h, impractical |
 | 4K30 | 1440p at 12 fps, four greys, `normal` | 5.4 | about 200 KB/s | about 50 s | about 80 min |
-| 4K60 with a 1080p monitor | 1080p at 30 fps, four greys, `fast` | 7.2 | about 350 KB/s | about 30 s | about 47 min |
+| 4K60 with a 1080p monitor | 1080p at 30 fps, four greys, `normal` | 7.2 | about 280 KB/s | about 37 s | about 1 h |
 | 4K60 | 1440p at 30 fps, four greys, `normal` | 5.4 | about 500 KB/s | about 20 s | about 32 min |
 | 4K120 | 1440p at 30-60 fps, four greys, `normal` | 5.4 | 0.6-1.0 MB/s | 10-16 s | 16-26 min |
 
@@ -1934,7 +1940,7 @@ writing each package format by hand.
 | M2 | Vision, including header reading and stripe cancellation |
 | M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards 1.46-2.80% of black-and-white cells of a perfect frame, mean about 2.1% (section 10, step 4) |
 | M4 | `calibrate`, `inspect`, profiles |
-| G1 | The owner films the calibration video and sample transfers |
+| G1 | The owner films the calibration video and sample transfers, including one tripod take |
 | M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings; inferring the frame index of a capture whose header copies all fail, from the last index and the phase markers with the quad carried by tracking (deferred from M2, section 7 rule 1); mirrored recordings (FORMAT.md section 4.1) |
 | M6 | 1 GB scale, resuming with `--state-dir`; experimental `--hdr` |
 | G2 | The owner films one large transfer |
