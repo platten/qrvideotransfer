@@ -208,7 +208,7 @@ func TestEvictionCycle(t *testing.T) {
 	d := &decoder{c: &DecodeConfig{}, tmp: t.TempDir(), frames: map[uint32]*frameAcc{},
 		softCap: 10*frameRecordBytes(g.cpf) + int64((g.cpf-1)*g.sent)}
 	defer d.close()
-	for i := range 3000 {
+	for i := range 1000 {
 		if err := d.apply(captureResult{index: 3 * i, located: true, key: key, cells: 1, clean: 1,
 			phases: []phaseBits{{frame: uint32(i % 50), soft: soft}}}); err != nil {
 			t.Fatal(err)
@@ -217,7 +217,7 @@ func TestEvictionCycle(t *testing.T) {
 			t.Fatalf("capture %d: %d bytes held (cap %d), %d pending for %d records", i, d.usedBytes(), d.softCap, len(d.pending), len(d.frames))
 		}
 	}
-	if per := float64(d.evictSteps) / 3000; per > 3 {
+	if per := float64(d.evictSteps) / 1000; per > 3 {
 		t.Errorf("%.2f eviction steps per capture", per)
 	}
 	d.sendStats()

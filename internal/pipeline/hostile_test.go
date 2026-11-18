@@ -78,7 +78,9 @@ func signedStream(t *testing.T, key ed25519.PrivateKey) []byte {
 // encrypted stream with one bit flipped, re-encoded as a video whose descriptor matches it, is
 // refused with the named error, with or without a trusted key, before the passphrase is asked
 // for, and nothing is written; the stream as signed decodes. The payload's tests flip every bit;
-// here one bit of each field.
+// here one bit of each field, with and without a trusted key, in the long version
+// (QRVT_LONG_TESTS=1); always, the stream as signed, a flipped body bit without a trusted key and a
+// flipped signature bit with one.
 func TestTamperedStreamEndToEnd(t *testing.T) {
 	raceSkipStatistics(t)
 	_, key, err := payload.GenerateKey(nil)
@@ -104,8 +106,13 @@ func TestTamperedStreamEndToEnd(t *testing.T) {
 		{"public key", body + 3, 0x01, func(err error) bool { return errors.Is(err, payload.ErrBadSignature) }},
 		{"signature", body + ed25519.PublicKeySize + 40, 0x20, func(err error) bool { return errors.Is(err, payload.ErrBadSignature) }},
 	}
+	long := os.Getenv("QRVT_LONG_TESTS") == "1"
+	short := map[string]int{"none": 0, "body": 0, "signature": 1} // each case's trusted keys
 	for _, c := range cases {
 		for _, keys := range [][]ed25519.PublicKey{nil, {pub}} {
+			if n, ok := short[c.name]; !long && (!ok || n != len(keys)) {
+				continue
+			}
 			s := bytes.Clone(stream)
 			if c.off >= 0 {
 				s[c.off] ^= c.bit
@@ -133,7 +140,7 @@ func TestTamperedStreamEndToEnd(t *testing.T) {
 
 // TestInterleavedSessions (SECURITY.md sections 9.2 and T2): a recording that alternates frame by
 // frame between two transfers locks onto the one it shows first, decodes it, and ignores the other;
-// either order.
+// either order (the second in the long version, QRVT_LONG_TESTS=1).
 func TestInterleavedSessions(t *testing.T) {
 	raceSkipStatistics(t)
 	inA, wantA := writeInputs(t, 41, 3000)
@@ -142,10 +149,14 @@ func TestInterleavedSessions(t *testing.T) {
 	pb, _ := encodeRaw(t, profile480(inB))
 	fa, info := readFrames(t, video.NewRaw(), pa)
 	fb, _ := readFrames(t, video.NewRaw(), pb)
-	for _, c := range []struct {
+	orders := []struct {
 		first, second []*video.Frame
 		want          map[string][32]byte
-	}{{fa, fb, wantA}, {fb, fa, wantB}} {
+	}{{fa, fb, wantA}, {fb, fa, wantB}}
+	if os.Getenv("QRVT_LONG_TESTS") != "1" {
+		orders = orders[:1]
+	}
+	for _, c := range orders {
 		var mixed []*video.Frame
 		for i := range c.first {
 			mixed = append(mixed, c.first[i])

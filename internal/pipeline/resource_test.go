@@ -201,7 +201,8 @@ func locatedDecode(t *testing.T, frames []*video.Frame, procs int) (*decoder, ti
 
 // TestLocatedRecordingResources (SECURITY.md section 9.5): recordings that show a transfer, whose
 // grid stage holds far more than a noise recording's, keep the decode's grid stage within its
-// budget. Always: 24 captures at 848 x 480. Long (QRVT_LONG_TESTS=1): 24 captures at 3840 x 2160
+// budget. Long version only (QRVT_LONG_TESTS=1; the gate's bound is asserted always by
+// TestStageGateGridChange): 24 captures at 3840 x 2160
 // with the 4K preset's grid, GOMAXPROCS 16 and 32, within 1 GiB of heap growth, one at a time in
 // the grid stage. Beyond the measured boundary the bound is not met, and the figures are logged,
 // not asserted (DESIGN.md section 19; M7 decides): 8 captures at 7680 x 4320 with the 4K grid, one
@@ -210,16 +211,7 @@ func locatedDecode(t *testing.T, frames []*video.Frame, procs int) (*decoder, ti
 func TestLocatedRecordingResources(t *testing.T) {
 	raceSkipStatistics(t)
 	if os.Getenv("QRVT_LONG_TESTS") != "1" {
-		frames, want := locatedFrames(t, 24, 848, 480, 4)
-		d, _, peak, err := locatedDecode(t, frames, runtime.GOMAXPROCS(0))
-		if err != nil {
-			t.Fatal(err)
-		}
-		checkOutput(t, d.c.Unpack.OutputDir, want)
-		if peak > hostileHeap {
-			t.Errorf("heap growth %d bytes, bound %d", peak, hostileHeap)
-		}
-		return
+		t.Skip("long test: QRVT_LONG_TESTS=1")
 	}
 	frames, want := locatedFrames(t, 24, 3840, 2160, 4)
 	for _, procs := range []int{16, 32} {

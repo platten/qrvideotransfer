@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/platten/qrvideotransfer/internal/payload"
@@ -36,7 +37,8 @@ func TestGenerateKey(t *testing.T) {
 // TestSigningEndToEnd: files encoded with a generated key and decoded with its public key verify
 // and name the signer; with another trusted key, or unsigned with any trusted key, the decode is
 // refused before the passphrase is asked for, and nothing is written (SECURITY.md sections 6 and
-// 9.4).
+// 9.4). The unsigned recording runs in the long version (QRVT_LONG_TESTS=1); TestTypedErrors
+// refuses an unsigned recording with a trusted key always.
 func TestSigningEndToEnd(t *testing.T) {
 	raceSkipStatistics(t)
 	in, want := payloadDir(t, 30, 4000, 300)
@@ -51,7 +53,17 @@ func TestSigningEndToEnd(t *testing.T) {
 	asked := 0
 	pass := func() (string, error) { asked++; return "a passphrase", nil }
 	signed, _ := encodeTest(t, EncodeOptions{Inputs: []string{in}, SignKey: priv, Passphrase: pass})
-	unsigned, _ := encodeTest(t, EncodeOptions{Inputs: []string{in}, Passphrase: pass})
+	cases := map[string]struct {
+		rec  string
+		keys [][]byte
+	}{"signed by another key": {signed, [][]byte{other}}}
+	if os.Getenv("QRVT_LONG_TESTS") == "1" {
+		unsigned, _ := encodeTest(t, EncodeOptions{Inputs: []string{in}, Passphrase: pass})
+		cases["unsigned"] = struct {
+			rec  string
+			keys [][]byte
+		}{unsigned, [][]byte{pub}}
+	}
 	asked = 0
 
 	out, rep, err := decodeTest(t, DecodeOptions{Recordings: []string{signed}, VerifyKeys: [][]byte{other, pub}, Passphrase: pass})
@@ -64,13 +76,7 @@ func TestSigningEndToEnd(t *testing.T) {
 		t.Errorf("report signed %v encrypted %v signer %x, passphrase asked %d times", rep.Signed, rep.Encrypted, rep.SignerKey, asked)
 	}
 
-	for name, c := range map[string]struct {
-		rec  string
-		keys [][]byte
-	}{
-		"signed by another key": {signed, [][]byte{other}},
-		"unsigned":              {unsigned, [][]byte{pub}},
-	} {
+	for name, c := range cases {
 		asked = 0
 		out, _, err := decodeTest(t, DecodeOptions{Recordings: []string{c.rec}, VerifyKeys: c.keys, Passphrase: pass})
 		if !errors.Is(err, ErrMissingSignature) {
