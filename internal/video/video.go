@@ -36,7 +36,14 @@ type EncodeConfig struct {
 	FPS           int
 	Quantiser     int
 	BitDepth      int // 8, or 10 for the experimental HDR output
+	// Bitrate, in bits per second, makes the encoder stand in for a phone's recorder in the
+	// simulated camera's tests (DESIGN.md section 15); 0 keeps the display video's constant
+	// quantiser. Not reachable from the public API.
+	Bitrate int
 }
+
+// MaxBitrate is the largest EncodeConfig.Bitrate, 1 Gbit/s.
+const MaxBitrate = 1_000_000_000
 
 // DecodeConfig configures a [Decoder].
 type DecodeConfig struct {
