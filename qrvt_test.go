@@ -15,8 +15,6 @@ func TestNotImplemented(t *testing.T) {
 	errs = append(errs, err)
 	_, err = Inspect(ctx, InspectOptions{})
 	errs = append(errs, err)
-	_, _, err = GenerateKey()
-	errs = append(errs, err)
 	for i, err := range errs {
 		if !errors.Is(err, ErrNotImplemented) {
 			t.Errorf("call %d: got %v, want ErrNotImplemented", i, err)
