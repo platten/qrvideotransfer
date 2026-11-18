@@ -9,6 +9,7 @@ package qrvt
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -151,7 +152,14 @@ func Inspect(ctx context.Context, o InspectOptions) (*StreamInfo, error) {
 	return nil, ErrNotImplemented
 }
 
-// GenerateKey returns a new Ed25519 signing key pair in qrvt's key-file encoding.
+// GenerateKey returns a new Ed25519 signing key pair in qrvt's key-file encoding (SECURITY.md
+// section 6): each the contents of a key file, one line and its line ending. The private key, as
+// it is or without its line ending, is what EncodeOptions.SignKey takes, and the public key what
+// DecodeOptions.VerifyKeys takes.
 func GenerateKey() (public, private []byte, err error) {
-	return nil, nil, ErrNotImplemented
+	pub, priv, err := payload.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	return payload.MarshalPublicKey(pub), payload.MarshalPrivateKey(priv), nil
 }
