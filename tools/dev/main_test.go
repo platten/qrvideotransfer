@@ -223,13 +223,13 @@ func TestCheckJobLimit(t *testing.T) {
 		t.Errorf("the check job's limit is %d minutes, want at least 2 x %d (race steps) + %d (other steps)", job, race[0], fixedStepsBudget)
 	}
 	wf := "jobs:\n  check:\n    timeout-minutes: 50\n    steps:\n      - name: Race tests, other packages (Unix)\n        timeout-minutes: 20\n" +
-		"      - name: Race tests, internal/video (Windows)\n        timeout-minutes: 15\n      - name: Lint\n        timeout-minutes: 9\n  other:\n    timeout-minutes: 5\n"
+		"      - name: Race tests, isolated packages (Windows)\n        timeout-minutes: 15\n      - name: Lint\n        timeout-minutes: 9\n  other:\n    timeout-minutes: 5\n"
 	if job, race := checkJobLimits([]byte(wf)); job != 50 || !slices.Equal(race, []int{20, 15}) {
 		t.Errorf("checkJobLimits = %d, %v; want 50, [20 15]", job, race)
 	}
 }
 
-// TestIsolatedRaceStepFollowsOthers: the internal/video race step runs after a failure of the
+// TestIsolatedRaceStepFollowsOthers: the isolated packages' race step runs after a failure of the
 // other packages' race step, but not alone after a failure earlier in the job, which skipped it.
 func TestIsolatedRaceStepFollowsOthers(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
@@ -240,6 +240,9 @@ func TestIsolatedRaceStepFollowsOthers(t *testing.T) {
 	for _, want := range []string{
 		"      - name: Race tests, other packages (Unix)\n        id: race-others\n",
 		"      - name: Race tests, other packages (Windows)\n        id: race-others-windows\n",
+		// The isolated part runs internal/video, the root package and internal/pipeline.
+		"      - name: Race tests, isolated packages (Unix)\n",
+		"      - name: Race tests, isolated packages (Windows)\n",
 		"if: ${{ !cancelled() && runner.os != 'Windows' && steps.race-others.outcome != 'skipped' }}\n",
 		"if: ${{ !cancelled() && matrix.os == 'windows-2025' && steps.race-others-windows.outcome != 'skipped' }}\n",
 	} {
