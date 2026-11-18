@@ -839,8 +839,9 @@ several recordings passed to one `decode` simply add up. With `--state-dir`, rec
 unresolved soft bits persist, and a later run reads only the new recording.
 
 **As built (M3, `internal/pipeline`).** Recordings are read one after another, each by one video
-decoder whose captures go to a pool of vision workers (one per core, each with its own detector and
-buffers); the workers return each capture's soft bits, descrambled and in codeword order, through a
+decoder whose captures go to a pool of vision workers (one per core, as many as half the decode's
+memory budget holds for the probed capture size, each with its own detector and buffers; the grid
+stage, from sampling to soft bits, is admitted by a gate sized from the grid, section 19); the workers return each capture's soft bits, descrambled and in codeword order, through a
 channel to the one goroutine that owns the accumulators, the shard store and the events, which
 applies them in capture order. A phase of the capture is credited to the header's frame with that
 phase, else to the frame one step after or before the first header's (wrapping at the seam); two
@@ -2098,7 +2099,15 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   and every pipeline test that crosses a goroutine boundary or guards a limit (two recordings,
   cancellation, the reorder bound, disk space, hostile descriptors, frame loss at 20 frames,
   where 3 lost are 15% and 4 are 20%, so the levels stay honest); the matrix, the typed errors,
-  the prefix property, the mid-loop start and the summed soft bits run in the non-race step. And
+  the prefix property, the mid-loop start and the summed soft bits run in the non-race step. PR B
+  of M3 part 2 adds to that step the hostile and located recordings' resources, the tampered stream
+  and the interleaved sessions end to end, `FuzzDecode` (also in the fuzz step), signing end to end
+  (root package) and the two eviction tests. Five of those (the hostile recordings, the tampered
+  stream, the interleaved sessions, `FuzzDecode` and signing) and the located recordings run the
+  whole `Decode`; they are skipped for time, not because they cross no goroutine. The `Decode`
+  goroutine paths they use stay under the race detector through `TestEncodeDecode` (root), the
+  pipeline's loopback and frame-loss tests and `TestWorkersClampedWarning`, and the grid stage's
+  gate through `TestStageGateGridChange` (32 goroutines). And
   both run in the isolated race part beside `internal/video` (`-part isolated`), so the other
   race step holds what it held before this pull request; the steps stay two, with their limits.
   The CI-size suites and that runner's variance from host to host are an item for later, not
@@ -2106,10 +2115,36 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   pinned on the development machine: about 2.5 times, so the 5.7 times above, taken from the
   contended step, overstates an uncontended one. The margin is kept anyway, because that
   runner's speed varies from host to host.
+- **PR #49's CI runs 2 and 3 (M3 part 2, PR B).** Run 2 failed two steps. (1) CI's
+  go-test-coverage step gates a package as a file's path up to its last slash, so each file at the
+  module's root is gated on its own; `qrvt.go` stood at 93.9% (62/66) where `tools/dev cover`,
+  grouping by directory, passed the root package at 95.4%. Two tests now reach two of its four
+  uncovered statements (97.0%; `convert.go` 96.9%, 31 of 32, so one more uncovered statement
+  there would take it to about 93.8%, below the per-file gate); the other two, a failure of `crypto/rand` in
+  `GenerateKey` and of `json.MarshalIndent` on the report, no test reaches without a production
+  change. `tools/dev cover` now groups files as the action does (`TestParseProfileGroups`), so the
+  local gate fails where CI's would. (2) The coverage step on macos-26-intel reached its 20-minute
+  limit; run 1 on the same code took 18 min 13 s, and package times rose from run 1 to run 2
+  (`internal/vision` 605 to 714 s, the root 149 to 200 s, `internal/pipeline` 95 to 119 s). This
+  PR's heavier always-on cases moved to the long run, where they still execute, keeping one small
+  case per property always (designer's ruling): the located recordings' resources at 4K (always,
+  one pass of the transfer's captures at 848 x 480, decoded correctly within 1 GiB and the grid
+  stage's budget, 0.7 s pinned), signing end to end with an unsigned
+  recording (`TestTypedErrors` refuses one always), the tampered stream beyond the stream as
+  signed, a flipped body bit without a trusted key and a flipped signature bit with one, the
+  second order of the interleaved sessions; `TestEvictionCycle` runs 1,000 captures, not 3,000.
+  Pinned on 4 CPUs, back to back on the development machine: the coverage step took 365 s at #48
+  and 377 s here (before the last trim); the 346 s measured for #48 earlier came from a faster
+  run of the same machine, and `internal/vision`, unchanged, moved by 5 s between the two runs. At
+  bce3915, back to back: 464 s at #48 and 477 s here (+2.8%; the reviewer's, 455.5 and 470.6 s,
+  +3%), within the designer's 5% of #48 back to back, with no always-on security case dropped.
+  **The main margin risk for the coverage step is `internal/vision`'s CI-size cost**, 600 to 714 s
+  on macos-26-intel; a trim of its tests is due in its own pull request before M4 adds tests.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
-  the encoder joins runs with one engine instance. Eviction rescans every frame's soft bits each
-  time the cap is exceeded, O(frames x C x sent bits) per eviction. Per-frame bookkeeping was
+  the encoder joins runs with one engine instance. Eviction rescanned every frame's soft bits each
+  time the cap was exceeded, O(frames x C x sent bits) per eviction, until PR B of M3 part 2
+  (below). Per-frame bookkeeping was
   outside the 256 MB cap: each frame seen (at most F; a capture can credit up to four frames,
   three from one header's phases and a fourth from a second header) keeps C
   `done` flags and C slice headers, about 25 C bytes: 3.8 KB at C = 151 (250 MB at F = 67,112),
@@ -2119,12 +2154,69 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   seen least recently; the frames seen are counted in a bitset of F bits (at most 512 KiB, beside
   the cap). A frame seen again after its record went is decoded again, and its shards, already
   stored, are not counted twice (`TestBookkeepingUnderCap`, `TestDroppedRecordCountsOnce`).
-  **Open, for M7:** a hostile or looping recording can keep the decode at the cap, so that every
-  capture forces an eviction, a rescan of everything held (up to 256 MB) and the re-decoding of
-  codewords whose records went. No existing limit bounds that work per capture; the decoded-pixel
-  limit bounds the captures, not the work each costs here (SECURITY.md section 5). The
-  real-device check took 210-500 s per
-  recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
+  **Re-examine, for M7:** a hostile or looping recording that keeps the decode at the cap made
+  every capture evict, rescan everything held (up to 256 MB) and decode codewords again: 489 ms a
+  capture, beyond 60 s after about 120. Since PR B of M3 part 2 the eviction order lives in two
+  heaps updated as soft bits are added (least confident first, then least recently seen, as
+  before): 0.2 ms a capture at the full cap, and 200 captures there within 60 s and 1 GiB,
+  asserted in the long run (`TestEvictionLoopCost`); the steps per capture do not grow with what is
+  held, nor does a capture's time, which tells a rescan from the heaps (`TestEvictionWorkBounded`: 47 times at 1,600 frames against 40 for the rescan, about 1.1 for the heaps; `TestEvictionCycle`, always). Re-decoding a frame whose record
+  went is bounded per capture by the codewords of the frames it credits. **Decode memory (PR B):**
+  the vision workers had been one per CPU, about 50 MiB each at 4K, so a 4K noise recording grew
+  the heap by 836 MiB at 16 CPUs and would pass 1 GiB at about 24; they are now capped by memory
+  from the probed capture size, at half the decode's 640 MiB budget (SECURITY.md section 5: 6 at
+  4K, 1 at 8K; 360 MiB for 4K noise at 16 and 32 CPUs). That model held for noise only (review of
+  PR B): a capture that shows a code runs the grid stage, sampling, the tile equaliser with stripe
+  cancellation (about 200 MiB a 4K capture) and the soft bits (about 64 MiB), whose memory grows
+  with the grid. The reviewer measured the encoder's 4K output in modulation 3 (RGB8) before the 256 MB store
+  filled: 510 MiB of heap at 1 worker, 1,224 MiB at 3, about 3.5 GiB at 12 (the cap then; 2 GiB
+  even at GOGC=10, so live), and 1,863 MiB at 8K with 3; a header can claim about 6 times the
+  cells at 4K. **The grid stage's memory model** (designer's ruling (a)): one capture's stage holds
+  600 bytes a data cell and 16 MiB, from the heap's growth over one capture's stage on the
+  encoder's output, modulations 1 to 3 measured (peak live about equal at 4K; modulation 3 allocates most); 4 (Gray8) is not produced by the encoder and is unmeasured: in modulation 1, 84 MiB for 117,112 cells (1920 x 1080, 4-pixel
+  cells; 71 MiB in a second run), 283 MiB for 469,088 (3840 x 2160; 267 MiB in a second run), and
+  modulations 2 and 3 at 4K 183 and 188 MiB; the frame's size does not enter (the 480 x 270 grid
+  at 3840 x 2160 held 67 MiB, the 960 x 540 grid at 7680 x 4320 285 MiB). A gate admits the stage
+  at that weight against what the workers' captures leave of the budget, at least half, in order of
+  arrival; a stage whose weight exceeds the budget takes all of it and runs alone; nothing is
+  refused (a refusal rule is a limit change, with its own design). Each capture's weight is its own
+  grid's, so alternating grids cannot raise the concurrency (`TestStageGateGridChange`);
+  `TestStageConcurrencyByGrid` asserts fewer at once as the grid grows, never fewer than one. The
+  stage's buffers are the capture's, not kept by the worker. **Measured (long run,
+  `TestLocatedRecordingResources`):** 24 captures of the 4K output at 3840 x 2160, 834 MiB of heap
+  growth at GOMAXPROCS 16 and 883 at 32, one capture in the stage at a time, the soft-bit store
+  nearly empty; the 1 GiB holds up to there. Beyond it, not met: the same decode with 256 MiB held
+  to stand for a full store, as a hostile or a long poor recording reaches, 1,121 MiB of growth at
+  GOMAXPROCS 16 and 1,106 at 32 besides the store (reviewer's measurement); and, logged: 8 captures at 7680 x 4320 of the 4K grid, one worker, 1,096
+  MiB (1,114 in a first run: the reader's three capture buffers at 99.5 MB each and the GC's
+  headroom over them; the memory model therefore counts three captures a worker, not two, as
+  measured; the code's estimate, 6 x width x height, is unchanged); 6 captures at 3840 x 2160 of the
+  largest grid a header can claim, 2,047 x 1,393 (2,567,107 cells, a model weight of 1,484 MiB, so
+  alone), 1,799 MiB and 107 s, about 18 s a capture alone, so a recording of 4 or more such
+  captures exceeds the 60 s bound as well. **Both bounds hold** for the encoder's 4K output with the
+  soft-bit store nearly empty (12.3 and 12.6 s for 24 captures, 834 and 883 MiB) and for noise (848 x 480: 0.3 s, 126 MiB; 3840 x
+  2160: 1.7 s, 360 MiB). No refusal and no time limit in this PR (designer's ruling): M7 decides
+  between a refusal rule, a time limit and a tighter cap on the claimable grid, and for memory
+  between a refusal rule and M6's allocation work, and whether the soft-bit store counts against
+  the decode's budget. Outside the gate besides: each capture's soft bits per phase wait to be
+  applied, at most workers + 2 results of up to four phases of the frame's bits, about 2 MB a
+  phase at the 4K grid in modulation 1 and up to 7.7 MB at the largest grid in modulation 3;
+  detection and fitting before the gate, about 46 MiB live and 85 MiB allocated for a capture of
+  the largest grid; and each worker's geometry cache, up to two geometries of 22 MiB each at the
+  largest grid (reviewer's measurements).
+  **M6, scale work (designer's ruling (b)):** cut the stripe cancellation's allocations, about
+  200 MiB a 4K capture (reviewer's figures above), which would let more captures share the stage.
+  **Throughput (a note, not a merge condition):** 60 captures of the 4K output, 16 CPUs, decoded
+  in 13.0 s with 2,870 MiB of heap growth before the gate (12 workers, the stage unbounded) and in
+  27.3 s with 861 MiB after (6 workers, one capture in the stage at a time). **Engine memory:** the
+  budget assumes the engine decodes in its worker processes; a job that falls back to running in
+  process puts its 512 MiB reservation in the Go heap besides (SECURITY.md section 5), not
+  re-budgeted. **`FuzzDecode`, for M7:** slow and of limited reach as built: 46 executions in 45 s
+  on the development machine, each a whole decode of four 480p frames; it patches only the
+  brightness plane; it has no committed corpus beyond its seeds. **Frame
+  headers:** `frame.DecodeHeader` refuses a header without saying why (a CRC or a `Validate`
+  failure); the reason is a candidate for M4's `inspect`, its first consumer (designer's ruling).
+  The real-device check took 210-500 s per recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
   1, 255 s); a round-trip matrix row takes 3-14 s alone.
 
 ## 20. Sources

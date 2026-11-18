@@ -1,0 +1,260 @@
+[
+ {
+  "name": "reserved 1",
+  "field": "Reserved",
+  "value": 1,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 2",
+  "field": "Reserved",
+  "value": 2,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 3",
+  "field": "Reserved",
+  "value": 3,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 4",
+  "field": "Reserved",
+  "value": 4,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 5",
+  "field": "Reserved",
+  "value": 5,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 6",
+  "field": "Reserved",
+  "value": 6,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 7",
+  "field": "Reserved",
+  "value": 7,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 8",
+  "field": "Reserved",
+  "value": 8,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 9",
+  "field": "Reserved",
+  "value": 9,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 10",
+  "field": "Reserved",
+  "value": 10,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 11",
+  "field": "Reserved",
+  "value": 11,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 12",
+  "field": "Reserved",
+  "value": 12,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 13",
+  "field": "Reserved",
+  "value": 13,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 14",
+  "field": "Reserved",
+  "value": 14,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "reserved 15",
+  "field": "Reserved",
+  "value": 15,
+  "reason": "reserved bits are not zero"
+ },
+ {
+  "name": "version 0",
+  "field": "Version",
+  "value": 0,
+  "reason": "unsupported format version 0"
+ },
+ {
+  "name": "version 2",
+  "field": "Version",
+  "value": 2,
+  "reason": "unsupported format version 2"
+ },
+ {
+  "name": "version 3",
+  "field": "Version",
+  "value": 3,
+  "reason": "unsupported format version 3"
+ },
+ {
+  "name": "version 4",
+  "field": "Version",
+  "value": 4,
+  "reason": "unsupported format version 4"
+ },
+ {
+  "name": "version 5",
+  "field": "Version",
+  "value": 5,
+  "reason": "unsupported format version 5"
+ },
+ {
+  "name": "version 6",
+  "field": "Version",
+  "value": 6,
+  "reason": "unsupported format version 6"
+ },
+ {
+  "name": "version 7",
+  "field": "Version",
+  "value": 7,
+  "reason": "unsupported format version 7"
+ },
+ {
+  "name": "version 8",
+  "field": "Version",
+  "value": 8,
+  "reason": "unsupported format version 8"
+ },
+ {
+  "name": "version 9",
+  "field": "Version",
+  "value": 9,
+  "reason": "unsupported format version 9"
+ },
+ {
+  "name": "version 10",
+  "field": "Version",
+  "value": 10,
+  "reason": "unsupported format version 10"
+ },
+ {
+  "name": "version 11",
+  "field": "Version",
+  "value": 11,
+  "reason": "unsupported format version 11"
+ },
+ {
+  "name": "version 12",
+  "field": "Version",
+  "value": 12,
+  "reason": "unsupported format version 12"
+ },
+ {
+  "name": "version 13",
+  "field": "Version",
+  "value": 13,
+  "reason": "unsupported format version 13"
+ },
+ {
+  "name": "version 14",
+  "field": "Version",
+  "value": 14,
+  "reason": "unsupported format version 14"
+ },
+ {
+  "name": "version 15",
+  "field": "Version",
+  "value": 15,
+  "reason": "unsupported format version 15"
+ },
+ {
+  "name": "modulation 0",
+  "field": "Modulation",
+  "value": 0,
+  "reason": "unknown modulation 0"
+ },
+ {
+  "name": "modulation 5",
+  "field": "Modulation",
+  "value": 5,
+  "reason": "unknown modulation 5"
+ },
+ {
+  "name": "modulation 6",
+  "field": "Modulation",
+  "value": 6,
+  "reason": "unknown modulation 6"
+ },
+ {
+  "name": "modulation 7",
+  "field": "Modulation",
+  "value": 7,
+  "reason": "unknown modulation 7"
+ },
+ {
+  "name": "inner code 0",
+  "field": "InnerCode",
+  "value": 0,
+  "reason": "unknown inner code 0"
+ },
+ {
+  "name": "inner code 5",
+  "field": "InnerCode",
+  "value": 5,
+  "reason": "unknown inner code 5"
+ },
+ {
+  "name": "inner code 6",
+  "field": "InnerCode",
+  "value": 6,
+  "reason": "unknown inner code 6"
+ },
+ {
+  "name": "inner code 7",
+  "field": "InnerCode",
+  "value": 7,
+  "reason": "unknown inner code 7"
+ },
+ {
+  "name": "no frames",
+  "field": "TotalFrames",
+  "value": 0,
+  "reason": "invalid frame count 0"
+ },
+ {
+  "name": "frames not a multiple of 4",
+  "field": "TotalFrames",
+  "value": 6,
+  "reason": "invalid frame count 6"
+ },
+ {
+  "name": "index at the count",
+  "field": "FrameIndex",
+  "value": 8,
+  "reason": "frame index 8 not below frame count 8"
+ },
+ {
+  "name": "grid too narrow",
+  "field": "GridX",
+  "value": 8,
+  "reason": "outside the limits"
+ },
+ {
+  "name": "grid too short",
+  "field": "GridY",
+  "value": 29,
+  "reason": "outside the limits"
+ }
+]

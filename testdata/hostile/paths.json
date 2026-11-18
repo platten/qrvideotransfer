@@ -1,0 +1,421 @@
+[
+ {
+  "path": "",
+  "reason": "empty path"
+ },
+ {
+  "path": "/etc/passwd",
+  "reason": "empty component (absolute path or doubled or trailing slash)",
+  "note": "absolute"
+ },
+ {
+  "path": "a//b",
+  "reason": "empty component (absolute path or doubled or trailing slash)"
+ },
+ {
+  "path": "a/",
+  "reason": "empty component (absolute path or doubled or trailing slash)"
+ },
+ {
+  "path": "..",
+  "reason": "dot or dot-dot component"
+ },
+ {
+  "path": "a/../../b",
+  "reason": "dot or dot-dot component"
+ },
+ {
+  "path": "./a",
+  "reason": "dot or dot-dot component"
+ },
+ {
+  "path": "a\\b",
+  "reason": "backslash"
+ },
+ {
+  "path": "..\\windows",
+  "reason": "backslash"
+ },
+ {
+  "path": "C:",
+  "reason": "colon",
+  "note": "drive letter"
+ },
+ {
+  "path": "C:/x",
+  "reason": "colon"
+ },
+ {
+  "path": "a:b",
+  "reason": "colon",
+  "note": "alternate data stream"
+ },
+ {
+  "path": "a\u0000b",
+  "reason": "control character",
+  "note": "NUL"
+ },
+ {
+  "path": "a\u0001b",
+  "reason": "control character"
+ },
+ {
+  "path": "a\u001fb",
+  "reason": "control character"
+ },
+ {
+  "path": "a\u007fb",
+  "reason": "control character",
+  "note": "DEL"
+ },
+ {
+  "path": "a\u001b[31mred",
+  "reason": "control character",
+  "note": "ANSI escape sequence"
+ },
+ {
+  "path": "a\nb",
+  "reason": "control character"
+ },
+ {
+  "path": "a\rb",
+  "reason": "control character"
+ },
+ {
+  "path": "a<b",
+  "reason": "character Windows cannot store in a name"
+ },
+ {
+  "path": "a>b",
+  "reason": "character Windows cannot store in a name"
+ },
+ {
+  "path": "a\"b",
+  "reason": "character Windows cannot store in a name"
+ },
+ {
+  "path": "a|b",
+  "reason": "character Windows cannot store in a name"
+ },
+ {
+  "path": "a?b",
+  "reason": "character Windows cannot store in a name"
+ },
+ {
+  "path": "a*b",
+  "reason": "character Windows cannot store in a name"
+ },
+ {
+  "path": "a.",
+  "reason": "component ends in a space or a dot"
+ },
+ {
+  "path": "a ",
+  "reason": "component ends in a space or a dot"
+ },
+ {
+  "path": "d./f",
+  "reason": "component ends in a space or a dot"
+ },
+ {
+  "path": "d /f",
+  "reason": "component ends in a space or a dot"
+ },
+ {
+  "path": "CON",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "con.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "PRN",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "prn.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "AUX",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "aux.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "NUL",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "nul.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "CONIN$",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "conin$.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "CONOUT$",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "conout$.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM0",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com0.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM1",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com1.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM2",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com2.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM3",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com3.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM4",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com4.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM5",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com5.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM6",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com6.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM7",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com7.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM8",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com8.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM9",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com9.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT0",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt0.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT1",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt1.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT2",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt2.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT3",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt3.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT4",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt4.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT5",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt5.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT6",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt6.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT7",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt7.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT8",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt8.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT9",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt9.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM\u00b9",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com\u00b9.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM\u00b2",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com\u00b2.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "COM\u00b3",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "com\u00b3.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT\u00b9",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt\u00b9.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT\u00b2",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt\u00b2.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "LPT\u00b3",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "lpt\u00b3.txt",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "d/aux.tar.gz",
+  "reason": "Windows device name"
+ },
+ {
+  "path": "CON .txt",
+  "reason": "Windows device name",
+  "note": "spaces before the extension"
+ },
+ {
+  "path": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "reason": "component longer than 255 bytes",
+  "note": "256 bytes"
+ },
+ {
+  "path": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9",
+  "reason": "component longer than 255 bytes",
+  "note": "256 bytes in 128 characters"
+ },
+ {
+  "path": "a/",
+  "reason": "more than 64 components",
+  "repeat": 64,
+  "note": "a/ repeated: 65 components"
+ },
+ {
+  "path": "abcdefghij/",
+  "reason": "path longer than 4096 bytes",
+  "repeat": 373,
+  "note": "4,103 bytes"
+ },
+ {
+  "path": "e\u0301",
+  "reason": "not in Unicode normalisation form C",
+  "note": "NFD"
+ },
+ {
+  "path": "\u212b",
+  "reason": "not in Unicode normalisation form C",
+  "note": "Angstrom sign"
+ }
+]

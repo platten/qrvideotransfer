@@ -1,0 +1,1 @@
+M3 part 2, PR B: section 19 records the eviction loop fixed (heaps; 489 ms to 0.2 ms a capture at the cap; re-examine for M7), the vision workers capped by memory (836 MiB of heap at 16 CPUs on a 4K noise recording before, about 630 MiB at 16 or 32 after; 3 workers and about 580 MiB at 8K), and DecodeHeader's missing reason as a candidate for M4's inspect

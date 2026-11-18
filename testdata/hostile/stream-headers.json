@@ -1,0 +1,131 @@
+{
+ "base": "515256530100000000000000000000640000000000000064",
+ "cases": [
+  {
+   "name": "magic",
+   "byte": 0,
+   "error": "format",
+   "xor": 1
+  },
+  {
+   "name": "version 0",
+   "byte": 4,
+   "error": "unsupported:stream version:0",
+   "xor": 1
+  },
+  {
+   "name": "version 3",
+   "byte": 4,
+   "error": "unsupported:stream version:3",
+   "xor": 2
+  },
+  {
+   "name": "compression 3",
+   "byte": 5,
+   "error": "unsupported:compression:3",
+   "xor": 3
+  },
+  {
+   "name": "compression 255",
+   "byte": 5,
+   "error": "unsupported:compression:255",
+   "xor": 255
+  },
+  {
+   "name": "flag bit 2",
+   "byte": 6,
+   "error": "format",
+   "xor": 4
+  },
+  {
+   "name": "flag bit 3",
+   "byte": 6,
+   "error": "format",
+   "xor": 8
+  },
+  {
+   "name": "flag bit 4",
+   "byte": 6,
+   "error": "format",
+   "xor": 16
+  },
+  {
+   "name": "flag bit 5",
+   "byte": 6,
+   "error": "format",
+   "xor": 32
+  },
+  {
+   "name": "flag bit 6",
+   "byte": 6,
+   "error": "format",
+   "xor": 64
+  },
+  {
+   "name": "flag bit 7",
+   "byte": 6,
+   "error": "format",
+   "xor": 128
+  },
+  {
+   "name": "reserved bit 0",
+   "byte": 7,
+   "error": "format",
+   "xor": 1
+  },
+  {
+   "name": "reserved bit 1",
+   "byte": 7,
+   "error": "format",
+   "xor": 2
+  },
+  {
+   "name": "reserved bit 2",
+   "byte": 7,
+   "error": "format",
+   "xor": 4
+  },
+  {
+   "name": "reserved bit 3",
+   "byte": 7,
+   "error": "format",
+   "xor": 8
+  },
+  {
+   "name": "reserved bit 4",
+   "byte": 7,
+   "error": "format",
+   "xor": 16
+  },
+  {
+   "name": "reserved bit 5",
+   "byte": 7,
+   "error": "format",
+   "xor": 32
+  },
+  {
+   "name": "reserved bit 6",
+   "byte": 7,
+   "error": "format",
+   "xor": 64
+  },
+  {
+   "name": "reserved bit 7",
+   "byte": 7,
+   "error": "format",
+   "xor": 128
+  },
+  {
+   "name": "archive length beyond int64",
+   "byte": 8,
+   "error": "limit:archive length",
+   "set": "ffffffffffffffff"
+  },
+  {
+   "name": "body length",
+   "byte": 16,
+   "error": "limit:stream length",
+   "set": "7fffffffffffffff"
+  }
+ ]
+}

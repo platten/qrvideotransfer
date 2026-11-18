@@ -1,0 +1,1 @@
+M3 part 2, PR B review round 2: sections 5 and 9.5 narrow the 4K figures that hold both bounds to a nearly empty soft-bit store, add the full store (about 1.1 GiB of growth besides the 256 MB store, reviewer's measurement) to the cases not met, with M7 deciding whether the store counts against the decode's budget, and state which modulations the grid stage's model was measured on

@@ -1,0 +1,135 @@
+[
+ {
+  "name": "CRC",
+  "byte": 10,
+  "xor": 1,
+  "crc": false,
+  "reason": "CRC mismatch"
+ },
+ {
+  "name": "magic",
+  "byte": 0,
+  "xor": 1,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "version",
+  "byte": 4,
+  "xor": 2,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "reserved bit 0",
+  "byte": 38,
+  "xor": 1,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "reserved bit 1",
+  "byte": 38,
+  "xor": 2,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "reserved bit 2",
+  "byte": 38,
+  "xor": 4,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "reserved bit 3",
+  "byte": 38,
+  "xor": 8,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "reserved bit 4",
+  "byte": 38,
+  "xor": 16,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "reserved bit 5",
+  "byte": 38,
+  "xor": 32,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "reserved bit 6",
+  "byte": 38,
+  "xor": 64,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "reserved bit 7",
+  "byte": 38,
+  "xor": 128,
+  "crc": true,
+  "reason": "wrong magic, version or reserved byte"
+ },
+ {
+  "name": "session",
+  "byte": 12,
+  "xor": 1,
+  "crc": true,
+  "reason": "does not match header session"
+ },
+ {
+  "name": "stream length",
+  "byte": 15,
+  "xor": 1,
+  "crc": true,
+  "reason": "do not match stream length"
+ },
+ {
+  "name": "shard size",
+  "byte": 20,
+  "xor": 64,
+  "crc": true,
+  "reason": "does not match inner code"
+ },
+ {
+  "name": "K",
+  "byte": 22,
+  "xor": 1,
+  "crc": true,
+  "reason": "do not match stream length"
+ },
+ {
+  "name": "M above 32,768",
+  "byte": 23,
+  "xor": 128,
+  "crc": true,
+  "reason": "parity shards"
+ },
+ {
+  "name": "blocks",
+  "byte": 27,
+  "xor": 2,
+  "crc": true,
+  "reason": "do not match stream length"
+ },
+ {
+  "name": "frames",
+  "byte": 30,
+  "xor": 4,
+  "crc": true,
+  "reason": "does not match header"
+ },
+ {
+  "name": "codewords per frame",
+  "byte": 32,
+  "xor": 1,
+  "crc": true,
+  "reason": "codewords per frame"
+ }
+]

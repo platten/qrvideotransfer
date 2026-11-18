@@ -215,6 +215,9 @@ const (
 	// (DefaultMaxEntries, DefaultMaxManifestBytes), so the receiver must decode with the
 	// --max-entries value the warning names.
 	WarnReceiverLimit WarningCode = "ReceiverLimit"
+	// WarnWorkersReduced: DecodeOptions.Workers asked for more vision workers than the decode's
+	// memory budget allows for the recording's capture size; fewer are used.
+	WarnWorkersReduced WarningCode = "WorkersReduced"
 )
 
 // Warning is a condition the user should know about that does not stop the work.
