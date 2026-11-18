@@ -918,21 +918,35 @@ Whether a setting works depends on the camera. All of these must hold (simulated
 Planning figures are the simulated single-pass rate derated by 40% for everything not simulated. All
 of them are simulated. The main figures are **handheld** (fill 0.80, the four-grey condition of
 condition 2: `robust` 4.8, `normal` 6, `fast` 10 provisionally). Each row takes the highest-rate
-setting that conditions 1 to 3 allow. Black and white is used at 4.8 camera pixels per cell, where it
-decoded every codeword with every code in the 2026-11-18 measurements. The 1080p30 row's black-and-white
-`fast` figure rests on the simulator alone: there are no real black-and-white recordings yet (S2
-filmed four greys). The always-on CI row for this camera class remains black and white `normal`.
+setting that conditions 1 to 3 allow. A planning row may use a setting only if the simulator and real
+recordings both support it, wherever real recordings exist for that modulation; otherwise the setting
+is labelled not established and is not used for planning.
+
+**Black and white at 4.8 camera pixels per cell.** `normal` is established: real recordings reach the
+0.78 bits per sent bit it needs from 3.0. `fast` is not established, and is to be settled at G1:
+- The simulator decoded 513 of 513 `fast` codewords at 4.8.
+- S2's real black-and-white segments with the camera at least twice the display rate give, in bits per
+  sent bit against the about 0.89 `fast` needs: 0.858 at 3.0 camera pixels per cell; 0.862 at 3.6
+  (92 of 324 captures located); 0.562 at 4.0 (5 of 178 located); 0.705 at 4.0 (48 of 348
+  located); and 0.975 at 6.4.
+- There are none at 4.8.
+
+So the 1080p30 row uses black and white `normal`, which is also the always-on CI row for this camera
+class.
 
 | Camera (handheld) | Recommended | s | Planning rate | 10 MB | 1 GB |
 | --- | --- | --- | --- | --- | --- |
-| 1080p30 (older Android, webcam) | 720p at 12 fps, black and white, `fast` | 4.8 | about 30 KB/s | about 5.5 min | about 9 h, impractical |
+| 1080p30 (older Android, webcam) | 720p at 12 fps, black and white, `normal` | 4.8 | about 25 KB/s | about 7 min | about 11 h, impractical |
 | 4K30 | 1080p at 12 fps, four greys, `normal` | 6.4 | about 112 KB/s | about 1.5 min | about 2.5 h |
 | 4K60 (with a 1080p or larger monitor) | 1080p at 30 fps, four greys, `normal` | 6.4 | about 280 KB/s | about 36 s | about 1 h |
 | 4K120 | 1080p at 60 fps, four greys, `normal` | 6.4 | about 560 KB/s | about 18 s | about 30 min |
 
-At a 4K camera, 1440p gives 4.8 camera pixels per cell handheld: four greys `robust` only, at about
-255 KB/s at 30 fps, below 1080p `normal`. Four greys `fast` is not used in any handheld row, since it
-needs 10 provisionally.
+At a 4K camera, 1440p gives 4.8 camera pixels per cell handheld. That allows four greys `robust`, at
+about 255 KB/s at 30 fps, or black and white `normal`, at about 251 KB/s; both are below 1080p
+`normal`. Four greys `fast` is not used in any handheld row, since it needs 10 provisionally. Colour
+`normal` is not chosen on the 4K rows, for two reasons: their q of 12-13 is below the about 15 above
+which section 5 favours colour, and colour's camera-pixels-per-cell figure was never re-derived under
+linear-light blur.
 
 **On a tripod** (fill 0.90; the steady four-grey figure of 3.5 from section 4, with `normal`
 re-checked at 3.6 and `fast` and `robust` not re-derived), the earlier figures stand:
