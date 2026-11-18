@@ -5,8 +5,12 @@ import (
 	"errors"
 	"path/filepath"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/platten/qrvideotransfer/internal/frame"
 	"github.com/platten/qrvideotransfer/internal/payload"
 	"github.com/platten/qrvideotransfer/internal/video"
 )
@@ -40,7 +44,111 @@ func TestDecodeWorkersByMemory(t *testing.T) {
 	}
 }
 
-// TestWorkersClampedWarning: an explicit worker count above the memory cap is reduced, and a
+// dataCells is the data cells of a gx x gy grid.
+func dataCells(t *testing.T, gx, gy int) int {
+	t.Helper()
+	l, err := frame.NewLayout(gx, gy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(l.DataCells())
+}
+
+// TestStageConcurrencyByGrid: the grid stage admits fewer captures at once as the grid grows, never
+// fewer than one, and a grid whose stage alone exceeds the budget takes all of it (DESIGN.md
+// section 19). The grids: the 1080p and 4K presets' at 4-pixel cells, and the largest a header can
+// claim under the vision's 1.5-pixel gate at 3840 x 2160.
+func TestStageConcurrencyByGrid(t *testing.T) {
+	grids := [][2]int{{212, 120}, {480, 270}, {960, 540}, {2047, 1393}}
+	for _, size := range [][2]int{{848, 480}, {3840, 2160}, {7680, 4320}} {
+		workers, _ := decodeWorkers(64, size[0], size[1])
+		g := newStageGate(stageBudget(workers, size[0], size[1]))
+		prev := 1 << 30
+		for _, gr := range grids {
+			cells := dataCells(t, gr[0], gr[1])
+			n := int(g.budget / g.weight(cells))
+			if n < 1 || n > prev {
+				t.Errorf("%v captures, %v grid: %d at once after %d", size, gr, n, prev)
+			}
+			if unitBytes(cells) >= g.budget && g.weight(cells) != g.budget {
+				t.Errorf("%v captures, %v grid: a unit over the budget takes %d of %d", size, gr, g.weight(cells), g.budget)
+			}
+			prev = n
+			t.Logf("%dx%d captures, %d workers, stage budget %d MiB: %dx%d grid, %d MiB a unit, %d at once",
+				size[0], size[1], workers, g.budget>>20, gr[0], gr[1], unitBytes(cells)>>20, n)
+		}
+		if prev != 1 {
+			t.Errorf("%v captures: the largest grid runs %d at once", size, prev)
+		}
+		if p := int64(workers)*workerBytes(size[0], size[1]) + g.budget; p > decodeMemBudget && workers > 1 {
+			t.Errorf("%v captures: %d workers and the stage project %d bytes, over %d", size, workers, p, decodeMemBudget)
+		}
+	}
+}
+
+// TestStageGateGridChange: captures whose grids change from one to the next, small and large in
+// turn, never hold more of the stage than its budget at once (a grid change cannot raise the
+// concurrency the gate allows), and a unit over the budget runs alone; a capture left waiting when
+// the decode ends releases nothing it did not take.
+func TestStageGateGridChange(t *testing.T) {
+	small, mid, large := dataCells(t, 480, 270), dataCells(t, 960, 540), dataCells(t, 2047, 1393)
+	g := newStageGate(stageBudget(5, 3840, 2160))
+	if g.weight(large) != g.budget || g.weight(mid) > g.budget || 2*g.weight(small) > g.budget {
+		t.Fatalf("weights %d %d %d, budget %d", g.weight(small), g.weight(mid), g.weight(large), g.budget)
+	}
+	var wg sync.WaitGroup
+	var alone atomic.Int32
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for k := range 50 {
+				cells := []int{small, mid, large, small}[(i+k)%4]
+				release, err := g.enter(context.Background(), cells)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				g.mu.Lock()
+				if g.used > g.budget || cells == large && g.inside != 1 {
+					alone.Add(1)
+				}
+				g.mu.Unlock()
+				release()
+			}
+		}()
+	}
+	wg.Wait()
+	if alone.Load() != 0 || g.maxUsed > g.budget || g.used != 0 || g.inside != 0 {
+		t.Errorf("%d admissions broke the budget; most held %d of %d; left %d held by %d", alone.Load(), g.maxUsed, g.budget, g.used, g.inside)
+	}
+	if g.maxInside < 2 {
+		t.Errorf("small grids never shared the stage (%d at once)", g.maxInside)
+	}
+
+	// A capture waiting behind a full gate when the decode ends.
+	release, _ := g.enter(context.Background(), large)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() {
+		_, err := g.enter(ctx, small)
+		done <- err
+	}()
+	cancel()
+	if err := <-done; err == nil {
+		t.Error("a capture waiting when the decode ended was admitted")
+	}
+	release()
+	if g.used != 0 || g.inside != 0 || len(g.waiters) != 0 {
+		t.Errorf("after the end: %d held by %d, %d waiting", g.used, g.inside, len(g.waiters))
+	}
+	var none *stageGate
+	if r, err := none.enter(ctx, large); err != nil || r == nil {
+		t.Errorf("no gate: %v", err)
+	}
+}
+
+// TestWorkersClampedWarning:an explicit worker count above the memory cap is reduced, and a
 // warning says so.
 func TestWorkersClampedWarning(t *testing.T) {
 	rec := writeRaw(t, noiseFrames(2, 1920, 1080, 3), 30) // 40 workers fit at 1080p
@@ -96,8 +204,11 @@ func TestEvictionCycle(t *testing.T) {
 }
 
 // TestEvictionWorkBounded: holding the decode at its cap costs each capture a fixed number of
-// eviction steps, whether the decode holds few frames or many (the eviction's ordered structures,
-// DESIGN.md section 19); and the order is the one of TestEvict and TestBookkeepingUnderCap.
+// eviction steps and a fixed time, whether the decode holds 40 frames or 1,600 (the eviction's
+// ordered structures, DESIGN.md section 19); the order is the one of TestEvict and
+// TestBookkeepingUnderCap. Steps alone would not tell a rescan of everything held from a heap, one
+// step an eviction alike; the time does: a rescan costs about 40 times as much at 1,600 frames, the
+// heaps about the same. The time is the least of five runs of 100 captures.
 func TestEvictionWorkBounded(t *testing.T) {
 	raceSkipStatistics(t)
 	key, truth := fixture(t)
@@ -109,7 +220,7 @@ func TestEvictionWorkBounded(t *testing.T) {
 	soft := append([]int8(nil), truth[0]...)
 	clear(soft[:g.sent])
 	perFrame := frameRecordBytes(g.cpf) + int64((g.cpf-1)*g.sent)
-	steps := map[int]float64{}
+	steps, cost := map[int]float64{}, map[int]time.Duration{}
 	for _, held := range []int{40, 1600} {
 		d := &decoder{c: &DecodeConfig{}, tmp: t.TempDir(), frames: map[uint32]*frameAcc{}, softCap: int64(held) * perFrame}
 		f := 0
@@ -124,12 +235,20 @@ func TestEvictionWorkBounded(t *testing.T) {
 		}
 		feed(held + 10)
 		before := d.evictSteps
-		feed(100)
-		steps[held] = float64(d.evictSteps-before) / 100
+		cost[held] = time.Hour
+		for range 5 {
+			t0 := time.Now()
+			feed(100)
+			cost[held] = min(cost[held], time.Since(t0)/100)
+		}
+		steps[held] = float64(d.evictSteps-before) / 500
 		d.close()
 	}
-	t.Logf("eviction steps per capture at the cap: %v", steps)
+	t.Logf("eviction steps per capture at the cap: %v; time per capture: %v", steps, cost)
 	if steps[40] == 0 || steps[1600] > steps[40]+1 || steps[1600] > 8 {
 		t.Errorf("eviction steps per capture grow with the frames held: %v", steps)
+	}
+	if cost[1600] > 8*cost[40] {
+		t.Errorf("a capture at the cap costs %v holding 1,600 frames, %v holding 40", cost[1600], cost[40])
 	}
 }

@@ -134,6 +134,7 @@ type decoder struct {
 	byConf     byConfidence // the frames holding soft bits, least confident first (evict.go)
 	bySeen     bySeen       // the frame records, the one seen least recently first
 	evictSteps int          // frames taken off the eviction order, for tests
+	gate       *stageGate   // the last recording's grid-stage gate, for tests
 	captures   int          // captures processed, across recordings, with a gap between recordings
 
 	stats            Stats
@@ -239,12 +240,20 @@ func (d *decoder) recording(ctx context.Context, path string) error {
 			}
 		}
 	}()
+	// The grid stage's memory is admitted by a gate sized from what the captures leave of the
+	// budget (memory.go), against each capture's own grid: a grid change mid-recording cannot raise
+	// it.
+	gate := newStageGate(stageBudget(workers, info.Width, info.Height))
+	d.gate = gate
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			var w captureWorker
+			w := captureWorker{enter: func(cells int) (func(), bool) {
+				release, err := gate.enter(rctx, cells)
+				return release, err == nil
+			}}
 			for j := range jobs {
 				r := processCapture(&w, j.f, j.index)
 				free <- j.f

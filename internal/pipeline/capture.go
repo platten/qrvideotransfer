@@ -68,9 +68,12 @@ type captureResult struct {
 type captureWorker struct {
 	det   vision.FinderDetector
 	geoms []*geometry // the last two grids seen, most recent first
-	obs   []modem.Obs
 	pal   []modem.Obs
-	soft  []int8
+
+	// enter, if set, admits a capture with cells data cells to the grid stage, sampling to soft
+	// bits, whose memory grows with the grid (stageGate), and returns its release; false if the
+	// decode ended meanwhile.
+	enter func(cells int) (release func(), ok bool)
 }
 
 // geometry returns the cached geometry of key, building it if needed.
@@ -128,29 +131,38 @@ func (w *captureWorker) see(f *video.Frame, r *captureResult, each func(g *geome
 	if err != nil {
 		return
 	}
-	r.located = true
 	cells := g.layout.DataCells()
+	if w.enter != nil {
+		release, ok := w.enter(len(cells))
+		if !ok {
+			return
+		}
+		defer release()
+	}
+	r.located = true
 	r.cells = len(cells)
-	w.obs = grow(w.obs, len(cells))
+	// The stage's buffers are the unit's, not kept by the worker: what it holds between captures
+	// does not grow with the largest grid it has seen.
+	obs := make([]modem.Obs, len(cells))
 	w.pal = grow(w.pal, 32)
-	vision.FootprintSampler{}.Sample(w.obs, f, m, cells)
+	vision.FootprintSampler{}.Sample(obs, f, m, cells)
 	vision.SamplePalette(w.pal, f, m, g.layout)
 	gamma, ok := vision.PaletteGamma(w.pal, g.mod)
 	if !ok {
 		gamma = 0
 	}
 	pf := vision.AnchorPhase{Gamma: gamma}.Estimate(anchors, g.layout)
-	fld := (&vision.TileEqualiser{Mod: g.mod, Stripes: true}).Fit(w.obs, w.pal, g.layout, anchors)
-	w.soft = grow(w.soft, g.mapping.Bits())
+	fld := (&vision.TileEqualiser{Mod: g.mod, Stripes: true}).Fit(obs, w.pal, g.layout, anchors)
+	soft := make([]int8, g.mapping.Bits())
 	for p := range 4 {
-		n := vision.SoftBits(w.soft, w.obs, g.layout, fld, g.mod, &pf, p)
+		n := vision.SoftBits(soft, obs, g.layout, fld, g.mod, &pf, p)
 		if n == 0 {
 			continue
 		}
 		r.clean += n
 		if idx, ok := phaseFrame(idxs, p, r.key.frames); ok {
-			g.descramble(w.soft, idx)
-			each(g, idx, w.soft)
+			g.descramble(soft, idx)
+			each(g, idx, soft)
 		}
 	}
 }
