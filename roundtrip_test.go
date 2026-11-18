@@ -301,6 +301,30 @@ func TestShortCamera(t *testing.T) {
 	}
 }
 
+// gray4MinPixels is the Gray4 condition of DESIGN.md section 11 (condition 2) for the handheld
+// blur (Gaussian sigma 1.5 camera pixels, `handheld`, `budget-android` and `iphone-hdr`): the
+// least camera pixels per cell, s = fill x camera width / GridX, at which each protection decodes,
+// re-derived from the simulator and S2's real recordings (2026-11-18).
+var gray4MinPixels = map[Protection]float64{Robust: 4.8, Normal: 6.0, Fast: 7.5}
+
+// TestMatrixFeasible: every Gray4 row of the round-trip matrix filmed under the handheld blur meets
+// section 11's condition at its preset's own camera; a row that does not is infeasible and is not
+// in the matrix (section 15).
+func TestMatrixFeasible(t *testing.T) {
+	for _, r := range matrix() {
+		c, err := channel.Preset(r.preset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.mod != Gray4 || c.Optics.Blur != 1.5 {
+			continue
+		}
+		if s := c.Geometry.Fill * float64(c.Geometry.Width) / float64(r.w/4); s < gray4MinPixels[r.protection] {
+			t.Errorf("%s: %.2f camera pixels per cell, below the %.1f its protection needs", r.name(), s, gray4MinPixels[r.protection])
+		}
+	}
+}
+
 // film records the looping frames, shown at fps, with the simulated camera c into a raw-frame file,
 // or with x264 into an MP4.
 func film(t testing.TB, frames []*video.Frame, fps int, c channel.Config, r channel.Run, x264 bool) string {
