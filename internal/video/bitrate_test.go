@@ -28,20 +28,20 @@ func TestEncodeArgsQuantiserUnchanged(t *testing.T) {
 
 // TestEncodeArgsBitrate: with a bitrate the encoder stands in for a phone's recorder (DESIGN.md
 // section 15): x264's defaults at veryfast, a GOP of one second at the frame rate, single-pass
-// average bitrate capped at the bitrate with a two-second buffer, the BT.709 tags, High 10 for
-// 10-bit input; neither the constant quantiser nor the intra-only parameters, and the MP4 keeps its
-// edit list, as a phone's does (without it the B-frames' delay cost the first frame on reading).
+// average bitrate capped at the bitrate with a two-second buffer, no lookahead and no B-frames
+// (forced by the engine's 512 MiB memory bound at 4K, DESIGN.md section 15), the BT.709 tags,
+// High 10 for 10-bit input; neither the constant quantiser nor the intra-only parameters.
 func TestEncodeArgsBitrate(t *testing.T) {
 	for _, bits := range []int{8, 10} {
 		a := encodeArgs(EncodeConfig{Width: 3840, Height: 2160, FPS: 60, BitDepth: bits, Bitrate: 74_000_000}, "o/x.mp4", "mp4")
 		s := strings.Join(a, " ")
 		for _, want := range []string{"-c:v libx264", "-preset veryfast", "-b:v 74000000", "-maxrate 74000000", "-bufsize 148000000",
-			"-g 60", "-color_trc bt709"} {
+			"-g 60", "-x264-params rc-lookahead=0:bframes=0", "-color_trc bt709"} {
 			if !strings.Contains(s, want) {
 				t.Errorf("%d-bit: arguments lack %q: %s", bits, want, s)
 			}
 		}
-		if slices.Contains(a, "-qp") || slices.Contains(a, "-x264-params") || slices.Contains(a, "-use_editlist") {
+		if slices.Contains(a, "-qp") || strings.Contains(s, "keyint=1") {
 			t.Errorf("%d-bit: constant quantiser or intra-only parameters with a bitrate: %s", bits, s)
 		}
 		if high10 := strings.Contains(s, "-profile:v high10"); high10 != (bits == 10) {
