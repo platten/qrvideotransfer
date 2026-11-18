@@ -1700,9 +1700,10 @@ by GoReleaser).
   no cache restored) the race step took 15 min 53 s, `internal/video` 528 s and `internal/vision`
   187 s; an earlier 13 min 26 s (run 43769482359) restored cached results for `internal/fec/conv`,
   `internal/fec/rs` and `internal/modem` and is not comparable. The race tests now run as two CI
-  steps, each with its own 20-minute limit: every package but `internal/video` (`tools/dev test
-  -race -part others`), then `internal/video` alone (`-part isolated`), which runs even when the
-  first step failed. Both pass `-count=1`: setup-go restores Go's test cache across runs, for every
+  steps, each with its own 20-minute limit: every package but `internal/video`, the root package
+  and `internal/pipeline` ("Race tests, other packages", `tools/dev test -race -part others`), then
+  those three each alone ("Race tests, isolated packages", `-part isolated`, named so since PR #47
+  moved the two end-to-end packages there), which runs even when the first step failed. Both pass `-count=1`: setup-go restores Go's test cache across runs, for every
   package unchanged since the cache was saved, and a cached race pass reuses one old run's luck for
   the nondeterministic tests (`internal/fec/conv`'s parallel test, `internal/fec/rs`'s subprocess
   test). That costs 0-3 minutes per run on macos-26-intel, nothing when nothing would have been
@@ -1714,7 +1715,7 @@ by GoReleaser).
   trimming vision's always-on statistics alone did not bring the steps back under it; 30 leaves
   roughly 8 to 10 minutes of margin. Earlier, run 43797784643, with no cache restored, took 16 min
   54 s; the slow host of run 43774194055 took 23 min 09 s, and a host that slow is a runner fault
-  (spike S1, section 14), for which the limits are not sized. The `internal/video` race step does not run alone after an
+  (spike S1, section 14), for which the limits are not sized. The isolated packages' race step does not run alone after an
   earlier failure skipped the other packages' step.
   The detector's hostile-cost tests (`TestDetectThreeHostile` 16 times, `TestDetectThreeHostile4K`
   and `TestDetectHostileGrid4K` 6, `TestDetectHostileGrid` 2; SECURITY.md section 9.1) bound a
@@ -2028,8 +2029,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   pipeline about 16 s. The runner took 5.6 and 5.9 times the pinned figures for root and
   pipeline. Two changes follow (designer's ruling on PR #47). **Isolation:** `tools/dev` runs
   the root package and `internal/pipeline` each on its own after the other packages, before
-  `internal/video` (`isolatedRuns`; the race step `-part others` holds all three runs, the
-  coverage gate merges every run's profile). That adds roughly 3 to 4 minutes on the slowest
+  `internal/video` (`isolatedRuns`; the coverage gate merges every run's profile; under the race detector they
+  later moved to the isolated part, below). That adds roughly 3 to 4 minutes on the slowest
   runner, (20 + 16) s x 5.7, against the non-race steps' 30 minutes, of which they took about 22
   before this pull request; it returns `internal/vision` to its conditions before it, about 530
   s on that runner; and the 5.7-times projection of the whole contended step no longer applies.

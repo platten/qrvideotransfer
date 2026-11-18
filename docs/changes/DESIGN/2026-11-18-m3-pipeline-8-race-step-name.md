@@ -1,0 +1,1 @@
+M3 pipeline: section 17 names the race steps, the isolated one now "Race tests, isolated packages" (the root package, internal/pipeline and internal/video, each alone), and section 19 says the end-to-end packages run in the isolated race part

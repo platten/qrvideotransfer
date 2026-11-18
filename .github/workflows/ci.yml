@@ -157,7 +157,7 @@ jobs:
         timeout-minutes: 20
         shell: bash
         run: scripts/test.sh -race -part others
-      - name: Race tests, internal/video (Unix)
+      - name: Race tests, isolated packages (Unix)
         if: ${{ !cancelled() && runner.os != 'Windows' && steps.race-others.outcome != 'skipped' }}
         timeout-minutes: 20
         shell: bash
@@ -168,7 +168,7 @@ jobs:
         timeout-minutes: 20
         shell: pwsh
         run: scripts/test.ps1 -race -part others
-      - name: Race tests, internal/video (Windows)
+      - name: Race tests, isolated packages (Windows)
         if: ${{ !cancelled() && matrix.os == 'windows-2025' && steps.race-others-windows.outcome != 'skipped' }}
         timeout-minutes: 20
         shell: pwsh
