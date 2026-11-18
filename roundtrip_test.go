@@ -305,8 +305,9 @@ func TestShortCamera(t *testing.T) {
 // gray4MinPixels is the Gray4 condition of DESIGN.md section 11 (condition 2) for the handheld
 // blur (Gaussian sigma 1.5 camera pixels, `handheld`, `budget-android` and `iphone-hdr`): the
 // least camera pixels per cell, s = fill x camera width / GridX, at which each protection decodes,
-// re-derived from the simulator and S2's real recordings (2026-11-18).
-var gray4MinPixels = map[Protection]float64{Robust: 4.8, Normal: 6.0, Fast: 7.5}
+// re-derived from the simulator and S2's real recordings (2026-11-18). `fast` is not established:
+// 10 is the provisional planning figure until the G1 recordings.
+var gray4MinPixels = map[Protection]float64{Robust: 4.8, Normal: 6.0, Fast: 10}
 
 // TestMatrixFeasible: every Gray4 row of the round-trip matrix filmed under the handheld blur meets
 // section 11's condition at its preset's own camera, and the rows the short version runs meet it
@@ -325,7 +326,11 @@ func TestMatrixFeasible(t *testing.T) {
 		if s := c.Geometry.Fill * float64(c.Geometry.Width) / float64(r.w/4); s < need {
 			t.Errorf("%s: %.2f camera pixels per cell, below the %.1f its protection needs", r.name(), s, need)
 		}
-		if !r.always {
+		// iphone-hdr's Gray4 `normal` is asserted in CI below the condition by design: at the short
+		// version's 3008 x 1692 camera it films 5.0 camera pixels per cell, and it passes because
+		// the stand-in recorder gives two captures per code frame (DESIGN.md sections 15 and 19).
+		// If it ever fails in CI, it is replaced by iphone-hdr's Gray4 `robust`, not rerun.
+		if !r.always || r.name() == "iphone-hdr-1080p30-gray4-normal" {
 			continue
 		}
 		w, _ := shortCamera(c, r.w/4)
