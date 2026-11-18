@@ -29,7 +29,7 @@ func FuzzDecode(f *testing.F) {
 	patch := func(frame byte, ps ...[2]int) []byte {
 		b := []byte{frame}
 		for _, p := range ps {
-			b = binary.BigEndian.AppendUint32(b, uint32(p[0])<<8|uint32(p[1])&0xff) //nolint:gosec // test positions
+			b = binary.BigEndian.AppendUint32(b, uint32(p[0])<<8|uint32(p[1])&0xff)
 		}
 		return b
 	}
