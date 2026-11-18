@@ -113,8 +113,8 @@ func hostileRecording(t *testing.T, n, w, h int) {
 }
 
 // locatedFrames returns n captures of a transfer encoded at w x h with cell-pixel cells in
-// modulation 1, the mode whose grid stage holds the most (DESIGN.md section 19): the encoder's
-// frames, repeated.
+// modulation 1, whose grid stage holds at least as much as modulations 2 and 3 at 4K (DESIGN.md
+// section 19): the encoder's frames, repeated.
 func locatedFrames(t *testing.T, n, w, h, cell int) ([]*video.Frame, map[string][32]byte) {
 	t.Helper()
 	in, want := writeInputs(t, 77, 20000)

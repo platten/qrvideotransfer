@@ -2143,12 +2143,12 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   4K, 1 at 8K; 360 MiB for 4K noise at 16 and 32 CPUs). That model held for noise only (review of
   PR B): a capture that shows a code runs the grid stage, sampling, the tile equaliser with stripe
   cancellation (about 200 MiB a 4K capture) and the soft bits (about 64 MiB), whose memory grows
-  with the grid. The reviewer measured the encoder's 4K output (Gray8) before the 256 MB store
+  with the grid. The reviewer measured the encoder's 4K output in modulation 3 (RGB8) before the 256 MB store
   filled: 510 MiB of heap at 1 worker, 1,224 MiB at 3, about 3.5 GiB at 12 (the cap then; 2 GiB
   even at GOGC=10, so live), and 1,863 MiB at 8K with 3; a header can claim about 6 times the
   cells at 4K. **The grid stage's memory model** (designer's ruling (a)): one capture's stage holds
   600 bytes a data cell and 16 MiB, from the heap's growth over one capture's stage on the
-  encoder's output in modulation 1, the heaviest mode: 84 MiB for 117,112 cells (1920 x 1080, 4-pixel
+  encoder's output, modulations 1 to 3 measured (peak live about equal at 4K; modulation 3 allocates most); 4 (Gray8) is not produced by the encoder and is unmeasured: in modulation 1, 84 MiB for 117,112 cells (1920 x 1080, 4-pixel
   cells; 71 MiB in a second run), 283 MiB for 469,088 (3840 x 2160; 267 MiB in a second run), and
   modulations 2 and 3 at 4K 183 and 188 MiB; the frame's size does not enter (the 480 x 270 grid
   at 3840 x 2160 held 67 MiB, the 960 x 540 grid at 7680 x 4320 285 MiB). A gate admits the stage
@@ -2159,20 +2159,26 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   `TestStageConcurrencyByGrid` asserts fewer at once as the grid grows, never fewer than one. The
   stage's buffers are the capture's, not kept by the worker. **Measured (long run,
   `TestLocatedRecordingResources`):** 24 captures of the 4K output at 3840 x 2160, 834 MiB of heap
-  growth at GOMAXPROCS 16 and 883 at 32, one capture in the stage at a time; the 1 GiB holds up to
-  there. Beyond it, not met, logged: 8 captures at 7680 x 4320 of the 4K grid, one worker, 1,096
+  growth at GOMAXPROCS 16 and 883 at 32, one capture in the stage at a time, the soft-bit store
+  nearly empty; the 1 GiB holds up to there. Beyond it, not met: the same decode with 256 MiB held
+  to stand for a full store, as a hostile or a long poor recording reaches, 1,121 MiB of growth at
+  GOMAXPROCS 16 and 1,106 at 32 besides the store (reviewer's measurement); and, logged: 8 captures at 7680 x 4320 of the 4K grid, one worker, 1,096
   MiB (1,114 in a first run: the reader's three capture buffers at 99.5 MB each and the GC's
   headroom over them; the memory model therefore counts three captures a worker, not two, as
   measured; the code's estimate, 6 x width x height, is unchanged); 6 captures at 3840 x 2160 of the
   largest grid a header can claim, 2,047 x 1,393 (2,567,107 cells, a model weight of 1,484 MiB, so
   alone), 1,799 MiB and 107 s, about 18 s a capture alone, so a recording of 4 or more such
-  captures exceeds the 60 s bound as well. **Both bounds hold** for the encoder's 4K output (12.3
-  and 12.6 s for 24 captures, 834 and 883 MiB) and for noise (848 x 480: 0.3 s, 126 MiB; 3840 x
+  captures exceeds the 60 s bound as well. **Both bounds hold** for the encoder's 4K output with the
+  soft-bit store nearly empty (12.3 and 12.6 s for 24 captures, 834 and 883 MiB) and for noise (848 x 480: 0.3 s, 126 MiB; 3840 x
   2160: 1.7 s, 360 MiB). No refusal and no time limit in this PR (designer's ruling): M7 decides
   between a refusal rule, a time limit and a tighter cap on the claimable grid, and for memory
-  between a refusal rule and M6's allocation work. Outside the gate besides: each capture's soft bits per phase wait to be
+  between a refusal rule and M6's allocation work, and whether the soft-bit store counts against
+  the decode's budget. Outside the gate besides: each capture's soft bits per phase wait to be
   applied, at most workers + 2 results of up to four phases of the frame's bits, about 2 MB a
-  phase at the 4K grid in modulation 1 and up to 7.7 MB at the largest grid in modulation 3.
+  phase at the 4K grid in modulation 1 and up to 7.7 MB at the largest grid in modulation 3;
+  detection and fitting before the gate, about 46 MiB live and 85 MiB allocated for a capture of
+  the largest grid; and each worker's geometry cache, up to two geometries of 22 MiB each at the
+  largest grid (reviewer's measurements).
   **M6, scale work (designer's ruling (b)):** cut the stripe cancellation's allocations, about
   200 MiB a 4K capture (reviewer's figures above), which would let more captures share the stage.
   **Throughput (a note, not a merge condition):** 60 captures of the 4K output, 16 CPUs, decoded

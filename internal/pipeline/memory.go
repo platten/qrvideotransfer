@@ -25,9 +25,9 @@ func workerBytes(w, h int) int64 { return 6*int64(w)*int64(h) + 4<<20 }
 // The grid stage's memory model (DESIGN.md section 19): sampling the data cells, the tile
 // equaliser with stripe cancellation, and the soft bits of the four phases hold about
 // unitCellBytes per data cell and unitBaseBytes besides, whatever the capture's size. Measured on
-// the encoder's output in its heaviest mode (modulation 1), as the heap's growth over one capture's
-// stage: 84 MiB for 117,112 cells (1920 x 1080, 4-pixel cells) and 283 MiB for 469,088 (3840 x
-// 2160), which gives 593 bytes a cell and 18 MiB.
+// the encoder's output in modulation 1 (modulations 2 and 3 at most as much at 4K), as the heap's
+// growth over one capture's stage: 84 MiB for 117,112 cells (1920 x 1080, 4-pixel cells) and 283
+// MiB for 469,088 (3840 x 2160), which gives 593 bytes a cell and 18 MiB.
 const (
 	unitCellBytes = 600
 	unitBaseBytes = 16 << 20
