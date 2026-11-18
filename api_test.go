@@ -242,6 +242,11 @@ func TestTypedErrors(t *testing.T) {
 	check("state folder", err, is(ErrNotImplemented))
 	_, err = Encode(context.Background(), EncodeOptions{Inputs: []string{in}, Output: filepath.Join(t.TempDir(), "x.mp4"), Backend: "/nonexistent/ffmpeg"})
 	check("bad backend", err, func(err error) bool { return err != nil })
+	_, err = Decode(context.Background(), DecodeOptions{Recordings: []string{plain}, OutputDir: t.TempDir(), Backend: "/nonexistent/ffmpeg"})
+	check("decode, bad backend", err, func(err error) bool { return err != nil })
+	// A report that cannot be written: its path is a folder. The files are decoded first.
+	_, _, err = decodeTest(t, DecodeOptions{Recordings: []string{plain}, Report: t.TempDir()})
+	check("report not written", err, func(err error) bool { return err != nil })
 }
 
 // TestConversions: the pipeline's events, stats and errors map onto the root package's.
