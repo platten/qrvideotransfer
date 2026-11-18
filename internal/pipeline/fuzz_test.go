@@ -19,6 +19,9 @@ import (
 // that succeeds writes exactly the transfer's files; nothing is written outside the output folder
 // and the temporary folder, and the temporary folder is left empty.
 func FuzzDecode(f *testing.F) {
+	if raceEnabled {
+		f.Skip("asserted in the non-race test step and by the fuzz step")
+	}
 	in, want := writeInputs(f, 50, 2500)
 	path, res := encodeRaw(f, profile480(in))
 	frames, info := readFrames(f, video.NewRaw(), path)

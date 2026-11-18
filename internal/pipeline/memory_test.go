@@ -43,7 +43,7 @@ func TestDecodeWorkersByMemory(t *testing.T) {
 // TestWorkersClampedWarning: an explicit worker count above the memory cap is reduced, and a
 // warning says so.
 func TestWorkersClampedWarning(t *testing.T) {
-	rec := writeRaw(t, noiseFrames(2, 3840, 2160, 3), 30)
+	rec := writeRaw(t, noiseFrames(2, 1920, 1080, 3), 30) // 40 workers fit at 1080p
 	var warned []string
 	_, err := Decode(context.Background(), DecodeConfig{Recordings: []string{rec}, Backend: video.NewRaw(), Workers: 1000,
 		TempDir: t.TempDir(), Unpack: payload.UnpackOptions{OutputDir: filepath.Join(t.TempDir(), "out")},
@@ -65,6 +65,7 @@ func TestWorkersClampedWarning(t *testing.T) {
 // and its frame seen again, keep the bytes held under the cap, the work per capture fixed, and the
 // list of frames waiting for an attempt within twice the records held (plus a constant).
 func TestEvictionCycle(t *testing.T) {
+	raceSkipStatistics(t)
 	key, truth := fixture(t)
 	key.frames = 1 << 16
 	g, err := newGeometry(key)
@@ -98,6 +99,7 @@ func TestEvictionCycle(t *testing.T) {
 // eviction steps, whether the decode holds few frames or many (the eviction's ordered structures,
 // DESIGN.md section 19); and the order is the one of TestEvict and TestBookkeepingUnderCap.
 func TestEvictionWorkBounded(t *testing.T) {
+	raceSkipStatistics(t)
 	key, truth := fixture(t)
 	key.frames = 1 << 16
 	g, err := newGeometry(key)

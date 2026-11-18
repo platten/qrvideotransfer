@@ -80,6 +80,7 @@ func signedStream(t *testing.T, key ed25519.PrivateKey) []byte {
 // for, and nothing is written; the stream as signed decodes. The payload's tests flip every bit;
 // here one bit of each field.
 func TestTamperedStreamEndToEnd(t *testing.T) {
+	raceSkipStatistics(t)
 	_, key, err := payload.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +135,7 @@ func TestTamperedStreamEndToEnd(t *testing.T) {
 // frame between two transfers locks onto the one it shows first, decodes it, and ignores the other;
 // either order.
 func TestInterleavedSessions(t *testing.T) {
+	raceSkipStatistics(t)
 	inA, wantA := writeInputs(t, 41, 3000)
 	inB, wantB := writeInputs(t, 42, 3000)
 	pa, _ := encodeRaw(t, profile480(inA))

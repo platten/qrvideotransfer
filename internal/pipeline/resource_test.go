@@ -76,6 +76,7 @@ func noiseFrames(n, w, h int, seed uint64) []*video.Frame {
 // version decodes 16 frames at 848 x 480; the long version (QRVT_LONG_TESTS=1) 32 at 3840 x 2160
 // with GOMAXPROCS forced to 16 and to 32, which the decode's memory cap must absorb.
 func TestHostileRecordingResources(t *testing.T) {
+	raceSkipStatistics(t)
 	if os.Getenv("QRVT_LONG_TESTS") != "1" {
 		hostileRecording(t, 16, 848, 480)
 		return
