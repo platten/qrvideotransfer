@@ -38,6 +38,7 @@ func TestGenerateKey(t *testing.T) {
 // refused before the passphrase is asked for, and nothing is written (SECURITY.md sections 6 and
 // 9.4).
 func TestSigningEndToEnd(t *testing.T) {
+	raceSkipStatistics(t)
 	in, want := payloadDir(t, 30, 4000, 300)
 	pub, priv, err := GenerateKey()
 	if err != nil {
