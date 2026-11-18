@@ -1,1 +1,1 @@
-M3 part 2: section 19 records PR #48's first run failing the coverage gate on windows-11-arm (internal/pipeline 95.0%), the deterministic tests that bring it to 96.8%, and internal/video's 95.6 to 95.8% on Windows as a margin item for the next video pull request
+M3 part 2: section 19 records PR #48's first run failing the coverage gate on windows-11-arm (internal/pipeline 95.0%), the deterministic tests that bring it to 96.5%, and internal/video's 95.6 to 95.8% on Windows as a margin item for the next video pull request

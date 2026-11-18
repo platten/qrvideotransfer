@@ -1995,8 +1995,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 - **Coverage margins (M3 part 2).** PR #48's first run failed the coverage gate on windows-11-arm
   alone: `internal/pipeline` at 95.0% (95.2 to 95.4% on the other runners; the error paths of the
   repair, the shard store and the hash check were never covered, and two cancellation returns
-  only sometimes). Deterministic tests of those paths bring it to 96.8% in five local runs, two
-  of them under load. `internal/video` stood at 95.8% (windows-2025) and 95.6% (windows-11-arm)
+  only sometimes). Deterministic tests of those paths bring it to 96.5% (measured over three runs, with the
+  defensive guard in `attemptDue` kept uncovered). `internal/video` stood at 95.8% (windows-2025) and 95.6% (windows-11-arm)
   in that run: a margin item for the next pull request that changes `internal/video`, not fixed
   in this one.
 - **Round-trip matrix with x264 (M3 part 2).** `TestRoundTripMatrixX264` with `QRVT_LONG_TESTS=1`
