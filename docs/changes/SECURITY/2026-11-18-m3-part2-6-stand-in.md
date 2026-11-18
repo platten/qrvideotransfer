@@ -1,0 +1,1 @@
+M3 part 2, PR B review round 2: sections 5 and 9.5 say the full-store figure was measured with 256 MiB held as a stand-in for a full store, and section 5's grid-stage row states the modulations measured without nested parentheses
