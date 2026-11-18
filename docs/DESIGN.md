@@ -99,7 +99,7 @@ optics. The ratios between options are more trustworthy than the absolute values
 | F1 | The recording's bitrate is the ceiling. Delivered bits per cell depend on *q*, the recorder's bits per cell per code frame, almost regardless of cell size or captures per frame | Four grey levels, HEVC: q = 2.3 gives 0.78 bit; 4.1 gives 1.26; 5.9 gives 1.68; 7.5 gives 1.87; 9 gives 1.95. One, two or four captures per frame at fixed quantiser: 1.19, 1.26, 1.29 bit |
 | F2 | At each one's best cell size, all sensible modulations are within about 20% | Delivered bits per camera pixel per frame on a 4K HEVC phone: four greys 0.109, eight colours 0.093, layered 0.093, two greys 0.076 |
 | F3 | The display video's size depends on aligning cells to H.264's 4x4 transform blocks | Bits per cell at quantiser 32: four greys at 4 pixels 8.4 (x264 `veryfast`; 6.1 with `medium` or the settings of section 12, spike S1); at 8 pixels 10.1; at 3 pixels 29.1; at 6 pixels 26.3; eight colours at 4 pixels 28.1. No cell errors through the display codec up to quantiser 38 |
-| F4 | Blur moves the best cell size by about one camera pixel | Sigma 1.0 to 1.5: four greys at 5.1 camera pixels per cell drop from 1.7 to 1.5 bits |
+| F4 | Blur moves the best cell size by about one camera pixel | Sigma 1.0 to 1.5: four greys at 5.1 camera pixels per cell drop from 1.7 to 1.5 bits (code-value blur; with blur in linear light and sharpening the loss is larger, section 11 condition 2, 2026-11-18) |
 
 **Rule of thumb:** net throughput is 13-16% of the recording's bitrate. An iPhone recording 4K60 HEVC at
 about 53 Mbit/s therefore carries roughly 0.9 MB/s at best.
@@ -119,7 +119,7 @@ so an "RGB or CMYK" code is an 8-colour cell carrying 3 bits. That is the `color
 
 | Mode | Flag | Bits per cell | Camera pixels per cell needed, steady / handheld (simulated) | Display bits per cell (simulated) | Role |
 | --- | --- | --- | --- | --- | --- |
-| Four greys | `--mode gray4` | 2 | 3.5 / 6 (`normal`; 4.8 `robust`, 7.5 `fast`) | 8.4 | Provisional default |
+| Four greys | `--mode gray4` | 2 | 3.5 (section 4; `normal` re-checked at 3.6, 99.7%; `fast` and `robust` not re-derived) / 6 (`normal`; 4.8 `robust`, 7.5 `fast`) | 8.4 | Provisional default |
 | Black and white | `--mode bw` | 1 | 2.6 / 3.4 | 7.3 | Most robust |
 | Eight colours | `--mode color` | 3 | 4.3 / 5.5-6 | 28 | Best when the recording bitrate is generous |
 | Eight greys, 10-bit | `--hdr` | 3 | not simulated | not simulated | Experimental |
@@ -890,9 +890,11 @@ Whether a setting works depends on the camera. All of these must hold (simulated
    6 for `normal` and 7.5 for `fast` (re-derived on 2026-11-18, simulated). The simulator's
    `budget-android` at 1080p decodes, per capture through the vision pipeline, every `robust`
    codeword at 4.8, and 9.5% of `normal` codewords at 4.8 against 99% at 5.4. It decodes 11% of
-   `fast` codewords at 6.4 against 99.6% at 7.25. S2's real recordings decode `normal` from about 6
-   (docs/spikes/S2.md, section 1.4). The more conservative figure is taken. On a tripod (sigma 1.0)
-   four greys with `normal` decode 99.7% of codewords at 3.6. Earlier this condition said 4.5 for
+   `fast` codewords at 6.4 against 99.6% at 7.25. S2's real recordings decode `normal` from 6.4
+   (docs/spikes/S2.md, section 1.4; its conservative setting is 6 or more). The more conservative
+   figure is taken. On a tripod (sigma 1.0) the steady figure stays at 3.5 (section 4): `normal` was
+   re-checked at 3.6, with 99.7% of codewords decoding, and `fast` and `robust` were not
+   re-derived. Earlier this condition said 4.5 for
    four greys handheld, from section 4's simulation, which blurred code values and modelled neither
    gamma nor sharpening; with blur in linear light the same model's symbol error rate at 4.8 pixels
    per cell is 0.21 instead of 0.10. Geometry alone (finders, header, mesh; section 10 step 1, measured
@@ -2003,6 +2005,18 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   `normal`.** The row decoded in 1 of 5 repeatable sessions with the stand-in and 0 of 3 with x264.
   It was traced in one bounded pass with the simulator's truth, on the row's own setting (320 x 180
   grid, 1080p30 camera, 12 fps display, 4.62 measured camera pixels per cell).
+
+  **How the figures were produced.** A throwaway diagnostic test in `internal/vision`, not in the
+  tree, built on the radiometry bench:
+  - The bench session is `newRadSession` with 12 code frames carrying inner-code codewords (seed
+    0xb0d6).
+  - It is filmed by the preset at 12 fps for 24 captures (simulator seed 0x77; 12 or 36 for the
+    ablations), with the grid varied to vary the camera pixels per cell.
+  - Every capture goes through Detect, the mesh fitter, the footprint sampler, `SamplePalette`, the
+    phase field, the equaliser with stripe cancellation and `SoftBits`.
+  - For each credited phase, the frame's codewords are decoded as the stripe test does
+    (`decodeFrame`: codewords with at least 90% of bits stated).
+  - The inner code is switched for `fast` and `robust` by a temporary change to the bench's header.
   - **Not a vision defect.** The raw bit error rate is 0.107 at true positions and 0.109 through
     the pipeline. The mesh is within 0.037 cell RMS. Per-tile oracle levels taken from the truth
     still give 0.102. Cells wholly one frame and partly mixed ones are alike (0.108 and 0.112).
@@ -2046,7 +2060,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 - **Round-trip matrix with x264 (M3 part 2).** `TestRoundTripMatrixX264` with `QRVT_LONG_TESTS=1`
   runs the 13 rows that have a recorder bitrate (not `ideal`, whose recorder is lossless) with
   x264 at the preset's bitrate and camera, three sessions each, 855 s on the development machine:
-  12 rows decode in 3 of 3 sessions; `budget-android` Gray4 `normal` in none (previous entry).
+  12 rows decode in 3 of 3 sessions; `budget-android` Gray4 `normal` in none (previous entry;
+  before the row's removal on 2026-11-18).
   Filming dominates the cost: about 18 to 21 s a session at 4K, 53 s for `harsh` (3 passes,
   4K30), 5 to 11 s at `budget-android`'s 1080p. The short version runs one row, `budget-android`
   Gray2 `normal` with its own 1080p camera, about 8 s pinned to 4 CPUs (designer's ruling on the
