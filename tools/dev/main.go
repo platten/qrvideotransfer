@@ -189,7 +189,7 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 	long := fs.Bool("long", false, "include long tests (QRVT_LONG_TESTS=1)")
 	short := fs.Bool("short", false, "pass -short to go test")
 	untagged := fs.Bool("untagged", false, "test the default build, without the release build tags")
-	p := fs.String("part", "", "others: every package but internal/video; isolated: internal/video alone")
+	p := fs.String("part", "", "others: every package but internal/video, the root package and internal/pipeline; isolated: each of those alone")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
 	if *untagged {
 		tags = ""
@@ -446,19 +446,20 @@ func isolatedRuns(args, pkgs []string) [][]string {
 }
 
 // selectRuns returns the part of an isolatedRuns split that -part names: "" for all, "others"
-// for every run before the isolated one, "isolated" for that one alone. CI runs the two parts of
-// the race tests as separate steps, each with its own time limit.
+// for the first run, every package but the end-to-end ones and internal/video, and "isolated" for
+// the runs after it, each package on its own. CI runs the two parts of the race tests as separate
+// steps, each with its own time limit; the end-to-end packages run in the isolated part, which
+// keeps the "others" step as it was before them (PR #47's second run cut it off at its limit).
 func selectRuns(runs [][]string, part string) ([][]string, error) {
-	n := len(runs)
 	switch {
 	case part == "":
 		return runs, nil
-	case n < 2:
+	case len(runs) < 2:
 		return nil, fmt.Errorf("-part %s needs the whole module (./...)", part)
 	case part == "others":
-		return runs[:n-1], nil
+		return runs[:1], nil
 	case part == "isolated":
-		return runs[n-1:], nil
+		return runs[1:], nil
 	}
 	return nil, fmt.Errorf("-part %q: want others or isolated", part)
 }

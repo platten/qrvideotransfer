@@ -2036,7 +2036,21 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   **Timeout:** the coverage step sets `-timeout=15m` per package (`coverArgs`), because go
   test's 10-minute default was never a chosen limit; the job's 70 minutes and the 30 for the
   non-race steps are the real guard. `internal/vision`'s cost at CI size is a performance item,
-  not optimised now.
+  not optimised now. PR #47's second run (6f18fc7) passed the coverage step in 19 min 22 s,
+  `internal/vision` taking 662 s under the 15-minute limit, but on that host the race step for
+  the other packages reached its 20 minutes: the main group took about 12 minutes
+  (`internal/vision` 709 s, `internal/payload` 507 s, `spikes/pattern` 469 s), the root package
+  then 128 s, and `internal/pipeline` was cut off; the job stood at about 58 of its 70 minutes.
+  So (designer's ruling): under the race detector the root package and `internal/pipeline` run
+  a subset, as `internal/vision` does (`raceSize`, `raceSkipStatistics`): the API's round trip,
+  and every pipeline test that crosses a goroutine boundary or guards a limit (two recordings,
+  cancellation, the reorder bound, disk space, hostile descriptors, frame loss at 20 frames,
+  where 3 lost are 15% and 4 are 20%, so the levels stay honest); the matrix, the typed errors,
+  the prefix property, the mid-loop start and the summed soft bits run in the non-race step. And
+  both run in the isolated race part beside `internal/video` (`-part isolated`), so the other
+  race step holds what it held before this pull request; the steps stay two, with their limits.
+  The CI-size suites and that runner's variance from host to host are an item for later, not
+  optimised now.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
   the encoder joins runs with one engine instance. Eviction rescans every frame's soft bits each
