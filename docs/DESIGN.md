@@ -2119,10 +2119,21 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   seen least recently; the frames seen are counted in a bitset of F bits (at most 512 KiB, beside
   the cap). A frame seen again after its record went is decoded again, and its shards, already
   stored, are not counted twice (`TestBookkeepingUnderCap`, `TestDroppedRecordCountsOnce`).
-  **Open, for M7:** a hostile or looping recording can keep the decode at the cap, so that every
-  capture forces an eviction, a rescan of everything held (up to 256 MB) and the re-decoding of
-  codewords whose records went. No existing limit bounds that work per capture; the decoded-pixel
-  limit bounds the captures, not the work each costs here (SECURITY.md section 5). The
+  **Re-examine, for M7:** a hostile or looping recording that keeps the decode at the cap made
+  every capture evict, rescan everything held (up to 256 MB) and decode codewords again: 489 ms a
+  capture, beyond 60 s after about 120. Since PR B of M3 part 2 the eviction order lives in two
+  heaps updated as soft bits are added (least confident first, then least recently seen, as
+  before): 0.2 ms a capture at the full cap, and 200 captures there within 60 s and 1 GiB,
+  asserted in the long run (`TestEvictionLoopCost`); the steps per capture do not grow with what is
+  held (`TestEvictionWorkBounded`, `TestEvictionCycle`, always). Re-decoding a frame whose record
+  went is bounded per capture by the codewords of the frames it credits. **Decode memory (PR B):**
+  the vision workers had been one per CPU, about 50 MiB each at 4K, so a 4K noise recording grew
+  the heap by 836 MiB at 16 CPUs and would pass 1 GiB at about 24; they are now capped by memory
+  from the probed capture size (SECURITY.md section 5, 12 at 4K, 3 at 8K, about 580 MiB
+  projected there, so one worker stays far under 1 GiB even at the capture limit). **Frame
+  headers:** `frame.DecodeHeader` refuses a header without saying why (a CRC or a `Validate`
+  failure); the reason is a candidate for M4's `inspect`, its first consumer (designer's ruling).
+The
   real-device check took 210-500 s per
   recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
   1, 255 s); a round-trip matrix row takes 3-14 s alone.
