@@ -56,6 +56,23 @@ func TestGeomPairRatios(t *testing.T) {
 	}
 }
 
+// geomCostSkip skips a cost-ratio test under the race detector or in a coverage build: either
+// instrumentation slows the hostile and the real-code runs unevenly, so the ratio measured is not
+// the shipped detector's. Under coverage the noise case read 8.52 and 8.61 times against 8.99 and
+// 8.92 without, pinned to 4 CPUs: a few per cent lenient. The tests assert the shipped build in
+// the plain test steps and, on every CI runner, in the check job's "Hostile-cost ratios" step; in
+// the coverage step they cost about 20 s of internal/vision's time pinned to 4 CPUs (DESIGN.md
+// section 19), and the package's coverage without them is 98.2% (98.3% with them).
+func geomCostSkip(t *testing.T) {
+	t.Helper()
+	if raceEnabled {
+		t.Skip("a cost ratio: race instrumentation distorts it unevenly")
+	}
+	if testing.CoverMode() != "" {
+		t.Skip("a cost ratio: coverage instrumentation distorts it unevenly; asserted without coverage, in CI's Hostile-cost ratios step")
+	}
+}
+
 // geomCostRounds is how many hostile runs geomCostRatio times, each between two real-code runs.
 const geomCostRounds = 15
 
@@ -83,6 +100,8 @@ func geomPairRatios(real, hostile []time.Duration) (lo, med, hi float64) {
 // the two runs of a pair.
 //
 // The real code is geomCostReference's: the slowest legitimate frame of its size.
+//
+// The callers skip with geomCostSkip under the race detector and in a coverage build.
 func geomCostRatio(t *testing.T, name string, real, hostile *video.Frame, hostilePlanes [][]uint16, most float64, limit uint64) {
 	t.Helper()
 	var dr, dh FinderDetector

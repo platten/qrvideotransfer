@@ -19,6 +19,16 @@ import (
 // geomLong reports whether the long tests run (QRVT_LONG_TESTS=1).
 func geomLong() bool { return os.Getenv("QRVT_LONG_TESTS") != "" }
 
+// geomLongSize returns long when the long tests run (geomLong) and short otherwise: the always-on
+// size of a test whose full size runs with QRVT_LONG_TESTS=1 (the CI-size trim of DESIGN.md
+// section 19). It composes with raceSize, which takes the always-on size as its full one.
+func geomLongSize(long, short int) int {
+	if geomLong() {
+		return long
+	}
+	return short
+}
+
 // geomCode is a looping test video: n code frames of one grid, with their headers and symbols.
 type geomCode struct {
 	layout  *frame.Layout
@@ -211,6 +221,26 @@ func geomParallel(n int, fn func(i int)) {
 	}
 	close(next)
 	wg.Wait()
+}
+
+// geomCoverMu serialises the vision code of the pose sweeps (geomSweep, geomDetectRate) in a
+// coverage build (geomVisionLock).
+var geomCoverMu sync.Mutex
+
+// geomVisionLock locks geomCoverMu in a coverage build and returns its unlock; otherwise it does
+// nothing. The coverage counters of the code under test are shared memory, and goroutines on
+// several cores writing them at once contend for their cache lines: pinned to 4 CPUs, the 72 poses
+// of TestGeometryPresetsSmall took 57 CPU seconds (13.7 s) under -cover, against 13 on one
+// goroutine and 15 (3.7 s) without coverage. So in a coverage build the sweeps still film their
+// poses on geomParallel's workers (the simulator is not instrumented) but run the vision code on
+// them one at a time; what they assert is unchanged. Its user must unlock with defer, so that a
+// failing test releases it.
+func geomVisionLock() (unlock func()) {
+	if testing.CoverMode() == "" {
+		return func() {}
+	}
+	geomCoverMu.Lock()
+	return geomCoverMu.Unlock
 }
 
 // geomDist returns the distance between two points.

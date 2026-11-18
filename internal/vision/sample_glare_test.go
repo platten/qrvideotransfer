@@ -7,16 +7,16 @@ import (
 	"github.com/platten/qrvideotransfer/internal/modem"
 )
 
-// TestSampleGlareFlagged: the simulator's specular glare patch (5% of the code area) on handheld
-// 4K captures (480 x 270 grid, seeds 22000 and 22001). Each pose is filmed twice, with and without
-// the patch, which leaves everything else equal; both are sampled through the mesh fitted to the
-// capture without it. Cells the patch turns near-white (changed by 20 code values or more, and at
-// 225 or above) must come back saturated (at most 3% missed), and cells it leaves within 1 code
-// value must not (at most 0.1% flagged). Cells on the patch's soft edge, brightened but not
-// clipped, are counted apart: telling them from data is the equaliser's part. Under -race, one
-// 720p pose of a 212 x 120 grid (geomRaceGlareCode).
+// TestSampleGlareFlagged: the simulator's specular glare patch (5% of the code area) on a handheld
+// 4K capture (480 x 270 grid, seed 22000; seeds 22000 and 22001 with QRVT_LONG_TESTS=1). Each pose
+// is filmed twice, with and without the patch, which leaves everything else equal; both are sampled
+// through the mesh fitted to the capture without it. Cells the patch turns near-white (changed by
+// 20 code values or more, and at 225 or above) must come back saturated (at most 3% missed), and
+// cells it leaves within 1 code value must not (at most 0.1% flagged). Cells on the patch's soft
+// edge, brightened but not clipped, are counted apart: telling them from data is the equaliser's
+// part. Under -race, one 720p pose of a 212 x 120 grid (geomRaceGlareCode).
 func TestSampleGlareFlagged(t *testing.T) {
-	n := raceSize(2, 1)
+	n := raceSize(geomLongSize(2, 1), 1)
 	c, clean := geomRaceGlareCode(t, 1, 31)
 	glared := clean
 	glared.Optics.Glare = 0.05

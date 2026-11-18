@@ -89,9 +89,10 @@ func geomEdgeSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed ui
 // through the moustache lens (a phone filming a laptop's screen). At least 90% are located (all 40
 // when written; at 90% of the width the lens pushes some corner finders out of the frame), none
 // wrongly, every header read, and the cell-centre error is at most 0.15 cell RMS both in the edge
-// columns, outside the anchors, and elsewhere.
+// columns, outside the anchors, and elsewhere. 12 poses always (seeds 50000 to 50011, so at least
+// 11 located); the 40 with QRVT_LONG_TESTS=1.
 func TestGeometryMoustache(t *testing.T) {
-	n := raceSize(40, 1)
+	n := raceSize(geomLongSize(40, 12), 1)
 	c := geomNewCode(t, 480, 270, 4, 2, 4, 18)
 	s := geomEdgeSweep(t, c, geomMoustache(t, "handheld", 0, 0, 0.85), n, 50000)
 	if s.wrong != 0 || s.header != s.found+s.wrong || 10*s.found < 9*n {
@@ -106,9 +107,10 @@ func TestGeometryMoustache(t *testing.T) {
 // TestGeometryMoustacheWindow: the pattern played rescaled in a window, as in the S2 recording of
 // rescaled playback: a 1920 x 1080 video on a 2560 x 1600 panel (scaled to fit, with bars), filmed
 // by a 1080p camera through the moustache lens. No wrong quad, at least 90% located, every header
-// read, and the cell-centre error at most 0.15 cell RMS.
+// read, and the cell-centre error at most 0.15 cell RMS. 12 poses always, 24 with
+// QRVT_LONG_TESTS=1.
 func TestGeometryMoustacheWindow(t *testing.T) {
-	n := raceSize(24, 1)
+	n := raceSize(geomLongSize(24, 12), 1)
 	c := geomNewCode(t, 240, 135, 8, 2, 4, 19)
 	cfg := geomMoustache(t, "tripod", 1920, 1080, 0.85)
 	cfg.Display.PanelW, cfg.Display.PanelH = 2560, 1600

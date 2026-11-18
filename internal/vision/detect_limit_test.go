@@ -28,6 +28,7 @@ func geomDetectRate(t *testing.T, c *geomCode, cfg channel.Config, n int, seed u
 			mu.Unlock()
 			return
 		}
+		defer geomVisionLock()()
 		var d FinderDetector
 		q, ok := d.Detect(p.f, nil)
 		_, mod := geomFinderTruth(c, p.tr)
@@ -94,13 +95,14 @@ const (
 )
 
 // TestDetectModuleLimit: at the measured limits, with each preset's unscaled blur (1.5 camera
-// pixels), the finders are found in every one of 24 poses (seeds 6000 to 6023) and never wrongly:
-// handheld at geomModuleLimit (fill 0.5) and at 4.8 pixels per cell (fill 0.6, the case of the
-// PR #30 review), and iphone-hdr at geomModuleLimitHLG.
+// pixels), the finders are found in every pose and never wrongly: handheld at geomModuleLimit
+// (fill 0.5) and at 4.8 pixels per cell (fill 0.6, the case of the PR #30 review), and iphone-hdr
+// at geomModuleLimitHLG. 12 poses per case always (seeds 6000 to 6011); 24 (seeds 6000 to 6023)
+// with QRVT_LONG_TESTS=1.
 func TestDetectModuleLimit(t *testing.T) {
 	raceSkipStatistics(t)
 	c := geomModuleCode(t)
-	n := 24
+	n := geomLongSize(24, 12)
 	for _, tc := range []struct {
 		preset string
 		fill   float64
