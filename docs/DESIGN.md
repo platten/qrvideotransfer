@@ -1823,9 +1823,25 @@ by GoReleaser).
   the rise came from #38's three-candidate path (the hostile Detect from 260 to 295 ms, the real
   one unchanged at 23 ms). **Residual for the security pass (M7):** the 16-times bound has about 24%
   of quiet headroom (16 against 12.9); any detector change that adds hostile cost re-measures it.
-  A step of the `check` job ("Hostile-cost ratios") runs the four tests again verbosely and keeps
+  A step of the `check` job ("Hostile-cost ratios") runs the four tests verbosely and keeps
   their ratio lines, so that every runner's figures, a near miss included, can be read from the job
-  log on a pass too.
+  log on a pass too. Since the vision test trim (2026-11-18) that step, without coverage, is where
+  CI asserts them on every runner: they skip under the race detector and in a coverage build
+  (`geomCostSkip`), whose instrumentation slows the two runs of a pair unevenly (pinned to 4 CPUs
+  the noise case read 8.52 and 8.61 times under coverage against 8.99 and 8.92 without), and they
+  still run in every plain `go test`, the untagged step and `tools/dev test` included. The release
+  build tags select no different file in `internal/vision` or any package it imports, so the
+  untagged step measures the shipped detector.
+  **`internal/vision` in the coverage step.** The coverage counters of the code under test are
+  shared memory, and goroutines on several cores writing them at once contend for their cache
+  lines: pinned to 4 CPUs, `TestGeometryPresetsSmall` took 57 CPU seconds (13.7 s) under coverage
+  against 15 (3.7 s) without, and `TestDetectConcurrent` 34 against 2.3. So in a coverage build the
+  pose sweeps (`geomSweep`, `geomDetectRate`) film their poses in parallel, the simulator not being
+  instrumented, and run the vision code on them one at a time (`geomVisionLock`); what they assert
+  is unchanged. The concurrency tests keep their goroutines, as the race step needs them. The
+  always-on sizes and the long run (`QRVT_LONG_TESTS=1`, `go run ./tools/dev test -long`) are in
+  section 19; the long run is local only: no CI job runs it yet (the nightly simulator-matrix job
+  is still a placeholder).
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
@@ -2262,8 +2278,27 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   run of the same machine, and `internal/vision`, unchanged, moved by 5 s between the two runs. At
   bce3915, back to back: 464 s at #48 and 477 s here (+2.8%; the reviewer's, 455.5 and 470.6 s,
   +3%), within the designer's 5% of #48 back to back, with no always-on security case dropped.
-  **The main margin risk for the coverage step is `internal/vision`'s CI-size cost**, 600 to 714 s
-  on macos-26-intel; a trim of its tests is due in its own pull request before M4 adds tests.
+  **The main margin risk for the coverage step was `internal/vision`'s CI-size cost**, 600 to 714 s
+  on macos-26-intel. The vision test trim (2026-11-18) cut the package, pinned to 4 CPUs and
+  uncached, back to back on the development machine, from 127.7 and 126.8 s to 89.6 and 84.8 s
+  (-31%; at the 4.7 to 5 times that runner took before, roughly 400 to 450 s there, a projection
+  until a CI run measures it). No bound, tolerance or ratio changed. Three means: the hostile-cost
+  tests (about 20 s) skip in a coverage build and are asserted without coverage (section 17); the
+  pose sweeps run their vision code one capture at a time in a coverage build (section 17); and
+  these always-on cases shrank, their full sizes running with `QRVT_LONG_TESTS=1`:
+  `TestGeometryMoustache` 12 of its 40 poses (so at least 11 located), `TestGeometryMoustacheWindow`
+  12 of 24, `TestDetectModuleLimit` 12 of 24 per case, `TestGeometryPresetsSmall` 12 of 24 per
+  preset, `TestGeometryPresets4K` 2 of 4 per preset, `TestGeometry16x10` 6 of 12, `TestGlareOnFinder`
+  2 poses (3 before, 6 in the long run) and `TestSampleGlareFlagged` 1 of 2. The long run is local
+  only; no CI job runs the moved sizes yet. Half, the target, was not reached. What remains is
+  mostly the parallel statistics: `TestHonestConfidence` (31 to 40 s within the run) and
+  `TestPipelineHonesty` (17 to 22 s), whose CI size the designer kept so that every bucket is
+  judged, then `TestPhaseWeights`, `TestGlareUnknown`, `TestPipelineGlare` and `TestPipelinePhase`.
+  Filmed with one capture instead of two (an experiment, not committed), `TestPipelinePhase`'s
+  tripod yield fell below its floor (0.9566 against 0.964), two `TestGlareUnknown` cases failed and
+  one `TestPipelineGlare` case had no cell under its patch, so those sizes stay. Under the race
+  detector the package is unchanged (125.7 and 122.6 s pinned). Noted, not tuned: in the honesty
+  tests' profile the equaliser's `flagUnknown` (its `binomialTail`) takes 12.7% of the CPU.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
   the encoder joins runs with one engine instance. Eviction rescanned every frame's soft bits each
