@@ -2115,6 +2115,27 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   pinned on the development machine: about 2.5 times, so the 5.7 times above, taken from the
   contended step, overstates an uncontended one. The margin is kept anyway, because that
   runner's speed varies from host to host.
+- **PR #49's CI runs 2 and 3 (M3 part 2, PR B).** Run 2 failed two steps. (1) CI's
+  go-test-coverage step gates a package as a file's path up to its last slash, so each file at the
+  module's root is gated on its own; `qrvt.go` stood at 93.9% (62/66) where `tools/dev cover`,
+  grouping by directory, passed the root package at 95.4%. Two tests now reach two of its four
+  uncovered statements (97.0%; `convert.go` 96.9%); the other two, a failure of `crypto/rand` in
+  `GenerateKey` and of `json.MarshalIndent` on the report, no test reaches without a production
+  change. `tools/dev cover` now groups files as the action does (`TestParseProfileGroups`), so the
+  local gate fails where CI's would. (2) The coverage step on macos-26-intel reached its 20-minute
+  limit; run 1 on the same code took 18 min 13 s, and package times rose from run 1 to run 2
+  (`internal/vision` 605 to 714 s, the root 149 to 200 s, `internal/pipeline` 95 to 119 s). This
+  PR's heavier always-on cases moved to the long run, where they still execute, keeping one small
+  case per property always (designer's ruling): the located recordings' resources (the gate's
+  bound is asserted always by `TestStageGateGridChange`), signing end to end with an unsigned
+  recording (`TestTypedErrors` refuses one always), the tampered stream beyond the stream as
+  signed, a flipped body bit without a trusted key and a flipped signature bit with one, the
+  second order of the interleaved sessions; `TestEvictionCycle` runs 1,000 captures, not 3,000.
+  Pinned on 4 CPUs, back to back on the development machine: the coverage step took 365 s at #48
+  and 377 s here (before the last trim); the 346 s measured for #48 earlier came from a faster
+  run of the same machine, and `internal/vision`, unchanged, moved by 5 s between the two runs.
+  **The main margin risk for the coverage step is `internal/vision`'s CI-size cost**, 600 to 714 s
+  on macos-26-intel; a trim of its tests is due in its own pull request before M4 adds tests.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
   the encoder joins runs with one engine instance. Eviction rescanned every frame's soft bits each
