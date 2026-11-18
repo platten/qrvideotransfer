@@ -410,9 +410,9 @@ func (d *decoder) attemptDue(index int) error {
 	for _, f := range d.pending {
 		fa := d.frames[f]
 		if fa == nil {
-			continue // should not happen: evict takes a frame whose record it drops off the list
+			continue // its record was evicted; evict compacts the list
 		}
-		if d.store == nil || fa.last > index-2 {
+		if fa.last > index-2 {
 			keep = append(keep, f)
 			continue
 		}

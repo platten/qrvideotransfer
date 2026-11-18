@@ -34,13 +34,13 @@ const (
 )
 
 // unitBytes is the grid stage's memory for a grid of cells data cells.
-func unitBytes(cells int) int64 { return min(unitCellBytes*int64(cells)+unitBaseBytes, 1) } // not yet modelled
+func unitBytes(cells int) int64 { return unitCellBytes*int64(cells) + unitBaseBytes }
 
 // decodeWorkers returns the vision workers for captures of w x h, asked for requested (0: the CPU
 // count): at most as many as half the memory budget holds, at least one. It reports whether an
 // explicit request was reduced.
 func decodeWorkers(requested, w, h int) (int, bool) {
-	limit := int(max(1, decodeMemBudget/workerBytes(w, h)))
+	limit := int(max(1, decodeMemBudget/2/workerBytes(w, h)))
 	if requested <= 0 {
 		return min(runtime.GOMAXPROCS(0), limit), false
 	}
@@ -50,7 +50,7 @@ func decodeWorkers(requested, w, h int) (int, bool) {
 // stageBudget is the memory left to the grid stage by workers vision workers on w x h captures:
 // the budget less their captures, at least half of it.
 func stageBudget(workers, w, h int) int64 {
-	return decodeMemBudget // not yet: the stage is not gated
+	return max(decodeMemBudget-int64(workers)*workerBytes(w, h), decodeMemBudget/2)
 }
 
 // stageGate admits captures to the grid stage while the memory model of the units inside fits its
@@ -76,7 +76,7 @@ type stageWaiter struct {
 func newStageGate(budget int64) *stageGate { return &stageGate{budget: max(budget, 1)} }
 
 // weight is what a unit with cells data cells takes of the gate.
-func (g *stageGate) weight(int) int64 { return 1 } // not yet: everything is admitted
+func (g *stageGate) weight(cells int) int64 { return min(unitBytes(cells), g.budget) }
 
 // enter waits until a unit of cells data cells fits, or ctx ends; it returns the release.
 func (g *stageGate) enter(ctx context.Context, cells int) (func(), error) {
