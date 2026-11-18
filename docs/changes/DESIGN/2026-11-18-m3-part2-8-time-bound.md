@@ -1,0 +1,1 @@
+M3 part 2, PR B: section 19 records the 60 s bound exceeded by 4 or more 4K captures of the largest claimable grid, the cases holding both bounds, M7's choice (refusal rule, time limit or tighter grid cap), and the worker memory model at three captures, as measured at 8K (code unchanged)

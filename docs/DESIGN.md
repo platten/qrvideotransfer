@@ -2161,11 +2161,16 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   `TestLocatedRecordingResources`):** 24 captures of the 4K output at 3840 x 2160, 834 MiB of heap
   growth at GOMAXPROCS 16 and 883 at 32, one capture in the stage at a time; the 1 GiB holds up to
   there. Beyond it, not met, logged: 8 captures at 7680 x 4320 of the 4K grid, one worker, 1,096
-  MiB (1,114 in a first run: the worker's three capture buffers at 99.5 MB each, against the two
-  the worker model counts, and the GC's headroom over them); 6 captures at 3840 x 2160 of the
+  MiB (1,114 in a first run: the reader's three capture buffers at 99.5 MB each and the GC's
+  headroom over them; the memory model therefore counts three captures a worker, not two, as
+  measured; the code's estimate, 6 x width x height, is unchanged); 6 captures at 3840 x 2160 of the
   largest grid a header can claim, 2,047 x 1,393 (2,567,107 cells, a model weight of 1,484 MiB, so
-  alone), 1,799 MiB and 107 s, about 18 s a capture. M7 decides between a refusal rule and M6's
-  allocation work. Outside the gate besides: each capture's soft bits per phase wait to be
+  alone), 1,799 MiB and 107 s, about 18 s a capture alone, so a recording of 4 or more such
+  captures exceeds the 60 s bound as well. **Both bounds hold** for the encoder's 4K output (12.3
+  and 12.6 s for 24 captures, 834 and 883 MiB) and for noise (848 x 480: 0.3 s, 126 MiB; 3840 x
+  2160: 1.7 s, 360 MiB). No refusal and no time limit in this PR (designer's ruling): M7 decides
+  between a refusal rule, a time limit and a tighter cap on the claimable grid, and for memory
+  between a refusal rule and M6's allocation work. Outside the gate besides: each capture's soft bits per phase wait to be
   applied, at most workers + 2 results of up to four phases of the frame's bits, about 2 MB a
   phase at the 4K grid in modulation 1 and up to 7.7 MB at the largest grid in modulation 3.
   **M6, scale work (designer's ruling (b)):** cut the stripe cancellation's allocations, about
