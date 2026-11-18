@@ -102,7 +102,10 @@ optics. The ratios between options are more trustworthy than the absolute values
 | F4 | Blur moves the best cell size by about one camera pixel | Sigma 1.0 to 1.5: four greys at 5.1 camera pixels per cell drop from 1.7 to 1.5 bits (code-value blur; with blur in linear light and sharpening the loss is larger, section 11 condition 2, 2026-11-18) |
 
 **Rule of thumb:** net throughput is 13-16% of the recording's bitrate. An iPhone recording 4K60 HEVC at
-about 53 Mbit/s therefore carries roughly 0.9 MB/s at best.
+about 53 Mbit/s therefore carries roughly 0.9 MB/s at best. This is section 4's simulation, and it
+is superseded for planning: the handheld planning rates of section 11, re-derived on 2026-11-18, are
+about 280 KB/s at 4K60, and S2's real recordings gave about 3.3% of the bitrate at a setting
+decodable with margin.
 
 Consequences that shaped the design:
 
@@ -119,7 +122,7 @@ so an "RGB or CMYK" code is an 8-colour cell carrying 3 bits. That is the `color
 
 | Mode | Flag | Bits per cell | Camera pixels per cell needed, steady / handheld (simulated) | Display bits per cell (simulated) | Role |
 | --- | --- | --- | --- | --- | --- |
-| Four greys | `--mode gray4` | 2 | 3.5 (section 4; `normal` re-checked at 3.6, 99.7%; `fast` and `robust` not re-derived) / 6 (`normal`; 4.8 `robust`, 7.5 `fast`) | 8.4 | Provisional default |
+| Four greys | `--mode gray4` | 2 | 3.5 (section 4; `normal` re-checked at 3.6, 99.7%; `fast` and `robust` not re-derived) / 6 (`normal`; 4.8 `robust`; `fast` not established, 10 provisionally) | 8.4 | Provisional default |
 | Black and white | `--mode bw` | 1 | 2.6 / 3.4 | 7.3 | Most robust |
 | Eight colours | `--mode color` | 3 | 4.3 / 5.5-6 | 28 | Best when the recording bitrate is generous |
 | Eight greys, 10-bit | `--hdr` | 3 | not simulated | not simulated | Experimental |
@@ -886,8 +889,13 @@ Whether a setting works depends on the camera. All of these must hold (simulated
 1. Camera frame rate at least twice the display rate.
 2. Camera pixels per cell `s = fill x camera width / GridX` at least the mode's minimum, with fill 0.80
    handheld and 0.90 on a tripod. For four greys under the handheld blur (Gaussian sigma 1.5 camera
-   pixels, applied in linear light before the camera's tone curve), the minimum is 4.8 for `robust`,
-   6 for `normal` and 7.5 for `fast` (re-derived on 2026-11-18, simulated). The simulator's
+   pixels, applied in linear light before the camera's tone curve), the minimum is 4.8 for `robust`
+   and 6 for `normal` (re-derived on 2026-11-18, simulated). For `fast` it is **not established**:
+   - The simulator decodes 99.6% of `fast` codewords at 7.25.
+   - S2's real four-grey segments give 0.815 and 0.837 bits per sent bit at 7.2-7.8 camera pixels
+     per cell, below the about 0.89 `fast` needs, then 0.879 at 6.4 and 0.949 at 10.1. A segment at
+     0.937 had only 27 of its 239 captures located, so it is selection-biased.
+   - Planning uses 10 provisionally until the G1 recordings. The simulator's
    `budget-android` at 1080p decodes, per capture through the vision pipeline, every `robust`
    codeword at 4.8, and 9.5% of `normal` codewords at 4.8 against 99% at 5.4. It decodes 11% of
    `fast` codewords at 6.4 against 99.6% at 7.25. S2's real recordings decode `normal` from 6.4
@@ -907,15 +915,33 @@ Whether a setting works depends on the camera. All of these must hold (simulated
 4. The display video's bitrate, `8.4 x cells x rate`, stays playable: 33 Mbit/s for 1080p30,
    58 for 1440p30, 131 for 4K30.
 
-Planning figures are the simulated single-pass rate derated by 40% for everything not simulated:
+Planning figures are the simulated single-pass rate derated by 40% for everything not simulated. All
+of them are simulated. The main figures are **handheld** (fill 0.80, the four-grey condition of
+condition 2: `robust` 4.8, `normal` 6, `fast` 10 provisionally). Each row takes the highest-rate
+setting that conditions 1 to 3 allow. Black and white is used at 4.8 camera pixels per cell, where it
+decoded every codeword with every code in the 2026-11-18 measurements.
 
-| Camera | Recommended | Planning rate | 10 MB | 1 GB |
-| --- | --- | --- | --- | --- |
-| 1080p30 (older Android, webcam) | 720p at 12 fps, black and white, `normal` (simulated) | about 25 KB/s | about 7 min | about 11 h, impractical |
-| 4K30 | 1440p at 12 fps | about 200 KB/s | about 50 s | about 80 min |
-| 4K60 with a 1080p monitor | 1080p at 30 fps, `fast` | about 350 KB/s | about 30 s | about 47 min |
-| 4K60 | 1440p at 30 fps | about 500 KB/s | about 20 s | about 32 min |
-| 4K120 | 1440p at 30-60 fps | 0.6-1.0 MB/s | 10-16 s | 16-26 min |
+| Camera (handheld) | Recommended | s | Planning rate | 10 MB | 1 GB |
+| --- | --- | --- | --- | --- | --- |
+| 1080p30 (older Android, webcam) | 720p at 12 fps, black and white, `fast` | 4.8 | about 30 KB/s | about 5.5 min | about 9 h, impractical |
+| 4K30 | 1080p at 12 fps, four greys, `normal` | 6.4 | about 112 KB/s | about 1.5 min | about 2.5 h |
+| 4K60 (with a 1080p or larger monitor) | 1080p at 30 fps, four greys, `normal` | 6.4 | about 280 KB/s | about 36 s | about 1 h |
+| 4K120 | 1080p at 60 fps, four greys, `normal` | 6.4 | about 560 KB/s | about 18 s | about 30 min |
+
+At a 4K camera, 1440p gives 4.8 camera pixels per cell handheld: four greys `robust` only, at about
+255 KB/s at 30 fps, below 1080p `normal`. Four greys `fast` is not used in any handheld row, since it
+needs 10 provisionally.
+
+**On a tripod** (fill 0.90; the steady four-grey figure of 3.5 from section 4, with `normal`
+re-checked at 3.6 and `fast` and `robust` not re-derived), the earlier figures stand:
+
+| Camera (tripod) | Recommended | s | Planning rate | 10 MB | 1 GB |
+| --- | --- | --- | --- | --- | --- |
+| 1080p30 | 720p at 12 fps, four greys, `normal` | 5.4 | about 50 KB/s | about 3.5 min | about 5.5 h, impractical |
+| 4K30 | 1440p at 12 fps, four greys, `normal` | 5.4 | about 200 KB/s | about 50 s | about 80 min |
+| 4K60 with a 1080p monitor | 1080p at 30 fps, four greys, `fast` | 7.2 | about 350 KB/s | about 30 s | about 47 min |
+| 4K60 | 1440p at 30 fps, four greys, `normal` | 5.4 | about 500 KB/s | about 20 s | about 32 min |
+| 4K120 | 1440p at 30-60 fps, four greys, `normal` | 5.4 | 0.6-1.0 MB/s | 10-16 s | 16-26 min |
 
 Assumed recording bitrates: 1080p30 at 8 Mbit/s HEVC or 17 H.264; 4K30 at 23; 4K60 at 53; 4K120 at about
 110. For comparison, libcimbar reports about 106 KB/s.
@@ -1642,8 +1668,14 @@ note in this document.
 
 `budget-android` at 720p, four greys, `normal` was removed on 2026-11-18 as infeasible. It films 4.8
 camera pixels per cell, against the 6 that section 11's condition 2 now requires, and its
-recommended setting is black and white, `normal`. `TestMatrixFeasible` checks every four-grey row
-against that condition.
+recommended setting is black and white. `TestMatrixFeasible` checks every four-grey row
+against that condition, at the preset's camera and, for the rows CI runs, at the short version's
+camera.
+
+`iphone-hdr` four greys `normal` is asserted in CI below the condition by design. At the short
+version's 3008 x 1692 camera it films 5.0 camera pixels per cell, against the 6 required, and it
+passes because the stand-in recorder gives two captures per code frame. It is the test's one
+exemption (section 19). At the preset's 4K camera, 6.4, it meets the condition.
 
 ### Test videos
 
@@ -2037,6 +2069,11 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   (section 15). That is this row's M3 exit. The other `budget-android` rows decode in all sessions:
   5 of 5 with the stand-in and 3 of 3 with x264 for black and white `normal` and `robust` and for
   four greys `robust`.
+- **The handheld planning rates are simulated (section 11, 2026-11-18).** They await the G1
+  recordings. S2's real net rate, about 3.3% of the recording's bitrate at a setting decodable with
+  margin, remains the more pessimistic evidence for the 4K rows. At the assumed bitrates it gives
+  about 95 KB/s for 4K30 (23 Mbit/s) and 220 KB/s for 4K60 (53), against the handheld table's 112
+  and 280.
 - **Candidate for M5: neighbour-aware equalisation.** On the row above, at true positions on clean
   cells, a per-capture fit of each cell's level against its edge and diagonal neighbours' mean levels,
   with one round of decision feedback, lowers the four-grey symbol error rate from 0.226 to about
@@ -2075,7 +2112,9 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   the handheld blur: the setting is infeasible by that condition (2026-11-18), and the shortfall
   with x264 is expected. Through the vision pipeline at that camera, 25% of `normal` codewords
   decode per capture, against 100% at the preset's 4K camera. The stand-in still decodes there,
-  with two captures per code frame. The asserted row, at the preset's own camera, is unaffected.
+  with two captures per code frame. The CI row, filmed at that camera with the stand-in, is
+  asserted below the condition by design and is `TestMatrixFeasible`'s one exemption (section 15).
+  **If it ever fails in CI, it is replaced by `iphone-hdr` four greys `robust`, and is not rerun.**
   Also open: no 10-bit x264 recording runs end to end outside the long version (`iphone-hdr` is
   its only 10-bit row, and the engine's 10-bit round trip of a recording,
   `TestEncodeBitrateRoundTrip`, decodes a synthetic clip).
