@@ -6,7 +6,8 @@ import "runtime"
 // hostile input may make a process use (SECURITY.md sections 5 and 9.5).
 const decodeMemBudget = 640 << 20
 
-// WarnWorkersReduced: the worker count asked for was above what the decode's memory allows.
+// WarnWorkersReduced is the warning code for a worker count asked for above what the decode's
+// memory allows.
 const WarnWorkersReduced = "WorkersReduced"
 
 // workerBytes is the memory one vision worker holds for a w x h capture: its capture's planes, 16
