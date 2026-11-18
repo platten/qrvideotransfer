@@ -309,8 +309,9 @@ func TestShortCamera(t *testing.T) {
 var gray4MinPixels = map[Protection]float64{Robust: 4.8, Normal: 6.0, Fast: 7.5}
 
 // TestMatrixFeasible: every Gray4 row of the round-trip matrix filmed under the handheld blur meets
-// section 11's condition at its preset's own camera; a row that does not is infeasible and is not
-// in the matrix (section 15).
+// section 11's condition at its preset's own camera, and the rows the short version runs meet it
+// at the short version's camera too; a row that does not is infeasible and is not in the matrix
+// (section 15).
 func TestMatrixFeasible(t *testing.T) {
 	for _, r := range matrix() {
 		c, err := channel.Preset(r.preset)
@@ -320,8 +321,16 @@ func TestMatrixFeasible(t *testing.T) {
 		if r.mod != Gray4 || c.Optics.Blur != 1.5 {
 			continue
 		}
-		if s := c.Geometry.Fill * float64(c.Geometry.Width) / float64(r.w/4); s < gray4MinPixels[r.protection] {
-			t.Errorf("%s: %.2f camera pixels per cell, below the %.1f its protection needs", r.name(), s, gray4MinPixels[r.protection])
+		need := gray4MinPixels[r.protection]
+		if s := c.Geometry.Fill * float64(c.Geometry.Width) / float64(r.w/4); s < need {
+			t.Errorf("%s: %.2f camera pixels per cell, below the %.1f its protection needs", r.name(), s, need)
+		}
+		if !r.always {
+			continue
+		}
+		w, _ := shortCamera(c, r.w/4)
+		if s := c.Geometry.Fill * float64(w) / float64(r.w/4); s < need {
+			t.Errorf("%s: %.2f camera pixels per cell at the short version's %d-pixel-wide camera, below the %.1f its protection needs", r.name(), s, w, need)
 		}
 	}
 }
