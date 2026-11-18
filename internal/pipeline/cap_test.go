@@ -15,7 +15,7 @@ func TestBookkeepingUnderCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.softCap = 40 * (frameRecordBytes(g.cpf) + int64(g.cpf*g.sent)) // room for about 40 frames
+	d.softCap = 40*frameRecordBytes(g.cpf) + int64(g.cpf*g.sent) // about 40 records and one frame's soft bits
 	soft := append([]int8(nil), truth[0]...)
 	clear(soft[:g.sent]) // no descriptor: its frame count would contradict the altered header
 	for i := range 1000 {
