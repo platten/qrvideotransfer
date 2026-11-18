@@ -97,11 +97,12 @@ func matrix() []matrixRow {
 			rows = append(rows, matrixRow{"handheld", 1920, 1080, 30, m, p, m == Gray2 && p == Normal})
 		}
 	}
-	for _, m := range []Modulation{Gray2, Gray4} {
-		for _, p := range []Protection{Normal, Robust} {
-			rows = append(rows, matrixRow{"budget-android", 1280, 720, 12, m, p, m == Gray2 && p == Normal})
-		}
-	}
+	// budget-android's 720p Gray4 `normal` is infeasible: 4.8 camera pixels per cell, below the
+	// 6.0 that section 11 requires (TestMatrixFeasible); it was removed on 2026-11-18 (section 15).
+	rows = append(rows,
+		matrixRow{"budget-android", 1280, 720, 12, Gray2, Normal, true},
+		matrixRow{"budget-android", 1280, 720, 12, Gray2, Robust, false},
+		matrixRow{"budget-android", 1280, 720, 12, Gray4, Robust, false})
 	return append(rows,
 		matrixRow{"iphone-hdr", 1920, 1080, 30, Gray4, Normal, true},
 		matrixRow{"harsh", 1280, 720, 12, Gray2, Robust, true})
@@ -194,9 +195,9 @@ func TestRoundTripMatrixX264(t *testing.T) {
 const x264Sessions = 3
 
 // x264Always are the rows the short version runs with x264 (designer's ruling on the CI budget,
-// M3 part 2): one, budget-android's Gray2 `normal` with its own 1080p camera at 17 Mbit/s (its
-// Gray4 `normal` is the open defect of DESIGN.md section 19). Every other row runs in the long
-// version.
+// M3 part 2): one, budget-android's Gray2 `normal` with its own 1080p camera at 17 Mbit/s, the
+// setting section 11 recommends for a 1080p30 camera (its Gray4 `normal` is infeasible and not in
+// the matrix). Every other row runs in the long version.
 var x264Always = map[string]bool{
 	"budget-android-720p12-bw-normal": true,
 }
