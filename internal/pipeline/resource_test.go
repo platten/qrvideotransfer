@@ -73,12 +73,23 @@ func noiseFrames(n, w, h int, seed uint64) []*video.Frame {
 
 // TestHostileRecordingResources (SECURITY.md section 9.5): recordings that show no transfer, noise,
 // end within the time bound and the heap bound, with nothing known and nothing written. The short
-// version decodes 16 frames at 848 x 480; the long version (QRVT_LONG_TESTS=1) 32 at 3840 x 2160.
+// version decodes 16 frames at 848 x 480; the long version (QRVT_LONG_TESTS=1) 32 at 3840 x 2160
+// with GOMAXPROCS forced to 16 and to 32, which the decode's memory cap must absorb.
 func TestHostileRecordingResources(t *testing.T) {
-	n, w, h := 16, 848, 480
-	if os.Getenv("QRVT_LONG_TESTS") == "1" {
-		n, w, h = 32, 3840, 2160
+	if os.Getenv("QRVT_LONG_TESTS") != "1" {
+		hostileRecording(t, 16, 848, 480)
+		return
 	}
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(0))
+	for _, procs := range []int{16, 32} {
+		runtime.GOMAXPROCS(procs)
+		hostileRecording(t, 32, 3840, 2160)
+	}
+}
+
+// hostileRecording decodes n noise frames of w x h and asserts the bounds.
+func hostileRecording(t *testing.T, n, w, h int) {
+	t.Helper()
 	rec := writeRaw(t, noiseFrames(n, w, h, 9), 30)
 	out := filepath.Join(t.TempDir(), "out")
 	var err error
@@ -93,7 +104,7 @@ func TestHostileRecordingResources(t *testing.T) {
 	if fs := filesUnder(t, out); len(fs) != 0 {
 		t.Errorf("files written: %v", fs)
 	}
-	t.Logf("%d noise frames at %d x %d: %.1f s, heap growth %.1f MiB", n, w, h, d.Seconds(), float64(peak)/(1<<20))
+	t.Logf("%d noise frames at %d x %d, GOMAXPROCS %d: %.1f s, heap growth %.1f MiB", n, w, h, runtime.GOMAXPROCS(0), d.Seconds(), float64(peak)/(1<<20))
 	if d > hostileTime || peak > hostileHeap {
 		t.Errorf("%.1f s and %d bytes of heap growth, bounds %v and %d", d.Seconds(), peak, hostileTime, hostileHeap)
 	}
@@ -103,9 +114,9 @@ func TestHostileRecordingResources(t *testing.T) {
 // decode held at its cap, where every new frame forces an eviction that rescans everything held.
 // Long version only (QRVT_LONG_TESTS=1): the decoder is filled to the full 256 MB cap with frames of
 // a transfer whose descriptor never decodes, then fed captures of further frames; it logs the cost
-// per capture at the cap and the heap's growth, and asserts the heap bound. The time a recording
-// of such captures costs grows with its length, so no time bound is asserted; see DESIGN.md
-// section 19.
+// per capture at the cap and the heap's growth, and asserts both bounds over the fill and 200
+// captures at the cap: the eviction's ordered structures keep a capture's cost from growing with
+// what is held (DESIGN.md section 19).
 func TestEvictionLoopCost(t *testing.T) {
 	if os.Getenv("QRVT_LONG_TESTS") != "1" {
 		t.Skip("long test: QRVT_LONG_TESTS=1")
@@ -149,7 +160,7 @@ func TestEvictionLoopCost(t *testing.T) {
 	if d.usedBytes() > d.softCap {
 		t.Errorf("%d bytes held over the cap %d", d.usedBytes(), d.softCap)
 	}
-	if peak > hostileHeap {
-		t.Errorf("heap growth %d bytes, bound %d", peak, hostileHeap)
+	if peak > hostileHeap || fillTime+loopTime > hostileTime {
+		t.Errorf("heap growth %d bytes and %.1f s, bounds %d and %v", peak, (fillTime + loopTime).Seconds(), hostileHeap, hostileTime)
 	}
 }

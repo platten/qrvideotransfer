@@ -132,6 +132,7 @@ type decoder struct {
 	seen       []uint64 // frames seen, one bit each (F bits, at most 512 KiB)
 	framesSeen int
 	maxWaiting int // most results held for in-order application at once
+	evictSteps int // frames taken off the eviction order, for tests
 	captures   int // captures processed, across recordings, with a gap between recordings
 
 	stats            Stats
