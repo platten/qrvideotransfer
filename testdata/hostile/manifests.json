@@ -1,0 +1,103 @@
+[
+ {
+  "name": "case",
+  "entries": [
+   [
+    "a",
+    "file"
+   ],
+   [
+    "A",
+    "file"
+   ]
+  ],
+  "path": "A",
+  "reason": "equal to \"a\" after case folding"
+ },
+ {
+  "name": "full case folding",
+  "entries": [
+   [
+    "Stra\u00dfe",
+    "file"
+   ],
+   [
+    "STRASSE",
+    "file"
+   ]
+  ],
+  "path": "STRASSE",
+  "reason": "equal to \"Stra\u00dfe\" after case folding"
+ },
+ {
+  "name": "Kelvin sign",
+  "entries": [
+   [
+    "k",
+    "file"
+   ],
+   [
+    "\u212a",
+    "file"
+   ]
+  ],
+  "path": "\u212a",
+  "reason": "not in Unicode normalisation form C"
+ },
+ {
+  "name": "normalisation pair",
+  "entries": [
+   [
+    "\u00e9",
+    "file"
+   ],
+   [
+    "e\u0301",
+    "file"
+   ]
+  ],
+  "path": "e\u0301",
+  "reason": "not in Unicode normalisation form C"
+ },
+ {
+  "name": "file under a file",
+  "entries": [
+   [
+    "a",
+    "file"
+   ],
+   [
+    "a/b",
+    "file"
+   ]
+  ],
+  "path": "a/b",
+  "reason": "its folder is not an entry of type dir"
+ },
+ {
+  "name": "file under a folder folded to a file",
+  "entries": [
+   [
+    "a",
+    "file"
+   ],
+   [
+    "A/b",
+    "file"
+   ]
+  ],
+  "path": "A/b",
+  "reason": "its folder is not an entry of type dir"
+ },
+ {
+  "name": "folder not an entry",
+  "entries": [
+   [
+    "d/f",
+    "file"
+   ]
+  ],
+  "path": "d/f",
+  "reason": "its folder is not an entry of type dir"
+ }
+]

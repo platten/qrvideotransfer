@@ -1,0 +1,230 @@
+[
+ {
+  "name": "symlink",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "symlink",
+    "name": "a",
+    "link": "/etc/passwd"
+   }
+  ],
+  "path": "a",
+  "reason": "tar entry of type '2' where the manifest has the regular file \"a\""
+ },
+ {
+  "name": "link",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "link",
+    "name": "a",
+    "link": "/etc/passwd"
+   }
+  ],
+  "path": "a",
+  "reason": "tar entry of type '1' where the manifest has the regular file \"a\""
+ },
+ {
+  "name": "char",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "char",
+    "name": "a",
+    "link": "/etc/passwd"
+   }
+  ],
+  "path": "a",
+  "reason": "tar entry of type '3' where the manifest has the regular file \"a\""
+ },
+ {
+  "name": "block",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "block",
+    "name": "a",
+    "link": "/etc/passwd"
+   }
+  ],
+  "path": "a",
+  "reason": "tar entry of type '4' where the manifest has the regular file \"a\""
+ },
+ {
+  "name": "fifo",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "fifo",
+    "name": "a",
+    "link": "/etc/passwd"
+   }
+  ],
+  "path": "a",
+  "reason": "tar entry of type '6' where the manifest has the regular file \"a\""
+ },
+ {
+  "name": "not in the manifest",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "reg",
+    "name": "a",
+    "data": "aaa"
+   },
+   {
+    "type": "reg",
+    "name": "b",
+    "data": "bbb"
+   }
+  ],
+  "path": "b",
+  "reason": "in the archive but not in the manifest"
+ },
+ {
+  "name": "missing from the archive",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ],
+   [
+    "b",
+    "file",
+    "bbb"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "reg",
+    "name": "a",
+    "data": "aaa"
+   }
+  ],
+  "path": "b",
+  "reason": "in the manifest but missing from the archive"
+ },
+ {
+  "name": "out of order",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ],
+   [
+    "b",
+    "file",
+    "bbb"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "reg",
+    "name": "b",
+    "data": "bbb"
+   },
+   {
+    "type": "reg",
+    "name": "a",
+    "data": "aaa"
+   }
+  ],
+  "path": "b",
+  "reason": "found where the manifest has \"a\" (out of order or not in the manifest)"
+ },
+ {
+  "name": "size",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "reg",
+    "name": "a",
+    "data": "aaaa"
+   }
+  ],
+  "path": "a",
+  "reason": "size 4 in the archive, 3 in the manifest"
+ },
+ {
+  "name": "hash",
+  "manifest": [
+   [
+    "a",
+    "file",
+    "aaa"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "reg",
+    "name": "a",
+    "data": "aab"
+   }
+  ],
+  "path": "a",
+  "reason": "SHA-256 differs from the manifest"
+ },
+ {
+  "name": "folder as a file",
+  "manifest": [
+   [
+    "d",
+    "dir"
+   ]
+  ],
+  "tar": [
+   {
+    "type": "reg",
+    "name": "d",
+    "data": ""
+   }
+  ],
+  "path": "d",
+  "reason": "tar entry of type '0' where the manifest has the directory \"d\""
+ }
+]
