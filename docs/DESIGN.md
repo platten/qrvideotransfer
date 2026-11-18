@@ -1993,12 +1993,15 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   x264 at the preset's bitrate and camera, three sessions each, 855 s on the development machine:
   12 rows decode in 3 of 3 sessions; `budget-android` Gray4 `normal` in none (previous entry).
   Filming dominates the cost: about 18 to 21 s a session at 4K, 53 s for `harsh` (3 passes,
-  4K30), 5 to 11 s at `budget-android`'s 1080p. The short version runs two rows with the smaller
-  cameras of the stand-in's short matrix, `tripod` Gray4 `normal` and `budget-android` Gray2
-  `normal`, about 21 s pinned to 4 CPUs. Also measured, not asserted: `iphone-hdr` Gray4 `normal`
-  with x264 at the short version's camera (3008 x 1692, the bitrate scaled with the pixels to
-  about 45 Mbit/s) falls short by 55 shards, where the stand-in at that camera and x264 at the
-  preset's 4K camera both decode; so it is not in the short version.
+  4K30), 5 to 11 s at `budget-android`'s 1080p. The short version runs one row, `budget-android`
+  Gray2 `normal` with its own 1080p camera, about 8 s pinned to 4 CPUs (designer's ruling on the
+  CI budget; `tripod` Gray4 `normal` at the smaller camera, 13 s more, runs in the long version
+  with the rest). Also measured, not asserted, and not diagnosed: `iphone-hdr` Gray4 `normal` with
+  x264 at the short matrix's camera, 3008 x 1692, falls short by 55 shards, where the stand-in at
+  that camera and x264 at the preset's 4K camera both decode. The bitrate there was scaled with
+  the pixel count by `channel.Config.Resize`: 74 Mbit/s x (3008 x 1692) / (3840 x 2160), about
+  45.4 Mbit/s, the same bits per camera pixel, so whether the scaling (fewer bits per cell than
+  at 4K, since a cell then covers fewer pixels) or the channel is at fault is open.
 - **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
   every row of section 15 through the public API with five repeatable sessions each: the files
   (6.5 KB) are encoded to an MP4 by the embedded engine, decoded, filmed for two passes (three on
@@ -2085,7 +2088,10 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   both run in the isolated race part beside `internal/video` (`-part isolated`), so the other
   race step holds what it held before this pull request; the steps stay two, with their limits.
   The CI-size suites and that runner's variance from host to host are an item for later, not
-  optimised now.
+  optimised now. PR #47's third run took 818 s for the coverage step on macos-26-intel, against 334 s
+  pinned on the development machine: about 2.5 times, so the 5.7 times above, taken from the
+  contended step, overstates an uncontended one. The margin is kept anyway, because that
+  runner's speed varies from host to host.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
   decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
   the encoder joins runs with one engine instance. Eviction rescans every frame's soft bits each

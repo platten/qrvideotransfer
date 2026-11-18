@@ -193,13 +193,11 @@ func TestRoundTripMatrixX264(t *testing.T) {
 // x264Sessions is the number of sessions each row runs with x264 in the long version.
 const x264Sessions = 3
 
-// x264Always are the rows the short version runs with x264, filmed with its smaller cameras: the
-// two ends of the recorder's range, budget-android's 1080p camera at 17 Mbit/s (Gray2 `normal`;
-// its Gray4 `normal` is the open defect of DESIGN.md section 19) and tripod's camera near 4K with
-// four greys. The other rows pass in the long version; iphone-hdr does not pass with x264 at the
-// short version's camera (section 19), and handheld and harsh cost 16 and 20 s more each.
+// x264Always are the rows the short version runs with x264 (designer's ruling on the CI budget,
+// M3 part 2): one, budget-android's Gray2 `normal` with its own 1080p camera at 17 Mbit/s (its
+// Gray4 `normal` is the open defect of DESIGN.md section 19). Every other row runs in the long
+// version.
 var x264Always = map[string]bool{
-	"tripod-1080p30-gray4-normal":     true,
 	"budget-android-720p12-bw-normal": true,
 }
 
