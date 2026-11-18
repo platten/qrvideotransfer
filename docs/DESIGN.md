@@ -2119,21 +2119,25 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   go-test-coverage step gates a package as a file's path up to its last slash, so each file at the
   module's root is gated on its own; `qrvt.go` stood at 93.9% (62/66) where `tools/dev cover`,
   grouping by directory, passed the root package at 95.4%. Two tests now reach two of its four
-  uncovered statements (97.0%; `convert.go` 96.9%); the other two, a failure of `crypto/rand` in
+  uncovered statements (97.0%; `convert.go` 96.9%, 31 of 32, so one more uncovered statement
+  there would take it to about 93.8%, below the per-file gate); the other two, a failure of `crypto/rand` in
   `GenerateKey` and of `json.MarshalIndent` on the report, no test reaches without a production
   change. `tools/dev cover` now groups files as the action does (`TestParseProfileGroups`), so the
   local gate fails where CI's would. (2) The coverage step on macos-26-intel reached its 20-minute
   limit; run 1 on the same code took 18 min 13 s, and package times rose from run 1 to run 2
   (`internal/vision` 605 to 714 s, the root 149 to 200 s, `internal/pipeline` 95 to 119 s). This
   PR's heavier always-on cases moved to the long run, where they still execute, keeping one small
-  case per property always (designer's ruling): the located recordings' resources (the gate's
-  bound is asserted always by `TestStageGateGridChange`), signing end to end with an unsigned
+  case per property always (designer's ruling): the located recordings' resources at 4K (always,
+  one pass of the transfer's captures at 848 x 480, decoded correctly within 1 GiB and the grid
+  stage's budget, 0.7 s pinned), signing end to end with an unsigned
   recording (`TestTypedErrors` refuses one always), the tampered stream beyond the stream as
   signed, a flipped body bit without a trusted key and a flipped signature bit with one, the
   second order of the interleaved sessions; `TestEvictionCycle` runs 1,000 captures, not 3,000.
   Pinned on 4 CPUs, back to back on the development machine: the coverage step took 365 s at #48
   and 377 s here (before the last trim); the 346 s measured for #48 earlier came from a faster
-  run of the same machine, and `internal/vision`, unchanged, moved by 5 s between the two runs.
+  run of the same machine, and `internal/vision`, unchanged, moved by 5 s between the two runs. At
+  bce3915, back to back: 464 s at #48 and 477 s here (+2.8%; the reviewer's, 455.5 and 470.6 s,
+  +3%), within the designer's 5% of #48 back to back, with no always-on security case dropped.
   **The main margin risk for the coverage step is `internal/vision`'s CI-size cost**, 600 to 714 s
   on macos-26-intel; a trim of its tests is due in its own pull request before M4 adds tests.
 - **Performance, noted and not tuned (M3).** Decoding reads each recording with one video

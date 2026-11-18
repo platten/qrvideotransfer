@@ -1,0 +1,1 @@
+M3 part 2, PR #49: section 19 records the located recordings' always-on case restored (one pass at 848 x 480, 0.7 s pinned), convert.go's coverage margin (31 of 32; one more uncovered statement would take it below the per-file gate) and the coverage step at bce3915 within 5% of #48 back to back
