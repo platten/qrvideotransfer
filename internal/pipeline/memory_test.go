@@ -122,9 +122,32 @@ func TestStageGateGridChange(t *testing.T) {
 	if alone.Load() != 0 || g.maxUsed > g.budget || g.used != 0 || g.inside != 0 {
 		t.Errorf("%d admissions broke the budget; most held %d of %d; left %d held by %d", alone.Load(), g.maxUsed, g.budget, g.used, g.inside)
 	}
-	if g.maxInside < 2 {
-		t.Errorf("small grids never shared the stage (%d at once)", g.maxInside)
+	// Small grids share the stage: two units each hold it until both are inside, behind a barrier
+	// with a timeout, so a gate that admitted only one at a time fails here instead of hanging.
+	// (Whether the goroutines above happened to overlap depends on scheduling; not asserted.)
+	tctx, tcancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer tcancel()
+	entered, both := make(chan error, 2), make(chan struct{})
+	for range 2 {
+		go func() {
+			release, err := g.enter(tctx, small)
+			entered <- err
+			if err != nil {
+				return
+			}
+			select {
+			case <-both:
+			case <-tctx.Done():
+			}
+			release()
+		}()
 	}
+	for range 2 {
+		if err := <-entered; err != nil {
+			t.Errorf("two small grids did not share the stage: %v", err)
+		}
+	}
+	close(both)
 
 	// A capture waiting behind a full gate when the decode ends.
 	release, _ := g.enter(context.Background(), large)
