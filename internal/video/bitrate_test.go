@@ -53,6 +53,9 @@ func TestEncodeArgsBitrate(t *testing.T) {
 // TestEncodeBitrateRoundTrip: the engine takes the recorder's arguments: 8- and 10-bit clips at a
 // bitrate are written, probed and read back whole.
 func TestEncodeBitrateRoundTrip(t *testing.T) {
+	if bitrateRace {
+		t.Skip("asserted in the non-race test step")
+	}
 	ctx := context.Background()
 	b := embedded(t)
 	for _, bits := range []int{8, 10} {
