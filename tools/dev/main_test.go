@@ -137,8 +137,10 @@ func TestSelectRuns(t *testing.T) {
 		want [][]string
 	}{
 		{"", runs},
-		{"others", runs[:3]},
-		{"isolated", runs[3:]},
+		// The "others" race step keeps its contents from before PR #47; the end-to-end packages run
+		// in the isolated part beside internal/video (designer's ruling on PR #47).
+		{"others", runs[:1]},
+		{"isolated", runs[1:]},
 	} {
 		got, err := selectRuns(runs, c.part)
 		if err != nil || len(got) != len(c.want) {

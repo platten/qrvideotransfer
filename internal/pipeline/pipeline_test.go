@@ -100,7 +100,9 @@ func lossPlan(t *testing.T, minFrames int) (string, *EncodeResult, map[string][3
 // 100 in the long version (QRVT_LONG_TESTS=1); fewer would make a frame too large a step (at 28,
 // five frames are 17.9%, beyond the budget).
 func TestFrameLoss(t *testing.T) {
-	minFrames := 52
+	// Under the race detector 20 frames: three lost are 15% and fit the budget, four are 20% and do
+	// not, so the levels stay honest.
+	minFrames := raceSize(52, 20)
 	if os.Getenv("QRVT_LONG_TESTS") == "1" {
 		minFrames = 100
 	}
@@ -181,7 +183,7 @@ func TestFrameLoss(t *testing.T) {
 // TestPartialRecordingsAddUp: two recordings that each show 60% of the loop, from either end,
 // each fail alone and succeed together (DESIGN.md section 15, "Two partial recordings").
 func TestPartialRecordingsAddUp(t *testing.T) {
-	path, res, want := lossPlan(t, 20)
+	path, res, want := lossPlan(t, raceSize(20, 8))
 	frames, info := readFrames(t, video.NewRaw(), path)
 	cut := res.Frames * 6 / 10
 	a := writeRaw(t, frames[:cut], info.FPSNum/info.FPSDen)
@@ -210,6 +212,7 @@ func simCamera(t testing.TB) channel.Config { return preset(t, "ideal", 1920, 10
 // TestStartMidLoop films a recording that starts half-way through the loop and lasts a little
 // more than one pass.
 func TestStartMidLoop(t *testing.T) {
+	raceSkipStatistics(t)
 	in, want := writeInputs(t, 3, 20000)
 	path, res := encodeRaw(t, profile480(in))
 	period := time.Duration(res.Frames) * time.Second / 12
@@ -417,7 +420,7 @@ func TestEvents(t *testing.T) {
 // TestCancel: a cancelled encode or decode stops with the context's error and leaves no temporary
 // file, no video and no output file.
 func TestCancel(t *testing.T) {
-	in, _ := writeInputs(t, 11, 60000)
+	in, _ := writeInputs(t, 11, raceSize(60000, 12000))
 	for _, stage := range []Stage{StagePack, StageProtect, StageRender, StageEncodeVideo} {
 		t.Run(fmt.Sprintf("encode-%d", stage), func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())

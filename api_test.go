@@ -180,6 +180,7 @@ func TestDryRun(t *testing.T) {
 // TestTypedErrors: each failure a caller can act on comes back as its typed error
 // (DESIGN.md section 14).
 func TestTypedErrors(t *testing.T) {
+	raceSkipStatistics(t)
 	in, _ := payloadDir(t, 4, 6000)
 	pub, priv, _ := payload.GenerateKey(rand.Reader)
 	other, _, _ := payload.GenerateKey(rand.Reader)

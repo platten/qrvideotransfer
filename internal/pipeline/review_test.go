@@ -96,7 +96,7 @@ func TestReorderBounded(t *testing.T) {
 	path, res := encodeRaw(t, profile480(in))
 	frames, info := readFrames(t, video.NewRaw(), path)
 	var long []*video.Frame
-	for range 4 {
+	for range raceSize(4, 2) { // at least ahead + workers + 2 captures either way
 		long = append(long, frames...)
 	}
 	rec := writeRaw(t, long, info.FPSNum/info.FPSDen)

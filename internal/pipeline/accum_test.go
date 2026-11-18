@@ -75,6 +75,7 @@ func awgn(g *prng.SplitMix64, ref []int8, esn0dB float64) []int8 {
 // far below the `normal` code's threshold (0.85 dB at FER 1e-2, DESIGN.md section 8), summed it
 // is 1.5 dB. The descriptor, summed over the four frames of the first recording, decodes at once.
 func TestSoftBitsAddUp(t *testing.T) {
+	raceSkipStatistics(t)
 	in, want := writeInputs(t, 4, 6000)
 	path, res := encodeRaw(t, profile480(in))
 	key, truth := truthOf(t, path)

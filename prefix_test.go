@@ -12,6 +12,7 @@ import (
 // matrix film one pass first (filmPrefix): decoding applies captures in order and stops once every
 // block is complete, so a prefix that decodes means the whole recording decodes the same way.
 func TestFilmPrefix(t *testing.T) {
+	raceSkipStatistics(t)
 	in, _ := payloadDir(t, 40, 3000)
 	path, _ := encodeTest(t, EncodeOptions{Inputs: []string{in}})
 	frames := readRaw(t, path)
