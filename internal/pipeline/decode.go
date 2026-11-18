@@ -8,8 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
-	"slices"
 	"sync"
 
 	"github.com/platten/qrvideotransfer/internal/fec"
@@ -59,16 +57,12 @@ func decode(ctx context.Context, c DecodeConfig, seen **decoder) (*DecodeResult,
 	if seen != nil {
 		*seen = d
 	}
-	workers := c.Workers
-	if workers <= 0 {
-		workers = runtime.GOMAXPROCS(0)
-	}
 	d.emit.stage(StageDemodulate, KindStarted, 0, 0, UnitFrames)
 	for _, rec := range c.Recordings {
 		if d.complete() {
 			break
 		}
-		if err := d.recording(ctx, rec, workers); err != nil {
+		if err := d.recording(ctx, rec); err != nil {
 			return nil, err
 		}
 	}
@@ -100,11 +94,16 @@ func decode(ctx context.Context, c DecodeConfig, seen **decoder) (*DecodeResult,
 
 // frameAcc holds the summed soft bits of one code frame's codewords.
 type frameAcc struct {
-	soft  [][]int8 // by codeword; nil when none yet, or decoded, or evicted
-	done  []bool   // by codeword: decoded and stored
-	left  int      // codewords 1..C-1 not yet decoded
-	last  int      // index of the last capture that added to it
-	dirty bool     // soft bits added since the last attempt
+	frame   uint32
+	soft    [][]int8 // by codeword; nil when none yet, or decoded, or evicted
+	done    []bool   // by codeword: decoded and stored
+	left    int      // codewords 1..C-1 not yet decoded
+	last    int      // index of the last capture that added to it
+	dirty   bool     // soft bits added since the last attempt
+	absSum  int64    // the magnitudes of the soft bits held, summed (evict.go)
+	held    int64    // the soft bits held
+	confPos int      // place in the decoder's byConf, or -1
+	seenPos int      // place in the decoder's bySeen, or -1
 }
 
 // decoder is the owner of a decode's state. Only the goroutine running Decode touches it.
@@ -131,9 +130,11 @@ type decoder struct {
 	softCap    int64    // MaxSoftBytes, for both; lower in tests
 	seen       []uint64 // frames seen, one bit each (F bits, at most 512 KiB)
 	framesSeen int
-	maxWaiting int // most results held for in-order application at once
-	evictSteps int // frames taken off the eviction order, for tests
-	captures   int // captures processed, across recordings, with a gap between recordings
+	maxWaiting int          // most results held for in-order application at once
+	byConf     byConfidence // the frames holding soft bits, least confident first (evict.go)
+	bySeen     bySeen       // the frame records, the one seen least recently first
+	evictSteps int          // frames taken off the eviction order, for tests
+	captures   int          // captures processed, across recordings, with a gap between recordings
 
 	stats            Stats
 	located          int64
@@ -177,10 +178,16 @@ func (d *decoder) sendStats() {
 }
 
 // recording reads one recording through the vision workers, adding every capture's soft bits.
-func (d *decoder) recording(ctx context.Context, path string, workers int) error {
+func (d *decoder) recording(ctx context.Context, path string) error {
 	info, err := d.c.Backend.Probe(ctx, path)
 	if err != nil {
 		return err
+	}
+	// The workers' captures and scratch must fit the decode's memory budget (memory.go).
+	workers, reduced := decodeWorkers(d.c.Workers, info.Width, info.Height)
+	if reduced {
+		d.warn(StageDecodeVideo, WarnWorkersReduced, fmt.Sprintf("%d workers asked for; %d, the most whose %d x %d captures fit "+
+			"the decode's memory budget, are used.", d.c.Workers, workers, info.Width, info.Height))
 	}
 	rctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -341,7 +348,8 @@ func (d *decoder) add(r captureResult) error {
 	for _, ph := range r.phases {
 		fa := d.frames[ph.frame]
 		if fa == nil {
-			fa = &frameAcc{soft: make([][]int8, g.cpf), done: make([]bool, g.cpf), left: g.cpf - 1, last: -2}
+			fa = &frameAcc{frame: ph.frame, soft: make([][]int8, g.cpf), done: make([]bool, g.cpf), left: g.cpf - 1, last: -2,
+				confPos: -1, seenPos: -1}
 			d.frames[ph.frame] = fa
 			d.bookBytes += frameRecordBytes(g.cpf)
 			if w, bit := ph.frame/64, uint64(1)<<(ph.frame%64); d.seen[w]&bit == 0 {
@@ -363,10 +371,12 @@ func (d *decoder) add(r captureResult) error {
 			if fa.soft[c] == nil {
 				fa.soft[c] = make([]int8, g.sent)
 				d.softBytes += int64(g.sent)
+				fa.held += int64(g.sent)
 			}
-			addSoft(fa.soft[c], ph.soft[c*g.sent:(c+1)*g.sent], w)
+			fa.absSum += addSoftAbs(fa.soft[c], ph.soft[c*g.sent:(c+1)*g.sent], w)
 		}
 		fa.last = r.index
+		d.reorder(fa)
 		if !fa.dirty && fa.left > 0 {
 			fa.dirty = true
 			d.pending = append(d.pending, ph.frame)
@@ -384,6 +394,9 @@ func (d *decoder) add(r captureResult) error {
 // attemptDue attempts, after capture index, every pending frame that two captures have passed
 // without, whether or not those captures showed the code (rule 11).
 func (d *decoder) attemptDue(index int) error {
+	if d.store == nil {
+		return nil // nothing can be attempted before the descriptor decodes
+	}
 	keep := d.pending[:0]
 	for _, f := range d.pending {
 		fa := d.frames[f]
@@ -403,11 +416,18 @@ func (d *decoder) attemptDue(index int) error {
 }
 
 // addSoft adds w/2 times src to dst, saturating at -127 and 127.
-func addSoft(dst, src []int8, w int) {
+func addSoft(dst, src []int8, w int) { addSoftAbs(dst, src, w) }
+
+// addSoftAbs is addSoft, returning how much the magnitudes of dst grew.
+func addSoftAbs(dst, src []int8, w int) int64 {
+	var delta int64
 	for i, s := range src {
-		v := int(dst[i]) + int(s)*w/2
-		dst[i] = int8(max(-127, min(127, v)))
+		old := int(dst[i])
+		v := max(-127, min(127, old+int(s)*w/2))
+		dst[i] = int8(v)
+		delta += int64(max(v, -v) - max(old, -old))
 	}
+	return delta
 }
 
 // tryDescriptor decodes codeword 0's summed soft bits; once it decodes and validates, the plan and
@@ -473,10 +493,11 @@ func (d *decoder) attempt(f uint32, fa *frameAcc) error {
 		if after > before { // a frame decoded again after its record was dropped adds nothing new
 			d.stats.CodewordsOK++
 		}
-		fa.done[c], fa.soft[c] = true, nil
+		d.dropSoft(fa, c)
+		fa.done[c] = true
 		fa.left--
-		d.softBytes -= int64(g.sent)
 	}
+	d.reorder(fa)
 	return nil
 }
 
@@ -500,55 +521,14 @@ func (d *decoder) flush() error {
 		return nil
 	}
 	for _, f := range d.pending {
-		if err := d.attempt(f, d.frames[f]); err != nil {
-			return err
+		if fa := d.frames[f]; fa != nil { // a dropped record stays listed until the list is compacted
+			if err := d.attempt(f, fa); err != nil {
+				return err
+			}
 		}
 	}
 	d.pending = d.pending[:0]
 	return nil
-}
-
-// evict keeps the soft bits and frame records held under the cap: it drops the soft bits of the
-// least confident frame first, and once no frame holds any, the record of the frame seen least
-// recently. A frame whose record was dropped and that is seen again is decoded again; its shards
-// are already stored, so nothing is counted twice (attempt).
-func (d *decoder) evict() {
-	for d.usedBytes() > d.softCap {
-		var worst, oldest *frameAcc
-		var oldestFrame uint32
-		best := -1.0
-		for f, fa := range d.frames {
-			if oldest == nil || fa.last < oldest.last {
-				oldest, oldestFrame = fa, f
-			}
-			n, sum := 0, 0
-			for _, s := range fa.soft {
-				for _, v := range s {
-					sum += int(max(v, -v))
-				}
-				n += len(s)
-			}
-			if n == 0 {
-				continue
-			}
-			if m := float64(sum) / float64(n); best < 0 || m < best {
-				worst, best = fa, m
-			}
-		}
-		switch {
-		case worst != nil:
-			for c, s := range worst.soft {
-				d.softBytes -= int64(len(s))
-				worst.soft[c] = nil
-			}
-		case oldest != nil:
-			delete(d.frames, oldestFrame)
-			d.bookBytes -= frameRecordBytes(len(oldest.done))
-			d.pending = slices.DeleteFunc(d.pending, func(f uint32) bool { return f == oldestFrame })
-		default:
-			return
-		}
-	}
 }
 
 // shortfall describes what is missing.

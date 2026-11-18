@@ -260,6 +260,7 @@ func TestConversions(t *testing.T) {
 	for _, c := range [][2]string{
 		{pipeline.WarnExposureTooLong, string(WarnExposureTooLong)}, {pipeline.WarnEngineInProcess, string(WarnEngineInProcess)},
 		{pipeline.WarnSkippedFile, string(WarnSkippedFile)}, {pipeline.WarnReceiverLimit, string(WarnReceiverLimit)},
+		{pipeline.WarnWorkersReduced, string(WarnWorkersReduced)},
 	} {
 		if c[0] != c[1] {
 			t.Errorf("warning %q in the pipeline, %q in the root", c[0], c[1])

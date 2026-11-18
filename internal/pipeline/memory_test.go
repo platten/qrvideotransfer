@@ -61,6 +61,39 @@ func TestWorkersClampedWarning(t *testing.T) {
 	}
 }
 
+// TestEvictionCycle: frames cycled through a cap that holds only a few of them, each record dropped
+// and its frame seen again, keep the bytes held under the cap, the work per capture fixed, and the
+// list of frames waiting for an attempt within twice the records held (plus a constant).
+func TestEvictionCycle(t *testing.T) {
+	key, truth := fixture(t)
+	key.frames = 1 << 16
+	g, err := newGeometry(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	soft := append([]int8(nil), truth[0]...)
+	clear(soft[:g.sent])
+	d := &decoder{c: &DecodeConfig{}, tmp: t.TempDir(), frames: map[uint32]*frameAcc{},
+		softCap: 10*frameRecordBytes(g.cpf) + int64((g.cpf-1)*g.sent)}
+	defer d.close()
+	for i := range 3000 {
+		if err := d.apply(captureResult{index: 3 * i, located: true, key: key, cells: 1, clean: 1,
+			phases: []phaseBits{{frame: uint32(i % 50), soft: soft}}}); err != nil {
+			t.Fatal(err)
+		}
+		if d.usedBytes() > d.softCap || len(d.pending) > 2*len(d.frames)+64 {
+			t.Fatalf("capture %d: %d bytes held (cap %d), %d pending for %d records", i, d.usedBytes(), d.softCap, len(d.pending), len(d.frames))
+		}
+	}
+	if per := float64(d.evictSteps) / 3000; per > 3 {
+		t.Errorf("%.2f eviction steps per capture", per)
+	}
+	d.sendStats()
+	if d.stats.FramesSeen != 50 {
+		t.Errorf("%d frames seen, want 50", d.stats.FramesSeen)
+	}
+}
+
 // TestEvictionWorkBounded: holding the decode at its cap costs each capture a fixed number of
 // eviction steps, whether the decode holds few frames or many (the eviction's ordered structures,
 // DESIGN.md section 19); and the order is the one of TestEvict and TestBookkeepingUnderCap.
