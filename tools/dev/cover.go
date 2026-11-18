@@ -101,8 +101,8 @@ func cover(args []string) error {
 	return nil
 }
 
-// parseProfile returns, per package directory, the total and covered statements of a coverage
-// profile, merging duplicate blocks and skipping excluded files.
+// parseProfile returns, per package directory (per file at the module's root), the total and
+// covered statements of a coverage profile, merging duplicate blocks and skipping excluded files.
 func parseProfile(name string) (map[string][2]int, error) {
 	f, err := os.Open(name)
 	if err != nil {
@@ -146,7 +146,12 @@ func parseProfile(name string) (map[string][2]int, error) {
 		if ex {
 			continue
 		}
+		// As CI's go-test-coverage groups them: up to the last slash of the module-relative path,
+		// so each file at the module's root is gated on its own.
 		p := path.Dir(file)
+		if !strings.Contains(rel, "/") {
+			p = file
+		}
 		c := pkgs[p]
 		c[0] += b.stmts
 		if b.count > 0 {
