@@ -385,10 +385,7 @@ func (d *decoder) add(r captureResult) error {
 func (d *decoder) attemptDue(index int) error {
 	keep := d.pending[:0]
 	for _, f := range d.pending {
-		fa := d.frames[f]
-		if fa == nil {
-			continue // its record was dropped
-		}
+		fa := d.frames[f] // a pending frame has its record: evict takes a dropped frame off the list
 		if d.store == nil || fa.last > index-2 {
 			keep = append(keep, f)
 			continue

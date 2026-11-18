@@ -1992,6 +1992,13 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   same sessions, so the shortfall is a range; the likely cause, not established, is x264's frame
   threading under average-bitrate control. Threads are not pinned: that would change the
   encoder's memory and time.
+- **Coverage margins (M3 part 2).** PR #48's first run failed the coverage gate on windows-11-arm
+  alone: `internal/pipeline` at 95.0% (95.2 to 95.4% on the other runners; the error paths of the
+  repair, the shard store and the hash check were never covered, and two cancellation returns
+  only sometimes). Deterministic tests of those paths bring it to 96.8% in five local runs, two
+  of them under load. `internal/video` stood at 95.8% (windows-2025) and 95.6% (windows-11-arm)
+  in that run: a margin item for the next pull request that changes `internal/video`, not fixed
+  in this one.
 - **Round-trip matrix with x264 (M3 part 2).** `TestRoundTripMatrixX264` with `QRVT_LONG_TESTS=1`
   runs the 13 rows that have a recorder bitrate (not `ideal`, whose recorder is lossless) with
   x264 at the preset's bitrate and camera, three sessions each, 855 s on the development machine:
