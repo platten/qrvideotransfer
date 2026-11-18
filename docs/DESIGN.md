@@ -919,7 +919,9 @@ Planning figures are the simulated single-pass rate derated by 40% for everythin
 of them are simulated. The main figures are **handheld** (fill 0.80, the four-grey condition of
 condition 2: `robust` 4.8, `normal` 6, `fast` 10 provisionally). Each row takes the highest-rate
 setting that conditions 1 to 3 allow. Black and white is used at 4.8 camera pixels per cell, where it
-decoded every codeword with every code in the 2026-11-18 measurements.
+decoded every codeword with every code in the 2026-11-18 measurements. The 1080p30 row's black-and-white
+`fast` figure rests on the simulator alone: there are no real black-and-white recordings yet (S2
+filmed four greys). The always-on CI row for this camera class remains black and white `normal`.
 
 | Camera (handheld) | Recommended | s | Planning rate | 10 MB | 1 GB |
 | --- | --- | --- | --- | --- | --- |
