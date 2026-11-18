@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 
 	"github.com/platten/qrvideotransfer/internal/fec"
@@ -125,10 +126,13 @@ type decoder struct {
 
 	frames     map[uint32]*frameAcc
 	pending    []uint32 // frames with soft bits added since their last attempt
-	softBytes  int64
-	softCap    int64 // MaxSoftBytes; lower in tests
-	maxWaiting int   // most results held for in-order application at once
-	captures   int   // captures processed, across recordings, with a gap between recordings
+	softBytes  int64    // summed soft bits held
+	bookBytes  int64    // frame records held, beside their soft bits
+	softCap    int64    // MaxSoftBytes, for both; lower in tests
+	seen       []uint64 // frames seen, one bit each (F bits, at most 512 KiB)
+	framesSeen int
+	maxWaiting int // most results held for in-order application at once
+	captures   int // captures processed, across recordings, with a gap between recordings
 
 	stats            Stats
 	located          int64
@@ -166,7 +170,7 @@ func (d *decoder) sendStats() {
 	if d.bitsAll > 0 {
 		d.stats.RawBitErrors = float64(d.bitErrs) / float64(d.bitsAll)
 	}
-	d.stats.FramesSeen = len(d.frames)
+	d.stats.FramesSeen = d.framesSeen
 	st := d.stats
 	d.emit.send(Event{Stage: StageDemodulate, Kind: KindStats, Stats: &st})
 }
@@ -319,6 +323,7 @@ func (d *decoder) add(r captureResult) error {
 		d.cwBits = make([]byte, (d.code.N()+7)/8)
 		d.descSoft = make([]int8, g.sent)
 		d.stats.FramesTotal = int(r.key.frames)
+		d.seen = make([]uint64, (r.key.frames+63)/64)
 	}
 	if r.key != *d.key {
 		return nil // another transfer, or a false header: counted as a capture, nothing more
@@ -337,6 +342,11 @@ func (d *decoder) add(r captureResult) error {
 		if fa == nil {
 			fa = &frameAcc{soft: make([][]int8, g.cpf), done: make([]bool, g.cpf), left: g.cpf - 1, last: -2}
 			d.frames[ph.frame] = fa
+			d.bookBytes += frameRecordBytes(g.cpf)
+			if w, bit := ph.frame/64, uint64(1)<<(ph.frame%64); d.seen[w]&bit == 0 {
+				d.seen[w] |= bit
+				d.framesSeen++
+			}
 		}
 		w := 2 // in halves: adjacent captures of one frame count half (DESIGN.md section 7, rule 7)
 		if fa.last == r.index-1 {
@@ -376,6 +386,9 @@ func (d *decoder) attemptDue(index int) error {
 	keep := d.pending[:0]
 	for _, f := range d.pending {
 		fa := d.frames[f]
+		if fa == nil {
+			continue // should not happen: evict takes a frame whose record it drops off the list
+		}
 		if d.store == nil || fa.last > index-2 {
 			keep = append(keep, f)
 			continue
@@ -451,11 +464,14 @@ func (d *decoder) attempt(f uint32, fa *frameAcc) error {
 		if err := d.store.Put(b, s, d.shard); err != nil {
 			return err
 		}
-		if before < p.K && d.store.Have(b) >= p.K {
+		after := d.store.Have(b)
+		if before < p.K && after >= p.K {
 			d.ready++
 			d.stats.BlocksReady = d.ready
 		}
-		d.stats.CodewordsOK++
+		if after > before { // a frame decoded again after its record was dropped adds nothing new
+			d.stats.CodewordsOK++
+		}
 		fa.done[c], fa.soft[c] = true, nil
 		fa.left--
 		d.softBytes -= int64(g.sent)
@@ -491,12 +507,19 @@ func (d *decoder) flush() error {
 	return nil
 }
 
-// evict drops the soft bits of the least confident frames while they exceed the cap.
+// evict keeps the soft bits and frame records held under the cap: it drops the soft bits of the
+// least confident frame first, and once no frame holds any, the record of the frame seen least
+// recently. A frame whose record was dropped and that is seen again is decoded again; its shards
+// are already stored, so nothing is counted twice (attempt).
 func (d *decoder) evict() {
-	for d.softBytes > d.softCap {
-		var worst *frameAcc
+	for d.usedBytes() > d.softCap {
+		var worst, oldest *frameAcc
+		var oldestFrame uint32
 		best := -1.0
-		for _, fa := range d.frames {
+		for f, fa := range d.frames {
+			if oldest == nil || fa.last < oldest.last {
+				oldest, oldestFrame = fa, f
+			}
 			n, sum := 0, 0
 			for _, s := range fa.soft {
 				for _, v := range s {
@@ -511,12 +534,18 @@ func (d *decoder) evict() {
 				worst, best = fa, m
 			}
 		}
-		if worst == nil {
+		switch {
+		case worst != nil:
+			for c, s := range worst.soft {
+				d.softBytes -= int64(len(s))
+				worst.soft[c] = nil
+			}
+		case oldest != nil:
+			delete(d.frames, oldestFrame)
+			d.bookBytes -= frameRecordBytes(len(oldest.done))
+			d.pending = slices.DeleteFunc(d.pending, func(f uint32) bool { return f == oldestFrame })
+		default:
 			return
-		}
-		for c, s := range worst.soft {
-			d.softBytes -= int64(len(s))
-			worst.soft[c] = nil
 		}
 	}
 }
@@ -624,3 +653,10 @@ func checkHash(ctx context.Context, r io.ReaderAt, n int64, want [16]byte) error
 	}
 	return nil
 }
+
+// frameRecordBytes is the bookkeeping a frame record holds beside its soft bits: a done flag and a
+// slice header per codeword, the record itself and its map entry.
+func frameRecordBytes(cpf int) int64 { return 96 + 25*int64(cpf) }
+
+// usedBytes returns the soft bits and frame records held.
+func (d *decoder) usedBytes() int64 { return d.softBytes + d.bookBytes }

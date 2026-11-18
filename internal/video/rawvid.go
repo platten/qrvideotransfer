@@ -114,6 +114,9 @@ func (*Raw) NewEncoder(_ context.Context, path string, c EncodeConfig) (Encoder,
 	if err := checkEncodeConfig(c); err != nil {
 		return nil, err
 	}
+	if c.Bitrate != 0 {
+		return nil, fmt.Errorf("%w: the raw-frame backend does not compress, so it has no bitrate", ErrUnsupported)
+	}
 	f, err := os.Create(path) //nolint:gosec // the caller names the file
 	if err != nil {
 		return nil, err
@@ -251,7 +254,8 @@ func checkEncodeConfig(c EncodeConfig) error {
 		return err
 	}
 	if c.Width%2 != 0 || c.Height%2 != 0 || c.FPS <= 0 || c.FPS > 1000 || c.Quantiser < 0 || c.Quantiser > 51 ||
-		(c.BitDepth != 0 && c.BitDepth != 8 && c.BitDepth != 10) {
+		(c.BitDepth != 0 && c.BitDepth != 8 && c.BitDepth != 10) ||
+		c.Bitrate < 0 || c.Bitrate > MaxBitrate || c.Bitrate > 0 && c.Quantiser != 0 {
 		return fmt.Errorf("%w: encoder configuration %+v", ErrUnsupported, c)
 	}
 	return nil

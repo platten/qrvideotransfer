@@ -145,7 +145,7 @@ func TestRoundTripMatrix(t *testing.T) {
 			}
 			for s := range sessions {
 				testRandom = &prngReader{prng.SplitMix64{State: uint64(1000 + s)}}
-				if err := roundTrip(t, r, long); err != nil {
+				if err := roundTrip(t, r, long, false); err != nil {
 					failed++
 					t.Errorf("session %d: %v", s, err)
 				}
@@ -155,8 +155,55 @@ func TestRoundTripMatrix(t *testing.T) {
 	}
 }
 
-// roundTrip runs one row once and returns why the decode failed, if it did.
-func roundTrip(t *testing.T, r matrixRow, long bool) error {
+// TestRoundTripMatrixX264 is the round-trip matrix with x264 standing in for the phone's HEVC
+// recorder, at the preset's bitrate (DESIGN.md section 15; video.EncodeConfig.Bitrate): an
+// approximation of a real phone, not a measurement of one. The rows of `ideal`, whose recorder is
+// lossless, have no bitrate and run only with the stand-in. The long version runs every other row
+// with x264sessions sessions; the short version runs the rows marked x264Always with one.
+func TestRoundTripMatrixX264(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the matrix is too slow under the race detector; the pipeline's tests cover its concurrency")
+	}
+	long := os.Getenv("QRVT_LONG_TESTS") == "1"
+	defer func() { testRandom = nil }()
+	for _, r := range matrix() {
+		if r.preset == "ideal" {
+			continue
+		}
+		t.Run(r.name(), func(t *testing.T) {
+			if !x264Always[r.name()] && !long {
+				t.Skip("long test: QRVT_LONG_TESTS=1")
+			}
+			sessions, failed := 1, 0
+			if long {
+				sessions = x264Sessions
+			}
+			for s := range sessions {
+				testRandom = &prngReader{prng.SplitMix64{State: uint64(1000 + s)}}
+				if err := roundTrip(t, r, long, true); err != nil {
+					failed++
+					t.Errorf("session %d: %v", s, err)
+				}
+			}
+			t.Logf("%d of %d sessions decoded", sessions-failed, sessions)
+		})
+	}
+}
+
+// x264Sessions is the number of sessions each row runs with x264 in the long version.
+const x264Sessions = 3
+
+// x264Always are the rows the short version runs with x264 (designer's ruling on the CI budget,
+// M3 part 2): one, budget-android's Gray2 `normal` with its own 1080p camera at 17 Mbit/s (its
+// Gray4 `normal` is the open defect of DESIGN.md section 19). Every other row runs in the long
+// version.
+var x264Always = map[string]bool{
+	"budget-android-720p12-bw-normal": true,
+}
+
+// roundTrip runs one row once, with the recorder stand-in or x264, and returns why the decode
+// failed, if it did.
+func roundTrip(t *testing.T, r matrixRow, long, x264 bool) error {
 	t.Helper()
 	in, want := payloadDir(t, 20, 6000, 500)
 	video1 := filepath.Join(t.TempDir(), "code.mp4")
@@ -192,7 +239,7 @@ func roundTrip(t *testing.T, r matrixRow, long bool) error {
 	// simulator's captures are prefix-stable (TestFilmPrefix) and decoding stops once complete, so
 	// the outcome equals the whole recording's at a fraction of the filming.
 	tries := []int{captures}
-	if pass := int(period.Seconds()*float64(c.Timing.FPS)) + 2; !long && pass < captures {
+	if pass := int(period.Seconds()*float64(c.Timing.FPS)) + 2; !long && !x264 && pass < captures { // x264's rate control looks ahead, so its prefix is not the whole recording's
 		tries = []int{pass/2 + 2, pass, captures}
 	}
 	var (
@@ -202,10 +249,15 @@ func roundTrip(t *testing.T, r matrixRow, long bool) error {
 	)
 	for _, n := range tries {
 		t0 = time.Now()
-		rec := film(t, frames, r.fps, c, channel.Run{Captures: n, Seed: 0x5eed})
+		rec := film(t, frames, r.fps, c, channel.Run{Captures: n, Seed: 0x5eed}, x264)
 		tFilm += time.Since(t0)
 		t0 = time.Now()
-		out, dr, err = decodeTest(t, DecodeOptions{Recordings: []string{rec}})
+		if x264 {
+			out = filepath.Join(t.TempDir(), "out")
+			dr, err = Decode(context.Background(), DecodeOptions{Recordings: []string{rec}, OutputDir: out})
+		} else {
+			out, dr, err = decodeTest(t, DecodeOptions{Recordings: []string{rec}})
+		}
 		tDec += time.Since(t0)
 		var short *NotEnoughDataError
 		if !errors.As(err, &short) {
@@ -249,8 +301,9 @@ func TestShortCamera(t *testing.T) {
 	}
 }
 
-// film records the looping frames, shown at fps, with the simulated camera c into a raw-frame file.
-func film(t testing.TB, frames []*video.Frame, fps int, c channel.Config, r channel.Run) string {
+// film records the looping frames, shown at fps, with the simulated camera c into a raw-frame file,
+// or with x264 into an MP4.
+func film(t testing.TB, frames []*video.Frame, fps int, c channel.Config, r channel.Run, x264 bool) string {
 	t.Helper()
 	period := time.Second / time.Duration(fps)
 	for i, f := range frames {
@@ -259,12 +312,23 @@ func film(t testing.TB, frames []*video.Frame, fps int, c channel.Config, r chan
 	in := channel.Input{Frames: frames, Period: time.Duration(len(frames)) * period, Cell: 4}
 	r.Workers = runtime.GOMAXPROCS(0)
 	out := filepath.Join(t.TempDir(), "rec.raw")
+	var be video.Backend = video.NewRaw()
+	cfg := video.EncodeConfig{FPS: c.Timing.FPS}
+	if x264 {
+		// x264 at the preset's bitrate records instead of the stand-in, which is switched off.
+		eb, err := video.NewEmbedded(video.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, be, r.Codec = filepath.Join(t.TempDir(), "rec.mp4"), eb, channel.Quantiser(0)
+		cfg.Bitrate = int(c.Recorder.Bitrate * 1e6)
+	}
 	var e video.Encoder
 	err := channel.Simulate(context.Background(), in, c, r, func(f *video.Frame, _ *channel.Truth) error {
 		if e == nil {
+			cfg.Width, cfg.Height, cfg.BitDepth = f.W, f.H, int(f.Bits)
 			var err error
-			if e, err = video.NewRaw().NewEncoder(context.Background(), out, video.EncodeConfig{Width: f.W, Height: f.H,
-				FPS: c.Timing.FPS, BitDepth: int(f.Bits)}); err != nil {
+			if e, err = be.NewEncoder(context.Background(), out, cfg); err != nil {
 				return err
 			}
 		}

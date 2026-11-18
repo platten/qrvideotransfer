@@ -31,6 +31,11 @@ const DefaultQuantiser = 32
 // 8x8 transform (which makes the stream Main profile).
 const x264Params = "keyint=1:min-keyint=1:scenecut=0:bframes=0:cabac=1:no-deblock=1:aq-mode=0:psy=0:trellis=0:partitions=i4x4:no-8x8dct=1"
 
+// recorderParams are the recorder stand-in's departures from x264's defaults: no lookahead and no
+// B-frames, the only settings measured to fit the engine's 512 MiB at 4K for both 8 and 10 bits
+// (DESIGN.md section 15).
+const recorderParams = "rc-lookahead=0:bframes=0"
+
 // bt709 tags the input and the output as BT.709, limited range, so that ffmpeg converts nothing.
 var bt709 = []string{"-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"}
 
@@ -45,8 +50,16 @@ func encodeArgs(c EncodeConfig, out, format string) []string {
 	a := []string{"-nostdin", "-hide_banner", "-nostats", "-loglevel", "error",
 		"-f", "rawvideo", "-pix_fmt", pix, "-s", fmt.Sprintf("%dx%d", c.Width, c.Height), "-framerate", strconv.Itoa(c.FPS)}
 	a = append(a, bt709...)
-	a = append(a, "-i", "pipe:0", "-map", "0:v:0", "-c:v", "libx264", "-preset", "veryfast", "-qp", strconv.Itoa(q),
-		"-x264-params", x264Params)
+	a = append(a, "-i", "pipe:0", "-map", "0:v:0", "-c:v", "libx264", "-preset", "veryfast")
+	if c.Bitrate > 0 {
+		// A phone's recorder stand-in (DESIGN.md section 15): x264's defaults, a GOP of one second,
+		// single-pass average bitrate capped at the bitrate with a two-second buffer.
+		b := strconv.Itoa(c.Bitrate)
+		a = append(a, "-b:v", b, "-maxrate", b, "-bufsize", strconv.Itoa(2*c.Bitrate), "-g", strconv.Itoa(c.FPS),
+			"-x264-params", recorderParams)
+	} else {
+		a = append(a, "-qp", strconv.Itoa(q), "-x264-params", x264Params)
+	}
 	if c.BitDepth == 10 {
 		a = append(a, "-profile:v", "high10")
 	}
