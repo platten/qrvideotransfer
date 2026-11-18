@@ -189,7 +189,7 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 	long := fs.Bool("long", false, "include long tests (QRVT_LONG_TESTS=1)")
 	short := fs.Bool("short", false, "pass -short to go test")
 	untagged := fs.Bool("untagged", false, "test the default build, without the release build tags")
-	p := fs.String("part", "", "others: every package but internal/video; isolated: internal/video alone")
+	p := fs.String("part", "", "others: every package but internal/video, the root package and internal/pipeline; isolated: each of those alone")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
 	if *untagged {
 		tags = ""
@@ -413,31 +413,48 @@ func fuzzAll(ts []fuzzTarget, fuzzOne func(fuzzTarget) error) error {
 // they failed on time bounds that the package alone meets.
 const isolated = module + "/internal/video"
 
-// isolatedRuns splits a go test command whose last argument is ./... into two: every package but
-// the isolated one (pkgs lists them all, from go list), then the isolated one alone. Any other
-// command is run as it is.
+// endToEnd are the packages whose always-on end-to-end tests film and decode code videos: each
+// runs on its own after the other packages. Run in parallel with them on the slowest runner
+// (macos-26-intel), they pushed internal/vision past go test's 10-minute default (PR #47; DESIGN.md
+// section 19).
+var endToEnd = []string{module, module + "/internal/pipeline"}
+
+// isolatedRuns splits a go test command whose last argument is ./... into runs: every package but
+// the isolated and end-to-end ones (pkgs lists them all, from go list), then each end-to-end
+// package present on its own, then the isolated one alone. Any other command is run as it is.
 func isolatedRuns(args, pkgs []string) [][]string {
 	if len(args) == 0 || args[len(args)-1] != "./..." {
 		return [][]string{args}
 	}
 	head := args[:len(args)-1]
 	others := slices.Clone(head)
+	var alone [][]string
 	for _, p := range pkgs {
-		if p != isolated && !strings.HasPrefix(p, isolated+"/") {
+		switch {
+		case p == isolated || strings.HasPrefix(p, isolated+"/"):
+		case slices.Contains(endToEnd, p):
+			alone = append(alone, append(slices.Clone(head), p))
+		default:
 			others = append(others, p)
 		}
 	}
-	return [][]string{others, append(slices.Clone(head), "./internal/video/...")}
+	slices.SortFunc(alone, func(a, b []string) int {
+		return slices.Index(endToEnd, a[len(a)-1]) - slices.Index(endToEnd, b[len(b)-1])
+	})
+	runs := append([][]string{others}, alone...)
+	return append(runs, append(slices.Clone(head), "./internal/video/..."))
 }
 
-// selectRuns returns the part of an isolatedRuns split that -part names: "" for both, "others"
-// for every package but the isolated one, "isolated" for that one alone. CI runs the two parts of
-// the race tests as separate steps, each with its own time limit.
+// selectRuns returns the part of an isolatedRuns split that -part names: "" for all, "others"
+// for the first run, every package but the end-to-end ones and internal/video, and "isolated" for
+// the runs after it, each package on its own. CI runs the two parts of the race tests as separate
+// steps, each with its own time limit; the end-to-end packages run in the isolated part, which
+// keeps the "others" step as it was before them (PR #47's second run cut it off at its limit).
 func selectRuns(runs [][]string, part string) ([][]string, error) {
 	switch {
 	case part == "":
 		return runs, nil
-	case len(runs) != 2:
+	case len(runs) < 2:
 		return nil, fmt.Errorf("-part %s needs the whole module (./...)", part)
 	case part == "others":
 		return runs[:1], nil

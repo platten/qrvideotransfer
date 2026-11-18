@@ -838,6 +838,30 @@ For each capture:
 several recordings passed to one `decode` simply add up. With `--state-dir`, recovered shards and
 unresolved soft bits persist, and a later run reads only the new recording.
 
+**As built (M3, `internal/pipeline`).** Recordings are read one after another, each by one video
+decoder whose captures go to a pool of vision workers (one per core, each with its own detector and
+buffers); the workers return each capture's soft bits, descrambled and in codeword order, through a
+channel to the one goroutine that owns the accumulators, the shard store and the events, which
+applies them in capture order. A phase of the capture is credited to the header's frame with that
+phase, else to the frame one step after or before the first header's (wrapping at the seam); two
+steps away is skipped (section 7, rule 1 as the S2 analysis did it). The decode locks onto the
+first located capture's session, grid, modulation, inner code and frame count; other captures are
+counted and ignored (SECURITY.md T2). Soft bits are summed in 8 bits, saturating; a capture of
+the frame the previous capture of the same recording also credited adds half (rule 7). Codeword
+0 of every frame is summed into one descriptor accumulator, tried after each capture until it
+decodes and validates; then the plan and the shard store are made. A frame is attempted once two
+captures have passed without it, located or not, and at each recording's end (rule 11). A capture
+is read only while fewer than workers + 2 results wait to be applied, so a stalled worker holds
+back the reading. Before the shard store is made, the temporary folder's free space less 1 GiB
+must hold the store and the stream, and the stream again before it is written (SECURITY.md
+section 5 and T3; otherwise a `LimitError`). Reading stops as soon as
+every block holds K shards. Beyond `MaxSoftBytes` (256 MB) the frame with the least mean confidence
+loses its soft bits first. The stream is then reconstructed block by block, its hash checked, and
+`internal/payload` verifies and unpacks it. `--state-dir` is not built yet (`ErrNotImplemented`;
+M6). The encoder renders runs of an even number of frames on one worker each, every run to its own
+H.264 elementary stream, joined by `Concat`; parity shards are kept in a file of their own beside
+the spooled stream.
+
 ## 11. Expected performance
 
 Net bytes per frame are fixed by the format: `(C - 1) x shard size x K / (K + M)`, where C is codewords
@@ -1676,9 +1700,10 @@ by GoReleaser).
   no cache restored) the race step took 15 min 53 s, `internal/video` 528 s and `internal/vision`
   187 s; an earlier 13 min 26 s (run 43769482359) restored cached results for `internal/fec/conv`,
   `internal/fec/rs` and `internal/modem` and is not comparable. The race tests now run as two CI
-  steps, each with its own 20-minute limit: every package but `internal/video` (`tools/dev test
-  -race -part others`), then `internal/video` alone (`-part isolated`), which runs even when the
-  first step failed. Both pass `-count=1`: setup-go restores Go's test cache across runs, for every
+  steps, each with its own 20-minute limit: every package but `internal/video`, the root package
+  and `internal/pipeline` ("Race tests, other packages", `tools/dev test -race -part others`), then
+  those three each alone ("Race tests, isolated packages", `-part isolated`, named so since PR #47
+  moved the two end-to-end packages there), which runs even when the first step failed. Both pass `-count=1`: setup-go restores Go's test cache across runs, for every
   package unchanged since the cache was saved, and a cached race pass reuses one old run's luck for
   the nondeterministic tests (`internal/fec/conv`'s parallel test, `internal/fec/rs`'s subprocess
   test). That costs 0-3 minutes per run on macos-26-intel, nothing when nothing would have been
@@ -1690,7 +1715,7 @@ by GoReleaser).
   trimming vision's always-on statistics alone did not bring the steps back under it; 30 leaves
   roughly 8 to 10 minutes of margin. Earlier, run 43797784643, with no cache restored, took 16 min
   54 s; the slow host of run 43774194055 took 23 min 09 s, and a host that slow is a runner fault
-  (spike S1, section 14), for which the limits are not sized. The `internal/video` race step does not run alone after an
+  (spike S1, section 14), for which the limits are not sized. The isolated packages' race step does not run alone after an
   earlier failure skipped the other packages' step.
   The detector's hostile-cost tests (`TestDetectThreeHostile` 16 times, `TestDetectThreeHostile4K`
   and `TestDetectHostileGrid4K` 6, `TestDetectHostileGrid` 2; SECURITY.md section 9.1) bound a
@@ -1935,6 +1960,109 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   the rendered frame, and the 4K gate header 196 ms, 3.5 times the reference against its bound of
   6 (5.3 times against the rendered frame, before the reference was redefined). The hostile noise
   frame's 301 ms is the figure to beat.
+- **Open defect, blocks the M3 exit (designer's ruling, 2026-11-17): `budget-android` 720p12
+  Gray4 `normal`.** It decodes in 1 of 5 repeatable sessions and in 1 of 8 random ones (the
+  independent review's count: 0 of 4; pooled over random sessions, 1 of 12); the raw bit error rate is about 0.10 per capture,
+  and the errors repeat across captures of a frame. Not diagnosed in the first M3 pull request;
+  the row stays asserted in the long run, unchanged. Details in the next entry.
+- **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
+  every row of section 15 through the public API with five repeatable sessions each: the files
+  (6.5 KB) are encoded to an MP4 by the embedded engine, decoded, filmed for two passes (three on
+  `harsh`) by the preset's camera with the pure-Go recorder stand-in, not x264 at the preset's
+  bitrate, and decoded. 21 of the 22 rows decode in all five sessions. `budget-android`, 720p at
+  12 fps, Gray4 `normal` decodes in 1 of 5 (short by 1 to 6 shards of one block), and in 1 of 8
+  further random sessions with 3 passes. The cause is the channel, not the summing: each capture
+  shows a raw bit error rate of about 0.10 (4.8 camera pixels per cell, blur 1.5, sharpening 0.8,
+  quantiser step about 11), and the errors repeat between captures of a frame, so summing them
+  gains little. The row meets section 11's feasibility conditions (camera at 2.5 times the
+  display rate, 4.8 pixels per cell against 4.5, q = 22 against 7.7), so it is a defect to
+  trace in vision or the simulator, not removed. CI runs one row per preset (Gray2 `normal` for
+  `budget-android`), one session each. The matrix's payload is small (F 4 to 12), so it does
+  not exercise many blocks. **The matrix does not yet use x264 at the preset's bitrate** as
+  section 15 asks (`video.EncodeConfig` has a quantiser, no bitrate); the next M3 piece adds it
+  (designer's ruling, 2026-11-17; section 15 unchanged). Burst loss is tested on a perfect
+  recording only (14.7% of the frames lost in one run decodes), with one block, where a burst
+  and scattered loss cost the same.
+- **Vision under strong simulated noise (M3).** Before the inner code fails, location and the
+  crediting of cells do. On a perfect 480p Gray4 capture with Gaussian noise added per pixel, the
+  credited share is 0.92 at sigma 10 and 0.22 at 12 with no bit error, and nothing at 15; the
+  phase field returns zero weights once anchor quadrants hold a sample at 0 or 255. The `ideal`
+  preset with sensor noise 12 (camera 1080p) credits nothing; `tripod` at 1080p holds to noise
+  12 and fails at 16. With noise on the data cells only, detection fails first. So
+  `TestSoftBitsAddUp` gives the decoder soft bits from a BPSK channel directly instead of a
+  filmed recording. A decode-level version was tried with the whole capture's contrast reduced
+  to 0.3 and noise on the data cells only: at sigma 14 each recording decodes 3 or 4 of 4
+  frames, and from sigma 16 location fails, so no setting isolates the summing; not added.
+- **Real recordings through the decode path (M3, `-tags realdevice`).** The S2 pattern carries
+  no codewords, so the public decode finds no descriptor (recording 1: no blocks known, after
+  255 s) and the check decodes each frame's summed soft bits against the all-zero codeword with
+  the inner code and its CRC (the coset of the all-zero shard; `internal/pipeline`
+  `realdevice_test.go`), with `normal` and, through `robust`'s interleaver, `robust`. Over the
+  six recordings no codeword decoded to anything but zeros. At the settings S2 calls
+  conservative: `normal` at a 12 fps display with Gray2 or Gray4 at 6 or more camera pixels per
+  cell decoded every codeword tried on recordings 1 and 2; at a 30 fps display filmed at 60 fps
+  (recording 6, 7.8 pixels per cell) Gray2 6,786 of 6,842 and Gray4 11,252 of 11,252; `robust` at
+  a 30 fps display filmed at 30 fps decoded 93-100% on recording 1 (Gray4 at 4-pixel cells 13,860
+  of 14,630) and on recording 2 Gray2 at 4-pixel cells 8,827 of 8,932 but Gray4 only 5,381 of
+  18,018 (the 29.98 fps camera beating against the display). RGB8 at 4-pixel cells decoded
+  nothing with `normal` anywhere. Laptop recordings 3 to 5 are limited by location (the corners
+  issue above). No margin recordings exist yet.
+- **CI-size suites near the runner's limits (M3, performance, not optimised now).** PR #47's
+  first run failed on macos-26-intel only: in the coverage step `internal/vision` reached `go
+  test`'s 10-minute default (600.6 s), running beside the two packages M3 adds (root 449.9 s,
+  `internal/pipeline` 344.5 s; `internal/payload` 221.9 s, `spikes/pattern` 79.8 s,
+  `internal/video` 183.3 s after them). The always-on end-to-end tests were trimmed, with every
+  removed row, session and case still asserted with `QRVT_LONG_TESTS=1`: the matrix's short
+  version films half a pass, then a pass, and the whole recording only if those fall short (the
+  simulator's captures are prefix-stable, `TestFilmPrefix`, and decoding stops once complete, so
+  the outcome is the whole recording's); `TestFrameLoss` uses a loop of at least 52 frames (100
+  in the long version) with both losses rounded up; `TestLoopback` runs each modulation and
+  protection once (all nine pairs in the long version); the tests that feed the decoder directly
+  share one encoded transfer; the short matrix films each row with the smallest 16:9 camera, at
+  least 1080p, that gives the code 5 camera pixels per cell (section 11's planning point), at the
+  preset's rate, timing, blur and shake (ideal 1920 x 1080, tripod 2688 x 1512, handheld and
+  iphone-hdr 3008 x 1692, budget-android its own 1920 x 1080, harsh 2304 x 1296); the long
+  version keeps each preset's own camera. Measured on the development machine with the coverage
+  step pinned to 4 CPUs (`taskset -c 0-3`, GOMAXPROCS 4, uncached), at PR #47's first head and
+  after these trims, before isolation: root 80.8 and 47.2 s, `internal/pipeline` 58.5 and 38.8
+  s, `internal/vision` 142.7 and 126.4 s, the whole step 313 s after; alone, root about 20 s and
+  pipeline about 16 s. The runner took 5.6 and 5.9 times the pinned figures for root and
+  pipeline. Two changes follow (designer's ruling on PR #47). **Isolation:** `tools/dev` runs
+  the root package and `internal/pipeline` each on its own after the other packages, before
+  `internal/video` (`isolatedRuns`; the coverage gate merges every run's profile; under the race detector they
+  later moved to the isolated part, below). That adds roughly 3 to 4 minutes on the slowest
+  runner, (20 + 16) s x 5.7, against the non-race steps' 30 minutes, of which they took about 22
+  before this pull request; it returns `internal/vision` to its conditions before it, about 530
+  s on that runner; and the 5.7-times projection of the whole contended step no longer applies.
+  **Timeout:** the coverage step sets `-timeout=15m` per package (`coverArgs`), because go
+  test's 10-minute default was never a chosen limit; the job's 70 minutes and the 30 for the
+  non-race steps are the real guard. `internal/vision`'s cost at CI size is a performance item,
+  not optimised now. PR #47's second run (6f18fc7) passed the coverage step in 19 min 22 s,
+  `internal/vision` taking 662 s under the 15-minute limit, but on that host the race step for
+  the other packages reached its 20 minutes: the main group took about 12 minutes
+  (`internal/vision` 709 s, `internal/payload` 507 s, `spikes/pattern` 469 s), the root package
+  then 128 s, and `internal/pipeline` was cut off; the job stood at about 58 of its 70 minutes.
+  So (designer's ruling): under the race detector the root package and `internal/pipeline` run
+  a subset, as `internal/vision` does (`raceSize`, `raceSkipStatistics`): the API's round trip,
+  and every pipeline test that crosses a goroutine boundary or guards a limit (two recordings,
+  cancellation, the reorder bound, disk space, hostile descriptors, frame loss at 20 frames,
+  where 3 lost are 15% and 4 are 20%, so the levels stay honest); the matrix, the typed errors,
+  the prefix property, the mid-loop start and the summed soft bits run in the non-race step. And
+  both run in the isolated race part beside `internal/video` (`-part isolated`), so the other
+  race step holds what it held before this pull request; the steps stay two, with their limits.
+  The CI-size suites and that runner's variance from host to host are an item for later, not
+  optimised now.
+- **Performance, noted and not tuned (M3).** Decoding reads each recording with one video
+  decoder, always with the colour planes, and the owning goroutine runs every LDPC attempt itself;
+  the encoder joins runs with one engine instance. Eviction rescans every frame's soft bits each
+  time the cap is exceeded, O(frames x C x sent bits) per eviction. Per-frame bookkeeping is
+  outside the 256 MB cap: each frame seen (at most F; a capture can credit up to four frames,
+  three from one header's phases and a fourth from a second header) keeps C
+  `done` flags and C slice headers, about 25 C bytes: 3.8 KB at C = 151 (250 MB at F = 67,112),
+  and about 200 KB at the largest grid's C, so a long recording claiming that grid could hold
+  gigabytes. Bringing it under the cap is the next M3 piece. The real-device check took 210-500 s per
+  recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
+  1, 255 s); a round-trip matrix row takes 3-14 s alone.
 
 ## 20. Sources
 

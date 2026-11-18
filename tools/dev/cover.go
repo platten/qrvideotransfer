@@ -29,6 +29,14 @@ func excluded(rel string) bool {
 	return err == nil && generated.Match(b)
 }
 
+// coverArgs returns the `go test` arguments of the coverage step. The per-package limit is set to
+// 15 minutes: go test's 10-minute default was never a chosen limit, and internal/vision reached
+// it on the slowest runner (macos-26-intel) beside the end-to-end packages (DESIGN.md section 19);
+// the CI job's 70 minutes and the 30 minutes of non-race steps are the real guard.
+func coverArgs(tags string) []string {
+	return goTest(tags, "-timeout=15m", "-coverprofile=PROFILE", "./...")
+}
+
 // cover runs the tests with coverage and enforces a minimum statement coverage per package.
 func cover(args []string) error {
 	fs := newFlags("cover")
@@ -39,15 +47,16 @@ func cover(args []string) error {
 	if err != nil {
 		return err
 	}
-	// Two runs, as the test task does (isolatedRuns): every package but internal/video, then
-	// internal/video on its own; their profiles are merged into one.
+	// The runs of the test task (isolatedRuns): every other package, then the root package and
+	// internal/pipeline each on its own, then internal/video on its own; their profiles are merged
+	// into one, so the gate covers every package.
 	list, err := packages(tags)
 	if err != nil {
 		return err
 	}
 	var parts []string
 	var errs []error
-	for i, a := range isolatedRuns(goTest(tags, "-coverprofile=PROFILE", "./..."), list) {
+	for i, a := range isolatedRuns(coverArgs(tags), list) {
 		part := fmt.Sprintf("%s.%d", *profile, i)
 		parts = append(parts, part)
 		a = slices.Clone(a)
