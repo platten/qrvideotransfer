@@ -1835,13 +1835,23 @@ by GoReleaser).
   **`internal/vision` in the coverage step.** The coverage counters of the code under test are
   shared memory, and goroutines on several cores writing them at once contend for their cache
   lines: pinned to 4 CPUs, `TestGeometryPresetsSmall` took 57 CPU seconds (13.7 s) under coverage
-  against 15 (3.7 s) without, and `TestDetectConcurrent` 34 against 2.3. So in a coverage build the
+  against 15 (3.7 s) without, and `TestDetectConcurrent`, run alone, 34 CPU seconds against 2.3.
+  So in a coverage build the
   pose sweeps (`geomSweep`, `geomDetectRate`) film their poses in parallel, the simulator not being
   instrumented, and run the vision code on them one at a time (`geomVisionLock`); what they assert
   is unchanged. The concurrency tests keep their goroutines, as the race step needs them. The
-  always-on sizes and the long run (`QRVT_LONG_TESTS=1`, `go run ./tools/dev test -long`) are in
-  section 19; the long run is local only: no CI job runs it yet (the nightly simulator-matrix job
-  is still a placeholder).
+  always-on sizes are in section 19.
+  **The long run (`QRVT_LONG_TESTS=1`, `go run ./tools/dev test -long`) runs in no CI job yet**;
+  the nightly simulator-matrix job is still a placeholder. Until the next pull request wires a
+  nightly job to run it on ubuntu-24.04, no CI job asserts: the cases PR #49 moved to the long run
+  (the located recordings' resources at 4K, the full signing and tamper matrices, the second order
+  of the interleaved sessions, and `TestEvictionLoopCost`);
+  those PR #47 moved (the full simulator matrix with each preset's own camera, `TestFrameLoss` at
+  100 frames, `TestLoopback`'s nine pairs); the eight full sizes the vision test trim moved
+  (section 19); and the long-only tests from before (in `internal/vision` the M2 1,000-pose
+  geometry runs, the glare and decoy studies, the harsh regression and the radiometry statistics'
+  long sizes; the long LDPC and convolutional-code checks; `spikes/pattern`'s long analysis). Until
+  then they are asserted only by the local long run each pull request makes (below).
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
@@ -1890,7 +1900,19 @@ by GoReleaser).
   before the push that opens it, `go run ./tools/dev platforms -full` runs every step and fails if
   any step could not run, and it takes no `-skip` (`-strict` fails on steps that could not run
   alone; `-skip` leaves named steps out of a routine run and refuses unknown names). A step that
-  could not run is reported as NOT RUN with its reason, never as a pass.
+  could not run is reported as NOT RUN with its reason, never as a pass. At the same point, once
+  per pull request, the developer also runs the long tests, `go run ./tools/dev test -long`, and
+  reports the result in the pull request's text (wall time; pass or fail per package; what was
+  skipped): no CI job runs them yet (see the coverage-step paragraph above). The task sets no
+  per-package time limit for them (`-timeout=0`): at go test's default of 10 minutes the root
+  package (in `TestRoundTripMatrix`), `internal/fec/ldpc` (`TestDecoderCandidates`) and
+  `internal/vision` (`TestDetectModuleSweep`) panicked with the rest of their tests unrun. Without
+  it, at the vision test trim's head on the machine below, the long run passed every package in
+  90 min 51 s: `internal/vision` 3,249 s and `internal/fec/ldpc` 3,141 s side by side, then the
+  root package 1,617 s, `internal/pipeline` 163 s and `internal/video` 155 s each alone; the only
+  skips were the two helper tests that run only as a child process (`TestWorkerCountChild`,
+  `TestStoreWriterProcess`). It is longer than `platforms -full` (about 48 minutes) on its own, so
+  folding it into that task would take the pair past two hours.
   - *compile*: `go vet` and `go test -c` of every package for all six targets, `CGO_ENABLED=0`, with
     no tags, the release build tags, and the release tags with the HEVC fast path's
     `unsandboxedhevc` (the set of CI's "HEVC fast-path tests" step). This catches build-constraint files, signature changes and
@@ -2289,8 +2311,14 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   `TestGeometryMoustache` 12 of its 40 poses (so at least 11 located), `TestGeometryMoustacheWindow`
   12 of 24, `TestDetectModuleLimit` 12 of 24 per case, `TestGeometryPresetsSmall` 12 of 24 per
   preset, `TestGeometryPresets4K` 2 of 4 per preset, `TestGeometry16x10` 6 of 12, `TestGlareOnFinder`
-  2 poses (3 before, 6 in the long run) and `TestSampleGlareFlagged` 1 of 2. The long run is local
-  only; no CI job runs the moved sizes yet. Half, the target, was not reached. What remains is
+  2 poses (3 before, 6 in the long run) and `TestSampleGlareFlagged` 1 of 2. **Gap:** no CI job
+  runs the long tests yet, so these eight full sizes, and the cases PR #49 moved (the located
+  recordings' resources at 4K, the full signing and tamper matrices, the second interleave order),
+  are asserted only by the local long run each pull request makes before the push that opens it
+  (section 17); a nightly job running them on ubuntu-24.04 comes in the next pull request. The
+  designer accepted -31% (2026-11-18), with the honesty statistics and the concurrency tests kept
+  in full; the macos-26-intel figure above stays a projection until this pull request's CI run
+  measures it. Half, the target, was not reached. What remains is
   mostly the parallel statistics: `TestHonestConfidence` (31 to 40 s within the run) and
   `TestPipelineHonesty` (17 to 22 s), whose CI size the designer kept so that every bucket is
   judged, then `TestPhaseWeights`, `TestGlareUnknown`, `TestPipelineGlare` and `TestPipelinePhase`.

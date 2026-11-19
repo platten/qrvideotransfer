@@ -1,0 +1,1 @@
+M3 trim: section 2's local-checks rule adds the long tests (`go run ./tools/dev test -long`), run once per pull request before the push that opens it with `platforms -full`, their result reported in the pull request's text (designer's ruling; no CI job runs them yet, DESIGN.md section 17).

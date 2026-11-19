@@ -206,7 +206,12 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 		env, extra = []string{"CGO_ENABLED=1"}, append(extra, "-race", "-timeout=18m", "-count=1")
 	}
 	if *long {
+		// The long tests run for longer than go test's default of 10 minutes per package: at that
+		// limit the root package, internal/fec/ldpc and internal/vision panicked, the rest of their
+		// tests unrun (DESIGN.md section 17). No limit: the run is local and watched, or bounded by
+		// the step that runs it.
 		env = append(env, "QRVT_LONG_TESTS=1")
+		extra = append(extra, "-timeout=0")
 	}
 	if *short {
 		extra = append(extra, "-short")
