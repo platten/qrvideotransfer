@@ -194,7 +194,12 @@ func film(t testing.TB, path string, cell int, c channel.Config, r channel.Run) 
 // filmFrames records the looping video frames, shown at fps, as film does.
 func filmFrames(t testing.TB, frames []*video.Frame, fps, cell int, c channel.Config, r channel.Run) string {
 	t.Helper()
-	period := time.Second / time.Duration(fps)
+	return filmPeriod(t, frames, time.Second/time.Duration(fps), cell, c, r)
+}
+
+// filmPeriod records the looping video frames, each shown for period, as film does.
+func filmPeriod(t testing.TB, frames []*video.Frame, period time.Duration, cell int, c channel.Config, r channel.Run) string {
+	t.Helper()
 	for i, f := range frames {
 		f.Index, f.PTS = i, time.Duration(i)*period
 	}
