@@ -206,7 +206,7 @@ Each runs briefly on every pull request and for longer nightly, with its corpus 
 | Target | Must hold |
 | --- | --- |
 | Header decoding from arbitrary soft bits | No panic; a result only with a valid CRC |
-| Descriptor parsing and plan derivation | No panic; no allocation before validation. Asserted in bytes allocated (`TestDescriptorNoAllocBeforeValidation`, and in `FuzzParseDescriptor` for every input), on the hostile descriptors and on descriptors claiming each field's largest value: refusing allocates at most 1 KiB (the error), accepting nothing, and an accepted descriptor's plan at most its shard order, 4 (K + M) bytes, and 16 KiB |
+| Descriptor parsing and plan derivation | No panic; no allocation before validation. Asserted in bytes allocated (`TestDescriptorNoAllocBeforeValidation`, and in `FuzzParseDescriptor` for every input), on the hostile descriptors and on descriptors claiming each field's largest value: refusing allocates at most 1 KiB (the error), accepting nothing, and an accepted descriptor's plan at most its shard order, 4 (K + M) bytes, plus 16 KiB |
 | Viterbi and LDPC decoding from arbitrary soft bits | No panic; terminates within the iteration cap |
 | Stream header, manifest and key-file parsing | No panic; rejects everything FORMAT.md forbids |
 | Unpacking arbitrary archive bytes into a temporary root | No file created outside the root; no panic |

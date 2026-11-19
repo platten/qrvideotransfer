@@ -2143,8 +2143,9 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 - **Infeasible, not a defect (designer's ruling, 2026-11-18): `budget-android` 720p12 Gray4
   `normal`.** The row decoded in 1 of 5 sessions with the stand-in and 0 of 3 with x264 (sessions
   with fixed seeds, but whose transfers changed from run to run until the M3 exit fixed the inputs'
-  modification times; see below). It was traced in one bounded pass with the simulator's truth, on the row's own setting (320 x 180
-  grid, 1080p30 camera, 12 fps display, 4.62 measured camera pixels per cell).
+  modification times; see below). It was traced in one bounded pass with the simulator's truth, on
+  the row's own setting (320 x 180 grid, 1080p30 camera, 12 fps display, 4.62 measured camera
+  pixels per cell).
 
   **How the figures were produced.** A throwaway diagnostic test in `internal/vision`, not in the
   tree, built on the radiometry bench:
@@ -2198,9 +2199,9 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 - **Coverage margins (M3 part 2).** PR #48's first run failed the coverage gate on windows-11-arm
   alone: `internal/pipeline` at 95.0% (95.2 to 95.4% on the other runners; the error paths of the
   repair, the shard store and the hash check were never covered, and two cancellation returns
-  only sometimes). Deterministic tests of those paths bring it to 96.5% (measured over three runs, with the
-  defensive guard in `attemptDue` kept uncovered). `internal/video` stood at 95.8% (windows-2025) and 95.6% (windows-11-arm)
-  in that run: a margin item for the next pull request that changes `internal/video`, not fixed
+  only sometimes). Deterministic tests of those paths bring it to 96.5% (measured over three runs,
+  with the defensive guard in `attemptDue` kept uncovered). `internal/video` stood at 95.8%
+  (windows-2025) and 95.6% (windows-11-arm) in that run: a margin item for the next pull request that changes `internal/video`, not fixed
   in this one. **Assigned to M5** (designer's ruling, 2026-11-19).
 - **Round-trip matrix with x264 (M3 part 2).** `TestRoundTripMatrixX264` with `QRVT_LONG_TESTS=1`
   runs the 13 rows that have a recorder bitrate (not `ideal`, whose recorder is lossless) with

@@ -126,6 +126,9 @@ func TestFrameVectors(t *testing.T) {
 			g.Random != hex.EncodeToString(vectorRandom) {
 			t.Fatal("frames.json's input differs from the test's")
 		}
+		if g.Width != 848 || g.Height != 480 || g.Cell != 4 || g.FPS != 12 || g.InnerCode != 2 || g.Parity != 20 {
+			t.Fatal("frames.json's settings differ from FORMAT.md section 13's")
+		}
 		if g.Stream != hex.EncodeToString(stream) || g.StreamHash != hex.EncodeToString(sum[:]) {
 			t.Errorf("stream %x, want %s", sum, g.StreamHash)
 		}

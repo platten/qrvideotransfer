@@ -90,6 +90,9 @@ func TestReferenceVideo(t *testing.T) {
 	if err := json.Unmarshal(b, &g); err != nil {
 		t.Fatal(err)
 	}
+	if g.Video != referenceVideo || g.File != referenceName {
+		t.Fatalf("reference-v1.json names %s and %s, want %s and %s", g.Video, g.File, referenceVideo, referenceName)
+	}
 	video, err := os.ReadFile(filepath.FromSlash(g.Video))
 	if err != nil {
 		t.Fatal(err)
