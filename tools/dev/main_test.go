@@ -101,30 +101,75 @@ func TestVulncheckRuns(t *testing.T) {
 	}
 }
 
-// TestIsolatedRuns: the packages run in two go test invocations, every package but internal/video
-// first and internal/video on its own after them, with the same arguments.
+// TestIsolatedRuns: the packages run in separate go test invocations with the same arguments:
+// every package but the end-to-end ones and internal/video first, then each end-to-end package on
+// its own, then internal/video on its own.
 func TestIsolatedRuns(t *testing.T) {
 	pkgs := []string{module, module + "/internal/fec", module + "/internal/pipeline", module + "/internal/video", module + "/internal/payload"}
-	got := isolatedRuns([]string{"test", "-race", "./..."}, pkgs)
+	got := isolatedRuns([]string{"test", "-race"}, pkgs)
 	// Every other package, then the end-to-end packages each on its own (the root package and
 	// internal/pipeline, designer's ruling on PR #47), then internal/video alone.
 	want := [][]string{
 		{"test", "-race", module + "/internal/fec", module + "/internal/payload"},
 		{"test", "-race", module},
 		{"test", "-race", module + "/internal/pipeline"},
-		{"test", "-race", "./internal/video/..."},
+		{"test", "-race", module + "/internal/video"},
 	}
+	sameRuns(t, "isolatedRuns", got, want)
+	// A package list without some of the groups gives no empty run.
+	sameRuns(t, "isolatedRuns of one package", isolatedRuns([]string{"test"}, []string{module + "/internal/fec"}),
+		[][]string{{"test", module + "/internal/fec"}})
+	sameRuns(t, "isolatedRuns of internal/video", isolatedRuns([]string{"test"}, []string{module + "/internal/video"}),
+		[][]string{{"test", module + "/internal/video"}})
+}
+
+// TestTestRunsPkg: -pkg goes through the same split as ./..., so the long tests of the root
+// package, internal/pipeline and internal/video each run in a go test invocation of their own
+// (DESIGN.md section 17), and -part, which names a half of the whole module's split, is refused
+// with -pkg.
+func TestTestRunsPkg(t *testing.T) {
+	_, args, part, patterns := testCommand([]string{"-long", "-pkg", "./internal/vision,.,./internal/pipeline,./internal/video"}, "noasm,nounsafe")
+	pkgs := []string{module + "/internal/vision", module, module + "/internal/pipeline", module + "/internal/video"}
+	got, err := testRuns(args, patterns, pkgs, part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := []string{"test", "-tags=noasm,nounsafe", "-timeout=120m"}
+	run := func(p string) []string { return append(slices.Clone(head), p) }
+	sameRuns(t, "testRuns", got, [][]string{run(module + "/internal/vision"), run(module), run(module + "/internal/pipeline"), run(module + "/internal/video")})
+	// Two ordinary packages stay in one run.
+	_, args, part, patterns = testCommand([]string{"-pkg", "./internal/vision,./internal/fec/ldpc"}, "")
+	got, err = testRuns(args, patterns, []string{module + "/internal/vision", module + "/internal/fec/ldpc"}, part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameRuns(t, "testRuns of two packages", got, [][]string{{"test", module + "/internal/vision", module + "/internal/fec/ldpc"}})
+	// The whole module with -part, as CI's race steps run it.
+	_, args, part, patterns = testCommand([]string{"-race", "-part", "isolated"}, "")
+	got, err = testRuns(args, patterns, pkgs, part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0][len(got[0])-1] != module {
+		t.Errorf("testRuns -part isolated = %q", got)
+	}
+	_, args, part, patterns = testCommand([]string{"-race", "-part", "isolated", "-pkg", "./internal/video"}, "")
+	if _, err := testRuns(args, patterns, pkgs[3:], part); err == nil {
+		t.Error("-part with -pkg gave no error")
+	}
+}
+
+// sameRuns reports a difference between two lists of go test runs.
+func sameRuns(t *testing.T, what string, got, want [][]string) {
+	t.Helper()
 	if len(got) != len(want) {
-		t.Fatalf("isolatedRuns = %q, want %q", got, want)
+		t.Errorf("%s = %q, want %q", what, got, want)
+		return
 	}
 	for i := range want {
 		if !slices.Equal(got[i], want[i]) {
-			t.Errorf("isolatedRuns run %d = %q, want %q", i, got[i], want[i])
+			t.Errorf("%s run %d = %q, want %q", what, i, got[i], want[i])
 		}
-	}
-	// Arguments that do not end in ./... are run as they are.
-	if got := isolatedRuns([]string{"test", "./internal/fec"}, pkgs); len(got) != 1 || got[0][1] != "./internal/fec" {
-		t.Errorf("isolatedRuns of one package = %q", got)
 	}
 }
 
@@ -282,9 +327,13 @@ func TestTestCommand(t *testing.T) {
 		{[]string{"-long", "-pkg", "./internal/vision,.,./internal/pipeline"}, "CGO_ENABLED=0 QRVT_LONG_TESTS=1", "test -tags=noasm,nounsafe -timeout=120m ./internal/vision . ./internal/pipeline"},
 	}
 	for _, c := range cases {
-		env, args, _ := testCommand(c.args, "noasm,nounsafe")
+		env, args, _, patterns := testCommand(c.args, "noasm,nounsafe")
 		if strings.Join(env, " ") != c.wantEnv || strings.Join(args, " ") != c.want {
 			t.Errorf("testCommand(%v) = %v, %v; want %s, %s", c.args, env, args, c.wantEnv, c.want)
+		}
+		// The package patterns are the arguments' tail.
+		if !slices.Equal(args[len(args)-len(patterns):], patterns) {
+			t.Errorf("testCommand(%v) patterns %q are not the tail of %q", c.args, patterns, args)
 		}
 	}
 }

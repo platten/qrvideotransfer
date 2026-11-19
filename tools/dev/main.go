@@ -184,7 +184,7 @@ func goTest(tags string, args ...string) []string {
 }
 
 // testCommand returns the environment and `go test` arguments of the test task.
-func testCommand(args []string, tags string) (env, goArgs []string, part string) {
+func testCommand(args []string, tags string) (env, goArgs []string, part string, patterns []string) {
 	fs := newFlags("test")
 	race := fs.Bool("race", false, "run with the race detector (enables cgo)")
 	long := fs.Bool("long", false, "include long tests (QRVT_LONG_TESTS=1)")
@@ -223,7 +223,12 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 		target = strings.Split(*only, ",")
 	}
 	extra = append(append(extra, fs.Args()...), target...)
-	return env, goTest(tags, extra...), *p
+	return env, goTest(tags, extra...), *p, target
+}
+
+// testRuns is not implemented yet.
+func testRuns(goArgs, patterns, pkgs []string, part string) ([][]string, error) {
+	return nil, errors.New("not implemented")
 }
 
 func test(args []string) error {
@@ -231,7 +236,7 @@ func test(args []string) error {
 	if err != nil {
 		return err
 	}
-	env, goArgs, part := testCommand(args, tags)
+	env, goArgs, part, _ := testCommand(args, tags)
 	return runTests(env, tags, goArgs, part)
 }
 
