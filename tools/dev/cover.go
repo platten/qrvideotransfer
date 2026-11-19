@@ -102,6 +102,16 @@ func cover(args []string) error {
 	return nil
 }
 
+// coverRuns is not implemented yet.
+func coverRuns(runs [][]string, part string) ([][]string, error) {
+	return nil, errors.New("not implemented")
+}
+
+// coverMerge is not implemented yet.
+func coverMerge(profile, part string, parts []string) (bool, error) {
+	return false, errors.New("not implemented")
+}
+
 // parseProfile returns, per package directory (per file at the module's root), the total and
 // covered statements of a coverage profile, merging duplicate blocks and skipping excluded files.
 func parseProfile(name string) (map[string][2]int, error) {

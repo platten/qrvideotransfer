@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -207,65 +208,86 @@ func TestSelectRuns(t *testing.T) {
 	}
 }
 
-// TestRaceStepsSplit checks that ci.yml runs the race tests in two steps, internal/video alone and
-// every other package, each with the 20-minute limit.
-func TestRaceStepsSplit(t *testing.T) {
+// splitSteps are the check job's steps that run a part of the test split, by their run line, with
+// their limits in minutes: about twice each step's normal time on macos-26-intel, the slowest
+// runner (designer's ruling on the CI budget, 2026-11-19; DESIGN.md section 17).
+var splitSteps = []struct {
+	run   string
+	limit int
+}{
+	{"run: scripts/test.sh cover -part rest\n", 18},
+	{"run: scripts/test.sh cover -part video\n", 8},
+	{"run: scripts/test.ps1 cover -part rest\n", 18},
+	{"run: scripts/test.ps1 cover -part video\n", 8},
+	{"run: scripts/test.sh -race -part others\n", 15},
+	{"run: scripts/test.sh -race -part isolated\n", 20},
+	{"run: scripts/test.ps1 -race -part others\n", 15},
+	{"run: scripts/test.ps1 -race -part isolated\n", 20},
+}
+
+// TestSplitSteps checks that ci.yml runs the coverage and race tests in parts, each in a step with
+// its own limit: the coverage run of internal/video after every other package's, and the race runs
+// of every package but the isolated ones before those.
+func TestSplitSteps(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, want := range []string{
-		"run: scripts/test.sh -race -part others\n",
-		"run: scripts/test.sh -race -part isolated\n",
-		"run: scripts/test.ps1 -race -part others\n",
-		"run: scripts/test.ps1 -race -part isolated\n",
-	} {
-		i := strings.Index(s, want)
+	for _, c := range splitSteps {
+		i := strings.Index(s, c.run)
 		if i < 0 {
-			t.Errorf("ci.yml lacks %q", strings.TrimSpace(want))
+			t.Errorf("ci.yml lacks %q", strings.TrimSpace(c.run))
 			continue
 		}
 		step := s[strings.LastIndex(s[:i], "      - name:"):i]
-		if !strings.Contains(step, "timeout-minutes: 20\n") {
-			t.Errorf("the step running %q has no 20-minute limit", strings.TrimSpace(want))
+		if want := fmt.Sprintf("timeout-minutes: %d\n", c.limit); !strings.Contains(step, want) {
+			t.Errorf("the step running %q has no %d-minute limit", strings.TrimSpace(c.run), c.limit)
 		}
 	}
-	if strings.Contains(s, "run: scripts/test.sh -race\n") || strings.Contains(s, "run: scripts/test.ps1 -race\n") {
-		t.Error("ci.yml still runs the race tests in one step")
+	for _, old := range []string{"run: scripts/test.sh -race\n", "run: scripts/test.ps1 -race\n", "run: scripts/test.sh cover\n", "run: scripts/test.ps1 cover\n"} {
+		if strings.Contains(s, old) {
+			t.Errorf("ci.yml still runs %q in one step", strings.TrimSpace(old))
+		}
 	}
-	// A failure among the other packages must not skip internal/video's race result.
+	// A failure in the first part must not skip the second part's result.
 	for _, want := range []string{
+		"if: ${{ !cancelled() && runner.os != 'Windows' && steps.cover-rest.outcome != 'skipped' }}\n        timeout-minutes: 8\n        shell: bash\n        run: scripts/test.sh cover -part video\n",
+		"if: ${{ !cancelled() && runner.os == 'Windows' && steps.cover-rest-windows.outcome != 'skipped' }}\n        timeout-minutes: 8\n        shell: pwsh\n        run: scripts/test.ps1 cover -part video\n",
 		"&& steps.race-others.outcome != 'skipped' }}\n        timeout-minutes: 20\n        shell: bash\n        run: scripts/test.sh -race -part isolated\n",
 		"&& steps.race-others-windows.outcome != 'skipped' }}\n        timeout-minutes: 20\n        shell: pwsh\n        run: scripts/test.ps1 -race -part isolated\n",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("an isolated race step lacks the !cancelled() condition: want %q", want)
+			t.Errorf("a second-part step lacks the !cancelled() condition: want %q", want)
+		}
+	}
+	for _, want := range []string{
+		"        id: cover-rest\n        if: runner.os != 'Windows'\n",
+		"        id: cover-rest-windows\n        if: runner.os == 'Windows'\n",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("ci.yml lacks %q", want)
 		}
 	}
 }
 
-// TestCheckJobLimit: the check job's limit covers the two race steps at their limits plus the
-// budget for every other step, so the split is not undone by the job limit (DESIGN.md section 17).
+// TestCheckJobLimit: the check job's limit covers the two race steps a runner runs, at their
+// limits, plus the budget for every other step, so the split is not undone by the job limit
+// (DESIGN.md section 17).
 func TestCheckJobLimit(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	job, race := checkJobLimits(b)
-	// Four race steps (two on Unix, two on windows-2025), all with the same limit; a runner runs
-	// two of them.
-	if len(race) != 4 {
-		t.Fatalf("found race-step limits %v, want four", race)
+	// Four race steps: others and isolated on Unix, then the same on windows-2025.
+	if !slices.Equal(race, []int{15, 20, 15, 20}) {
+		t.Fatalf("race-step limits %v, want [15 20 15 20]", race)
 	}
-	for _, r := range race {
-		if r != 20 {
-			t.Errorf("race-step limits %v, want 20 minutes each", race)
-			break
+	for i := 0; i < len(race); i += 2 {
+		if job < race[i]+race[i+1]+fixedStepsBudget {
+			t.Errorf("the check job's limit is %d minutes, want at least %d + %d (race steps) + %d (other steps)", job, race[i], race[i+1], fixedStepsBudget)
 		}
-	}
-	if job < 2*race[0]+fixedStepsBudget {
-		t.Errorf("the check job's limit is %d minutes, want at least 2 x %d (race steps) + %d (other steps)", job, race[0], fixedStepsBudget)
 	}
 	wf := "jobs:\n  check:\n    timeout-minutes: 50\n    steps:\n      - name: Race tests, other packages (Unix)\n        timeout-minutes: 20\n" +
 		"      - name: Race tests, isolated packages (Windows)\n        timeout-minutes: 15\n      - name: Lint\n        timeout-minutes: 9\n  other:\n    timeout-minutes: 5\n"
