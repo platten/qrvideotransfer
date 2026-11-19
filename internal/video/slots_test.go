@@ -13,11 +13,18 @@ import (
 // watchdog; every one must be stopped by it. With the cap, at most EngineInstances() run at a time,
 // an instance waiting for its turn is not stalled, and every one is cancelled on time and stops.
 // That is asserted per instance, from its own times, not as one total that also counts the turns:
-// the watchdog must cancel it at most 5 s after the stall limit from when it got its turn (the stall
-// is counted from the last tick at which it was waiting, so up to a tick earlier), it must return
-// with the stall error, and the test waits for every return. How long it takes to return after its
-// cancellation is logged, not asserted: on the macos-26-intel runner, with this package alone, one
-// returned 8.4 s after its cancellation for a reason not established (SECURITY.md section 5).
+// the watchdog must cancel it at most 5 s after its memory reservation plus the stall limit, the
+// same bound with or without the race detector, it must return with the stall error, and the test
+// waits for every return. The bound counts from the reservation because that is where the stall
+// clock starts (DESIGN.md section 12); the cancellation itself comes at a 1 s tick, so up to a tick
+// after the limit. The time from the turn to the reservation is logged, not asserted here: it is
+// bounded by EngineLoadLimit, which TestReservationLoadLimit asserts (an instance still reserving
+// when it runs out is cancelled with that limit's error and its slot is released). On
+// macos-26-intel that time was inferred at 5 to 6 s once (CI run 44400775718), which failed this
+// test while it still counted from the turn. A late cancellation logs the instance's breakdown.
+// How long an instance takes to return after its cancellation is logged, not asserted: on the
+// macos-26-intel runner, with this package alone, one returned 8.4 s after its cancellation for a
+// reason not established (SECURITY.md section 5).
 // Without the cap (DESIGN.md section 12) every one must still be
 // stopped by the watchdog, but the times are only logged: on a 16-thread development machine they
 // were stopped on time, while on the macos-26-intel CI runner five took 16.8 s against a 2 s limit
@@ -49,21 +56,24 @@ func TestWatchdogUnderLoad(t *testing.T) {
 		}
 		wg.Wait()
 		slots = old
-		var lateCancel, lateStop time.Duration
+		var lateCancel, lateStop, reserve time.Duration
 		for i, m := range ms {
-			ready, cancelled := meterTime(m.readyAt.Load()), meterTime(m.cancelledAt.Load())
-			if m.readyAt.Load() == 0 || m.cancelledAt.Load() == 0 {
-				t.Errorf("%d slots, instance %d: never ready or never cancelled by the watchdog", k, i)
+			if m.readyAt.Load() == 0 || m.memAt.Load() == 0 || m.cancelledAt.Load() == 0 {
+				t.Errorf("%d slots, instance %d: never ready, never reserved or never cancelled by the watchdog: %s", k, i, m.breakdown(ends[i]))
 				continue
 			}
-			lateCancel = max(lateCancel, cancelled.Sub(ready)-limit)
+			ready, reserved, cancelled := meterTime(m.readyAt.Load()), meterTime(m.memAt.Load()), meterTime(m.cancelledAt.Load())
+			late := cancelled.Sub(reserved) - limit
+			lateCancel = max(lateCancel, late)
 			lateStop = max(lateStop, ends[i].Sub(cancelled))
+			reserve = max(reserve, reserved.Sub(ready))
+			if k == capped && late > margin {
+				t.Errorf("%d instances in %d slots, instance %d: cancelled %v after its reservation + limit (at most %v): %s",
+					n, k, i, late, margin, m.breakdown(ends[i]))
+			}
 		}
-		t.Logf("%d instances in %d slots (GOMAXPROCS %d): %v; cancelled at most %v after turn + limit, returned at most %v after the cancellation",
-			n, k, runtime.GOMAXPROCS(0), time.Since(start), lateCancel, lateStop)
-		if k == capped && lateCancel > margin {
-			t.Errorf("%d instances in %d slots: a cancellation came %v after turn + limit (at most %v)", n, k, lateCancel, margin)
-		}
+		t.Logf("%d instances in %d slots (GOMAXPROCS %d): %v; turn to reservation at most %v, cancelled at most %v after reservation + limit, returned at most %v after the cancellation",
+			n, k, runtime.GOMAXPROCS(0), time.Since(start), reserve, lateCancel, lateStop)
 		for i, err := range errs {
 			var le *LimitError
 			if !errors.As(err, &le) || le.Limit != "EngineStallTimeout" {
