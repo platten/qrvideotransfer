@@ -134,7 +134,16 @@ func FuzzParseDescriptor(f *testing.F) {
 	good := d.Marshal()
 	f.Add(good[:])
 	f.Add(make([]byte, DescriptorSize))
+	for _, k := range hostileDescriptors(f) {
+		f.Add(k.bytes)
+	}
+	for _, k := range hostileClaims() {
+		if k.h == h && k.c == c {
+			f.Add(k.b)
+		}
+	}
 	f.Fuzz(func(t *testing.T, b []byte) {
+		checkDescriptorAllocs(t, b, h, c) // no allocation before validation (SECURITY.md section 9.1)
 		got, err := ParseDescriptor(b, h, c)
 		if err != nil {
 			return
