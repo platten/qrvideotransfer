@@ -54,6 +54,7 @@ func geomSweep(t *testing.T, c *geomCode, cfg channel.Config, n int, seed uint64
 			mu.Unlock()
 			return
 		}
+		defer geomVisionLock()()
 		var d FinderDetector
 		t0 := time.Now()
 		q, ok := d.Detect(p.f, nil)
@@ -194,29 +195,30 @@ func geomTilt25(t testing.TB, w, h int) channel.Config {
 	return cfg
 }
 
-// TestGeometryPresetsSmall asserts the M2 geometry rows on 24 poses of each of tripod, handheld and
-// handheld tilted up to 25 degrees, with a 212 x 120 grid at 4 pixels per cell, seeds 1000 to 1023,
-// the presets' blur unscaled. Tripod and handheld film at 1280 x 720 (4.3 to 4.8 camera pixels per
-// untilted finder module, above geomModuleLimit); the 25-degree case films at 1920 x 1080, since at
-// 720p its far finders shrink to about 3 pixels per module, below the limit. With 24 poses every
-// pose must succeed.
+// TestGeometryPresetsSmall asserts the M2 geometry rows on 12 poses of each of tripod, handheld and
+// handheld tilted up to 25 degrees, with a 212 x 120 grid at 4 pixels per cell, seeds 1000 to 1011
+// (24 poses, seeds 1000 to 1023, with QRVT_LONG_TESTS=1), the presets' blur unscaled. Tripod and
+// handheld film at 1280 x 720 (4.3 to 4.8 camera pixels per untilted finder module, above
+// geomModuleLimit); the 25-degree case films at 1920 x 1080, since at 720p its far finders shrink
+// to about 3 pixels per module, below the limit. Every pose must succeed.
 func TestGeometryPresetsSmall(t *testing.T) {
 	c := geomNewCode(t, 212, 120, 4, 2, 4, 11)
 	for _, cfg := range []channel.Config{geomConfig(t, "tripod", 1280, 720), geomConfig(t, "handheld", 1280, 720), geomTilt25(t, 1920, 1080)} {
 		t.Run(cfg.Name, func(t *testing.T) {
-			geomCheck(t, geomSweep(t, c, cfg, 24, 1000), 1, 1)
+			geomCheck(t, geomSweep(t, c, cfg, geomLongSize(24, 12), 1000), 1, 1)
 		})
 	}
 }
 
-// TestGeometryPresets4K asserts the same on 4 full-size 4K poses per preset with a 480 x 270 grid
-// at 4 pixels per cell (1080p video), seeds 2000 to 2003.
+// TestGeometryPresets4K asserts the same on 2 full-size 4K poses per preset with a 480 x 270 grid
+// at 4 pixels per cell (1080p video), seeds 2000 and 2001; 4 (seeds 2000 to 2003) with
+// QRVT_LONG_TESTS=1.
 func TestGeometryPresets4K(t *testing.T) {
 	raceSkipStatistics(t)
 	c := geomNewCode(t, 480, 270, 4, 2, 4, 12)
 	for _, cfg := range []channel.Config{geomConfig(t, "tripod", 0, 0), geomConfig(t, "handheld", 0, 0), geomTilt25(t, 0, 0)} {
 		t.Run(cfg.Name, func(t *testing.T) {
-			geomCheck(t, geomSweep(t, c, cfg, 4, 2000), 1, 1)
+			geomCheck(t, geomSweep(t, c, cfg, geomLongSize(4, 2), 2000), 1, 1)
 		})
 	}
 }
@@ -244,15 +246,16 @@ func TestGeometryPresetsLong(t *testing.T) {
 }
 
 // TestGeometry16x10 runs the same assertions on a 16:10 grid (432 x 270, so Ux differs from Uy)
-// with the handheld preset at 2880 x 1620, 12 poses from seed 3000: 4.7 camera pixels per cell,
-// above the 4.5 that DESIGN.md section 5 gives for four greys handheld. The screen fills 0.7 of the
-// width instead of 0.8, so that the taller code stays inside a 16:9 capture.
+// with the handheld preset at 2880 x 1620, 6 poses from seed 3000 (12 with QRVT_LONG_TESTS=1): 4.7
+// camera pixels per cell, above the 4.5 that DESIGN.md section 5 gives for four greys handheld. The
+// screen fills 0.7 of the width instead of 0.8, so that the taller code stays inside a 16:9
+// capture.
 func TestGeometry16x10(t *testing.T) {
 	raceSkipStatistics(t)
 	c := geomNewCode(t, 432, 270, 4, 2, 4, 14)
 	cfg := geomConfig(t, "handheld", 2880, 1620)
 	cfg.Geometry.Fill = 0.7
-	geomCheck(t, geomSweep(t, c, cfg, 12, 3000), 1, 1)
+	geomCheck(t, geomSweep(t, c, cfg, geomLongSize(12, 6), 3000), 1, 1)
 }
 
 // BenchmarkGeometry4K times detection, header reading, mesh fitting and sampling of every data

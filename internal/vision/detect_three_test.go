@@ -76,7 +76,7 @@ func TestDetectTwoHidden(t *testing.T) {
 // about 24%, of headroom. The three-finder search is a quarter of the cost. Serial, as every
 // geomCostRatio test (see there).
 func TestDetectThreeHostile(t *testing.T) {
-	raceSkipStatistics(t) // a cost ratio: race instrumentation distorts it unevenly
+	geomCostSkip(t)
 	const w, h = 1920, 1080
 	f := &video.Frame{W: w, H: h, Bits: 8, Y: make([]uint16, w*h)}
 	s := uint64(11)
@@ -117,7 +117,7 @@ func TestDetectThreeHostile(t *testing.T) {
 // is never located; each Detect allocates at most 32 MB and takes at most 6 times as long as
 // locating the real code in the same process.
 func TestDetectThreeHostile4K(t *testing.T) {
-	raceSkipStatistics(t) // a cost ratio: race instrumentation distorts it unevenly
+	geomCostSkip(t)
 	c := geomNewCode(t, 480, 270, 8, 2, 1, 40)
 	q := geomPlainQuad(c)
 	var planes [][]uint16
@@ -162,16 +162,13 @@ func TestThreeFindersConflictingCopy(t *testing.T) {
 	}
 }
 
-// TestGlareOnFinder: on 3 handheld 4K poses (480 x 270 grid, seeds 21000 to 21002), a glare patch
+// TestGlareOnFinder: on 2 handheld 4K poses (480 x 270 grid, seeds 21000 and 21001), a glare patch
 // of 2% of the code area centred on each finder in turn: every pose located with its header read,
 // no wrong quad or header, and a cell-centre error outside the patch of at most 0.15 cell RMS.
 // Under -race, one 720p pose of a 212 x 120 grid (geomRaceGlareCode); 6 poses in the long version.
 func TestGlareOnFinder(t *testing.T) {
 	t.Parallel() // no time bound; it runs with the other parallel statistics
-	n := raceSize(3, 1)
-	if geomLong() {
-		n = 6
-	}
+	n := raceSize(geomLongSize(6, 2), 1)
 	c, cfg := geomRaceGlareCode(t, 4, 30)
 	cases := geomGlareCases(c)[:4]
 	poses := geomPoses(t, c, cfg, n, 21000)
