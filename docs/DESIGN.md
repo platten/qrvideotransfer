@@ -1843,7 +1843,9 @@ by GoReleaser).
   always-on sizes are in section 19.
   **The long run (`QRVT_LONG_TESTS=1`, `go run ./tools/dev test -long`) runs in no CI job**; the
   nightly simulator-matrix job is still a placeholder, and a nightly long-test job is deferred to M6
-  (section 19). Until then the long-only assertions are checked locally, by the per-pull-request
+  (section 19). That deferral covers the placeholder too: the nightly "full simulator matrix (M3)"
+  below is not built in M3 but decided at M6 with the long-test job (designer's ruling,
+  2026-11-19). Until then the long-only assertions are checked locally, by the per-pull-request
   rule and at each milestone exit (below), and by no CI job. Every test that reads
   `QRVT_LONG_TESTS` (directly, or through `geomLong`, `geomLongSize`, `longTests` or LDPC's `long`),
   with what only its long version asserts:
@@ -1871,7 +1873,9 @@ by GoReleaser).
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
-  alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice until then.
+  alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice until then. The
+  full simulator matrix's step stays a placeholder until M6, under the deferral of the nightly
+  long-test job (section 19).
 - **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
   Dependabot for Go modules and actions, except wazero and go-ffmpreg: every engine speed, memory and
   sandbox figure of spike S1 was measured on their pinned versions, so they are updated by hand, with
@@ -2000,13 +2004,13 @@ writing each package format by hand.
 | S2 | The owner films a test pattern on each device; the real channel is measured and the default mode confirmed or changed. Does not block M1-M3 |
 | M1 | Building blocks in parallel, including keys and signing |
 | M2 | Vision, including header reading and stripe cancellation |
-| M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards 1.46-2.80% of black-and-white cells of a perfect frame, mean about 2.1% (section 10, step 4) |
+| M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards 1.46-2.80% of black-and-white cells of a perfect frame, mean about 2.1% (section 10, step 4). `tools/dev testvideos` and the committed "as filmed" clips moved to M5, and the fuzz corpora to M7 (designer's ruling, 2026-11-19) |
 | M4 | `calibrate`, `inspect`, profiles |
 | G1 | The owner films the calibration video and sample transfers, including one tripod take |
-| M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings; inferring the frame index of a capture whose header copies all fail, from the last index and the phase markers with the quad carried by tracking (deferred from M2, section 7 rule 1); mirrored recordings (FORMAT.md section 4.1) |
+| M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings; inferring the frame index of a capture whose header copies all fail, from the last index and the phase markers with the quad carried by tracking (deferred from M2, section 7 rule 1); mirrored recordings (FORMAT.md section 4.1); `tools/dev testvideos` and the committed synthetic "as filmed" clips (section 15, test videos), moved from M3 because M5 is where they are used, their size budget (the 2 MB class) ruled then |
 | M6 | 1 GB scale, resuming with `--state-dir`; experimental `--hdr` |
 | G2 | The owner films one large transfer |
-| M7 | Final security pass |
+| M7 | Final security pass; committed corpora for the 9 fuzz targets that have none (SECURITY.md section 9.1), moved from M3 to be built alongside `FuzzDecode`'s reach (section 19) |
 | M8 | Website, packaging, signing, release dry run, a delta security review of everything since M7, then the first release candidate |
 
 Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
@@ -2062,6 +2066,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   finder that fails the confirmation as absent; mark the cells outside the anchors' hull at that
   corner unknown instead of rejecting the frame. `TestGeometryMoustacheCorner` is skipped until
   then: the simulator's lens is the detector's own model, which extrapolates correctly.
+  **Recording 3's regression is assigned to M5** (designer's ruling, 2026-11-19), with the real-device
+  tuning that diagnoses it.
 - **The acceptance measure is not met on rescaled playback (S2, Phone A, recording 1).** After the
   S2 geometry fix, the confident-error rate (bits with |s| of 39 and more) at the code's edges
   improved but does not match the interior. By segment, the left 10% of columns went from
@@ -2090,7 +2096,7 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   None of their headers was wrong. The located counts there fell slightly too (budget-android at
   3.2: 192 to 186; iphone-hdr at 3.2: 81 to 71). A wrong quad below the reliable sizes relies on the header's
   CRC and, downstream, on each codeword's CRC to keep wrong cells out of the payload. Nothing is
-  tuned to move these numbers.
+  tuned to move these numbers. **Assigned to M5** (designer's ruling, 2026-11-19).
 - **Small grids.** The confirmation needs eight located anchors (section 10, step 1), and the
   anchor lattice (every 32 columns and 30 rows) gives small grids fewer, so they are never located,
   even on a perfect capture where the header reads and every anchor is found:
@@ -2116,7 +2122,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   the range, SECURITY.md section 9.1) takes 33 ms at 1080p and 56 ms at 4K, against 18 and 44 for
   the rendered frame, and the 4K gate header 196 ms, 3.5 times the reference against its bound of
   6 (5.3 times against the rendered frame, before the reference was redefined). The hostile noise
-  frame's 301 ms is the figure to beat.
+  frame's 301 ms is the figure to beat. **Assigned to M6** (designer's ruling, 2026-11-19), the
+  performance and scale work.
 - **Infeasible, not a defect (designer's ruling, 2026-11-18): `budget-android` 720p12 Gray4
   `normal`.** The row decoded in 1 of 5 repeatable sessions with the stand-in and 0 of 3 with x264.
   It was traced in one bounded pass with the simulator's truth, on the row's own setting (320 x 180
@@ -2170,14 +2177,14 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   on the same bench samples give 0.0001, and mapping every cell corner exactly (`nodeStep` 1) changes
   nothing. So the fault is in what the bench feeds the equaliser (its palette or anchor sampling),
   not in its cell sampling. Not a few-line fix, so not fixed. Results that use the bench with blur
-  off should not be trusted until it is.
+  off should not be trusted until it is. **Assigned to M5** (designer's ruling, 2026-11-19).
 - **Coverage margins (M3 part 2).** PR #48's first run failed the coverage gate on windows-11-arm
   alone: `internal/pipeline` at 95.0% (95.2 to 95.4% on the other runners; the error paths of the
   repair, the shard store and the hash check were never covered, and two cancellation returns
   only sometimes). Deterministic tests of those paths bring it to 96.5% (measured over three runs, with the
   defensive guard in `attemptDue` kept uncovered). `internal/video` stood at 95.8% (windows-2025) and 95.6% (windows-11-arm)
   in that run: a margin item for the next pull request that changes `internal/video`, not fixed
-  in this one.
+  in this one. **Assigned to M5** (designer's ruling, 2026-11-19).
 - **Round-trip matrix with x264 (M3 part 2).** `TestRoundTripMatrixX264` with `QRVT_LONG_TESTS=1`
   runs the 13 rows that have a recorder bitrate (not `ideal`, whose recorder is lossless) with
   x264 at the preset's bitrate and camera, three sessions each, 855 s on the development machine:
@@ -2201,7 +2208,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   **If it ever fails in CI, it is replaced by `iphone-hdr` four greys `robust`, and is not rerun.**
   Also open: no 10-bit x264 recording runs end to end outside the long version (`iphone-hdr` is
   its only 10-bit row, and the engine's 10-bit round trip of a recording,
-  `TestEncodeBitrateRoundTrip`, decodes a synthetic clip).
+  `TestEncodeBitrateRoundTrip`, decodes a synthetic clip). **Assigned to M6, with `--hdr`**
+  (designer's ruling, 2026-11-19).
 - **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
   every row of section 15 through the public API with five repeatable sessions each: the files
   (6.5 KB) are encoded to an MP4 by the embedded engine, decoded, filmed for two passes (three on
@@ -2344,15 +2352,19 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   (`internal/vision` 3,249 s, `internal/fec/ldpc` 3,141 s, the root package 1,617 s) and is
   expected to take several hours on a 4-vCPU runner, so it needs splitting or long-size trims
   before it can be a CI job; the decision is due at M6, the scale work, which owns the nightly 1 GB
-  loopback anyway. **Recorded, not fixed (reviewer's LOW, 2026-11-19):** most guards turn the long
+  loopback anyway. The deferral also covers the nightly workflow's "full simulator matrix (M3)"
+  step, still a placeholder (section 17): it is decided at M6 with the long-test job, not built
+  in M3 (designer's ruling, 2026-11-19). **Recorded, not fixed (reviewer's LOW, 2026-11-19):** most guards turn the long
   tests on only for `QRVT_LONG_TESTS=1` (`== "1"`), but three treat any non-empty value as on:
   `internal/vision`'s `geomLong`, `internal/fec/ldpc`'s `long` and `internal/fec/conv`'s
   `TestCorrectsThreeErrors`; so `QRVT_LONG_TESTS=0` runs the long sizes in those packages only.
   Making them all `== "1"` touches three places, more than the designer's two-helper limit for this
-  pull request, so it waits for a later one. **Also for later (reviewer's LOW, 2026-11-19):**
+  pull request, so it waits for a later one: **assigned to M4's tooling work** (designer's ruling,
+  2026-11-19). **Also for later (reviewer's LOW, 2026-11-19):**
   `tools/dev test -pkg` runs its packages in one `go test` run, without the isolation split that
   `./...` gets (`isolatedRuns`); until it goes through the same split, section 17 asks for the root
-  package, `internal/pipeline` and `internal/video` in `-pkg` invocations of their own. The
+  package, `internal/pipeline` and `internal/video` in `-pkg` invocations of their own. **Assigned
+  to M4's tooling work** (designer's ruling, 2026-11-19). The
   designer accepted -31% (2026-11-18), with the honesty statistics and the concurrency tests kept
   in full; the macos-26-intel figure above stays a projection until this pull request's CI run
   measures it. Half, the target, was not reached. What remains is
@@ -2469,6 +2481,12 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   run). With the 1 s watchdog tick and a stall clock that starts at the reservation, which is not
   aligned to a tick, an instance is cancelled between the limit and the limit plus 1 s after its
   reservation.
+- **`scripts/setup.sh` hung on apt (2026-11-19).** On PR #52's CI run 44474815418 the setup step
+  stalled in apt on a package mirror until the step's 35-minute limit; one infrastructure rerun was
+  allowed by the designer's ruling. **Assigned to M4's first pull request, the tooling one:**
+  `apt-get update` and `install` get Acquire timeouts and retries, and every package-manager command
+  a per-command timeout, so that a mirror stall fails within a few minutes with a clear message;
+  the same for any dnf, pacman, brew or winget step that can hang.
 
 ## 20. Sources
 
