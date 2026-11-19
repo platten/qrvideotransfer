@@ -226,18 +226,36 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string,
 	return env, goTest(tags, extra...), *p, target
 }
 
-// testRuns is not implemented yet.
+// testRuns returns the go test invocations of the test task: goArgs, whose tail is the package
+// patterns, split by isolatedRuns over pkgs, the packages the patterns name (go list), and then the
+// part that -part selects. -part names a half of the whole module's split, so it needs ./...
 func testRuns(goArgs, patterns, pkgs []string, part string) ([][]string, error) {
-	return nil, errors.New("not implemented")
+	if part != "" && !slices.Equal(patterns, []string{"./..."}) {
+		return nil, fmt.Errorf("-part %s needs the whole module (./...), not -pkg", part)
+	}
+	return selectRuns(isolatedRuns(goArgs[:len(goArgs)-len(patterns)], pkgs), part)
 }
 
+// test runs every run of testRuns, even after one fails.
 func test(args []string) error {
 	tags, err := releaseTags()
 	if err != nil {
 		return err
 	}
-	env, goArgs, part, _ := testCommand(args, tags)
-	return runTests(env, tags, goArgs, part)
+	env, goArgs, part, patterns := testCommand(args, tags)
+	pkgs, err := packages(tags, patterns...)
+	if err != nil {
+		return err
+	}
+	runs, err := testRuns(goArgs, patterns, pkgs, part)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, a := range runs {
+		errs = append(errs, run(env, "go", a...))
+	}
+	return errors.Join(errs...)
 }
 
 // lintRuns returns the golangci-lint invocations: the default build, then, when the release build
@@ -435,19 +453,17 @@ const isolated = module + "/internal/video"
 // section 19).
 var endToEnd = []string{module, module + "/internal/pipeline"}
 
-// isolatedRuns splits a go test command whose last argument is ./... into runs: every package but
-// the isolated and end-to-end ones (pkgs lists them all, from go list), then each end-to-end
-// package present on its own, then the isolated one alone. Any other command is run as it is.
-func isolatedRuns(args, pkgs []string) [][]string {
-	if len(args) == 0 || args[len(args)-1] != "./..." {
-		return [][]string{args}
-	}
-	head := args[:len(args)-1]
-	others := slices.Clone(head)
+// isolatedRuns splits a go test command (head, without its packages) over pkgs, import paths from
+// go list, into runs: every package but the isolated and end-to-end ones, then each end-to-end
+// package present on its own, then the isolated one alone. A group without a package gives no
+// run, so the whole module (./...) gives all four runs and a -pkg list only those it needs.
+func isolatedRuns(head, pkgs []string) [][]string {
+	others, last := slices.Clone(head), slices.Clone(head)
 	var alone [][]string
 	for _, p := range pkgs {
 		switch {
 		case p == isolated || strings.HasPrefix(p, isolated+"/"):
+			last = append(last, p)
 		case slices.Contains(endToEnd, p):
 			alone = append(alone, append(slices.Clone(head), p))
 		default:
@@ -457,8 +473,15 @@ func isolatedRuns(args, pkgs []string) [][]string {
 	slices.SortFunc(alone, func(a, b []string) int {
 		return slices.Index(endToEnd, a[len(a)-1]) - slices.Index(endToEnd, b[len(b)-1])
 	})
-	runs := append([][]string{others}, alone...)
-	return append(runs, append(slices.Clone(head), "./internal/video/..."))
+	var runs [][]string
+	if len(others) > len(head) {
+		runs = append(runs, others)
+	}
+	runs = append(runs, alone...)
+	if len(last) > len(head) {
+		runs = append(runs, last)
+	}
+	return runs
 }
 
 // selectRuns returns the part of an isolatedRuns split that -part names: "" for all, "others"
@@ -515,35 +538,17 @@ func checkJobLimits(b []byte) (job int, race []int) {
 	return job, race
 }
 
-// packages lists the module's packages, with the given build tags.
-func packages(tags string) ([]string, error) {
+// packages lists the packages that patterns name, with the given build tags.
+func packages(tags string, patterns ...string) ([]string, error) {
 	args := []string{"list"}
 	if tags != "" {
 		args = append(args, "-tags="+tags)
 	}
-	out, err := output("go", append(args, "./...")...)
+	out, err := output("go", append(args, patterns...)...)
 	if err != nil {
 		return nil, fmt.Errorf("go list: %w: %s", err, out)
 	}
 	return strings.Fields(out), nil
-}
-
-// runTests runs go test with goArgs as isolatedRuns splits it, all runs of the selected part (""
-// for both) even if one fails.
-func runTests(env []string, tags string, goArgs []string, part string) error {
-	pkgs, err := packages(tags)
-	if err != nil {
-		return err
-	}
-	runs, err := selectRuns(isolatedRuns(goArgs, pkgs), part)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for _, a := range runs {
-		errs = append(errs, run(env, "go", a...))
-	}
-	return errors.Join(errs...)
 }
 
 // mergeProfiles writes the coverage profiles srcs, in order, to dst as one profile with the first's

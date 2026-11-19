@@ -50,13 +50,14 @@ func cover(args []string) error {
 	// The runs of the test task (isolatedRuns): every other package, then the root package and
 	// internal/pipeline each on its own, then internal/video on its own; their profiles are merged
 	// into one, so the gate covers every package.
-	list, err := packages(tags)
+	list, err := packages(tags, "./...")
 	if err != nil {
 		return err
 	}
 	var parts []string
 	var errs []error
-	for i, a := range isolatedRuns(coverArgs(tags), list) {
+	goArgs := coverArgs(tags)
+	for i, a := range isolatedRuns(goArgs[:len(goArgs)-1], list) {
 		part := fmt.Sprintf("%s.%d", *profile, i)
 		parts = append(parts, part)
 		a = slices.Clone(a)
