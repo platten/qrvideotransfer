@@ -27,6 +27,10 @@ import (
 // Pinned Go version (IMPLEMENTATION_PROMPT.md section 3). The other tools are pinned in tools.go.
 const goVersion = "go1.27.4"
 
+// longTestsVar turns the long tests on when it is exactly "1" (test -long sets it; DESIGN.md
+// section 17). Every test reads it as os.Getenv(...) == "1" or != "1" (TestLongTestGuards).
+const longTestsVar = "QRVT_LONG_TESTS"
+
 // targets are the six release targets.
 var targets = [][2]string{
 	{"linux", "amd64"}, {"linux", "arm64"},
@@ -212,7 +216,7 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string,
 		// limit the root package, internal/fec/ldpc and internal/vision panicked, the rest of their
 		// tests unrun; the slowest, internal/vision, took 54 minutes on 16 threads (DESIGN.md
 		// section 17). 120 minutes leaves room and still fails a hang.
-		env = append(env, "QRVT_LONG_TESTS=1")
+		env = append(env, longTestsVar+"=1")
 		extra = append(extra, "-timeout=120m")
 	}
 	if *short {
