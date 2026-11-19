@@ -237,13 +237,26 @@ func TestDriftBestEffort(t *testing.T) {
 			for _, k := range offsets {
 				t.Run(fmt.Sprintf("%s-robust/%v/offset%d", rateModName[mod], exp, k), func(t *testing.T) {
 					start := time.Duration(k) * driftPeriod / 8
-					rec := filmPeriod(t, frames, driftPeriod, 4, lockedCamera(t, exp), channel.Run{Start: start, Captures: passes * res.Frames, Seed: 0x5eed + uint64(k)})
-					out, dr, err := decodeTo(t, rec)
+					// Five passes first, then all eight only if those fall short: the captures are
+					// prefix-stable (the root package's TestFilmPrefix) and decoding stops once
+					// complete, so the outcome is the eight passes' at less filming.
+					var (
+						out string
+						dr  *DecodeResult
+						err error
+					)
+					for _, p := range []int{5, passes} {
+						rec := filmPeriod(t, frames, driftPeriod, 4, lockedCamera(t, exp), channel.Run{Start: start, Captures: p * res.Frames, Seed: 0x5eed + uint64(k)})
+						var short *ShortError
+						if out, dr, err = decodeTo(t, rec); !errors.As(err, &short) {
+							break
+						}
+					}
 					if err != nil {
 						t.Fatalf("%d passes drifting at 29.97 against 30 fps: %v", passes, err)
 					}
 					checkOutput(t, out, want)
-					t.Logf("F %d, decoded after %d of %d captures, clean %.3f", res.Frames, dr.Stats.Captures, passes*res.Frames, dr.Stats.CleanFraction)
+					t.Logf("F %d, decoded after %d of at most %d captures, clean %.3f", res.Frames, dr.Stats.Captures, passes*res.Frames, dr.Stats.CleanFraction)
 				})
 			}
 		}
