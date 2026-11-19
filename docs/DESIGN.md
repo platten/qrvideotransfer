@@ -2140,7 +2140,7 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   frame's 301 ms is the figure to beat. **Assigned to M6** (designer's ruling, 2026-11-19), the
   performance and scale work.
 - **Infeasible, not a defect (designer's ruling, 2026-11-18): `budget-android` 720p12 Gray4
-  `normal`.** The row decoded in 1 of 5 repeatable sessions with the stand-in and 0 of 3 with x264.
+  `normal`.** The row decoded in 1 of 5 sessions with the stand-in and 0 of 3 with x264 (sessions with fixed seeds, but whose transfers changed from run to run until the M3 exit fixed the inputs' modification times; see below).
   It was traced in one bounded pass with the simulator's truth, on the row's own setting (320 x 180
   grid, 1080p30 camera, 12 fps display, 4.62 measured camera pixels per cell).
 
@@ -2226,7 +2226,7 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   `TestEncodeBitrateRoundTrip`, decodes a synthetic clip). **Assigned to M6, with `--hdr`**
   (designer's ruling, 2026-11-19).
 - **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
-  every row of section 15 through the public API with five repeatable sessions each: the files
+  every row of section 15 through the public API with five sessions each (fixed session ids and seeds; repeatable since the M3 exit, which fixed the inputs' modification times, below): the files
   (6.5 KB) are encoded to an MP4 by the embedded engine, decoded, filmed for two passes (three on
   `harsh`) by the preset's camera with the pure-Go recorder stand-in, not x264 at the preset's
   bitrate, and decoded. 21 of the 22 rows decode in all five sessions. `budget-android`, 720p at
@@ -2503,6 +2503,41 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   rule gives up around a patch are a fixed number of cells, a larger share of a small code.
   **Assigned to M5:** characterise the glare margin against grid size. No small-grid assertion is
   made until then.
+- **End-to-end transfers were not repeatable before the M3 exit (fixed 2026-11-19).** The
+  payload's manifest records each input's modification time, and every end-to-end test built its
+  inputs as fresh files (`payloadDir` in the root package, `writeInputs` in `internal/pipeline`),
+  so each run encoded different bytes (with compression on, as in the root package's encodes, a
+  different stream throughout). Fixed seeds therefore did not fix the transfer: four runs of the
+  short `TestRoundTripMatrix` gave clean fractions of 0.888 to 0.904 on one row (reviewer's
+  survey). Both helpers now set every input's modification time to a fixed instant (`fixTimes`,
+  one per package), and the always-on matrix rows and the x264 row then gave identical captures
+  and clean fractions over 5 runs. M4's first pull request checks that no test builds inputs
+  another way. The tests affected, by the reviewer's survey:
+  - **Near a margin, asserting only "decodes", could flip in CI:**
+    `TestRoundTripMatrix/iphone-hdr-1080p30-gray4-normal` (always on, below section 11's condition
+    2 by design) and `TestRoundTripMatrixX264/budget-android-720p12-bw-normal` (always on). No
+    remaining test asserted an exact count on an outcome that depends on the bytes; the
+    expected-failure case `TestLockedRateNotEnoughData` was the dangerous kind and was fixed first
+    (d62a274); `TestSoftBitsAddUp`'s threshold held with a large margin over 12 runs.
+  - **Affected, asserting "decodes" or a matching SHA-256, with margin:** `TestRoundTripMatrix`'s
+    other always-on rows and every long row (its "five repeatable sessions" were not repeatable),
+    every long row of `TestRoundTripMatrixX264`, `TestStartMidLoop` and `TestSoftBitsAddUp`.
+  - **Bytes varied, outcome could not** (a lossless channel, or a comparison within one run): in
+    the root package `TestEncodeDecode`, `TestEncodeDefaults`, `TestDryRun`, `TestTypedErrors`,
+    `TestSigningEndToEnd` and `TestFilmPrefix`; in `internal/pipeline` `TestFrameLoss`,
+    `TestLoopback`, `TestOtherSessionIgnored`, `TestEncodeConfig`, `TestDryRun`, `TestEvents`,
+    `TestCancel`, `TestInterleavedSessions` and the hostile tests' signed stream, `TestFileFaults`,
+    `TestCompleteSkipsRest`, `TestBackendFaults`, `TestTinyGrid`, `TestHostileDescriptorRecording`,
+    `TestEmbeddedInProcess`, `TestDiskSpaceLimit`, `TestReorderBounded`, the resource tests'
+    located frames, `FuzzDecode`'s seed and the accumulation tests built on their shared fixture.
+  Two earlier observations are reassessed. The x264 shortfall of `budget-android` Gray4 `normal`,
+  48 to 54 shards over repeated runs of the same sessions (2026-11-18, then put down to x264's
+  frame threading, not established), is likely this cause: the stand-in matrix alone varied from
+  run to run, so the sessions never had the same bytes; x264's threading may add to it but is not
+  needed to explain the range. The same row's "1 of 5 repeatable sessions" with the stand-in may
+  have been affected as a count (a rerun could give 0 or 2 of 5), but not the conclusion that the
+  row is infeasible, which rests on the radiometry bench's trace with fixed seeds and no file
+  inputs (raw bit error rate about 0.107, set by the blur and the camera pixels per cell).
 - **`scripts/setup.sh` hung on apt (2026-11-19).** On PR #52's CI run 44474815418 the setup step
   stalled in apt on a package mirror until the step's 35-minute limit; one infrastructure rerun was
   allowed by the designer's ruling. **Assigned to M4's first pull request, the tooling one:**

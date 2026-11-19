@@ -126,7 +126,8 @@ const matrixSessions = 5
 // the files are encoded to an MP4 by the embedded engine, the video is decoded and filmed by the
 // simulated camera of the row's preset for two passes of the loop (three on `harsh`), with the
 // pure-Go recorder stand-in (not x264 at the preset's bitrate), and the recording is decoded.
-// Each run uses a fixed session id and outer order seed, so that it can be repeated; the long
+// Each run uses a fixed session id and outer order seed, and payloadDir fixes the inputs'
+// modification times (since the M3 exit), so that it can be repeated; the long
 // version (QRVT_LONG_TESTS=1) runs every row with matrixSessions sessions, the short version the
 // rows marked always with one.
 func TestRoundTripMatrix(t *testing.T) {
