@@ -66,7 +66,8 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-2025, windows-11-arm]
     runs-on: ${{ matrix.os }}
-    # 2 race steps x 20 minutes + 30 for the rest (tools/dev fixedStepsBudget, DESIGN.md section 17).
+    # The 2 race steps' 15 + 20 minutes + 35 for the rest (tools/dev fixedStepsBudget, DESIGN.md
+    # section 17). Each step's limit is about twice its normal time on macos-26-intel.
     timeout-minutes: 70
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,12 +87,12 @@ jobs:
 
       - name: Lint (Unix)
         if: runner.os != 'Windows'
-        timeout-minutes: 15
+        timeout-minutes: 5
         shell: bash
         run: scripts/test.sh lint
       - name: Lint (Windows)
         if: runner.os == 'Windows'
-        timeout-minutes: 15
+        timeout-minutes: 5
         shell: pwsh
         run: scripts/test.ps1 lint
 
@@ -101,16 +102,32 @@ jobs:
         env:
           CGO_ENABLED: "0"
 
-      - name: Tests with coverage gate (Unix)
+      # The coverage tests in two steps, each with its own limit: every package but internal/video,
+      # its profile kept, then internal/video, which runs even if the first failed, but not alone
+      # after an earlier failure skipped the first, and gates the merged profile (tools/dev cover
+      # -part; DESIGN.md section 17).
+      - name: Tests with coverage, other packages (Unix)
+        id: cover-rest
         if: runner.os != 'Windows'
-        timeout-minutes: 20
+        timeout-minutes: 18
         shell: bash
-        run: scripts/test.sh cover
-      - name: Tests with coverage gate (Windows)
+        run: scripts/test.sh cover -part rest
+      - name: Tests with coverage gate, internal/video (Unix)
+        if: ${{ !cancelled() && runner.os != 'Windows' && steps.cover-rest.outcome != 'skipped' }}
+        timeout-minutes: 8
+        shell: bash
+        run: scripts/test.sh cover -part video
+      - name: Tests with coverage, other packages (Windows)
+        id: cover-rest-windows
         if: runner.os == 'Windows'
-        timeout-minutes: 20
+        timeout-minutes: 18
         shell: pwsh
-        run: scripts/test.ps1 cover
+        run: scripts/test.ps1 cover -part rest
+      - name: Tests with coverage gate, internal/video (Windows)
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.cover-rest-windows.outcome != 'skipped' }}
+        timeout-minutes: 8
+        shell: pwsh
+        run: scripts/test.ps1 cover -part video
 
       # The tasks above and below test with RELEASE_TAGS from .goreleaser.yaml, the configuration
       # that ships; this step keeps the default, untagged build covered too.
@@ -123,7 +140,7 @@ jobs:
       # The opt-in HEVC fast path is compiled only with the unsandboxedhevc tag (DESIGN.md section
       # 12), so the steps above never build it; its tests run here, with the release build's tags.
       - name: HEVC fast-path tests (unsandboxedhevc)
-        timeout-minutes: 15
+        timeout-minutes: 8
         run: go test -count=1 -tags unsandboxedhevc,noasm,nounsafe ./internal/video/
         env:
           CGO_ENABLED: "0"
@@ -166,13 +183,13 @@ jobs:
           config: ./.testcoverage.yml
 
       # The race detector needs cgo and does not support windows/arm64.
-      # Two steps, each with its own 20-minute limit: every package but internal/video, then
-      # internal/video on its own, which runs even if the first failed, but not alone after an
-      # earlier failure skipped the first (DESIGN.md section 17).
+      # Two steps, each with its own limit: every package but internal/video, the root package and
+      # internal/pipeline, then those three each alone, which runs even if the first failed, but
+      # not alone after an earlier failure skipped the first (DESIGN.md section 17).
       - name: Race tests, other packages (Unix)
         id: race-others
         if: runner.os != 'Windows'
-        timeout-minutes: 20
+        timeout-minutes: 15
         shell: bash
         run: scripts/test.sh -race -part others
       - name: Race tests, isolated packages (Unix)
@@ -183,7 +200,7 @@ jobs:
       - name: Race tests, other packages (Windows)
         id: race-others-windows
         if: matrix.os == 'windows-2025'
-        timeout-minutes: 20
+        timeout-minutes: 15
         shell: pwsh
         run: scripts/test.ps1 -race -part others
       - name: Race tests, isolated packages (Windows)
@@ -194,23 +211,27 @@ jobs:
 
       - name: Static build, all six targets (Unix)
         if: runner.os != 'Windows'
-        timeout-minutes: 10
+        timeout-minutes: 5
         shell: bash
         run: scripts/build.sh -all
       - name: Static build, all six targets (Windows)
         if: runner.os == 'Windows'
-        timeout-minutes: 10
+        timeout-minutes: 5
         shell: pwsh
         run: scripts/build.ps1 -all
 
       - name: Vulnerability scan
-        timeout-minutes: 10
+        timeout-minutes: 5
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:
           go-version-input: ${{ env.GO_VERSION }}
           check-latest: false
           go-package: ./...
           repo-checkout: false # already checked out above
+          # The setup-go above restored the module cache, and the steps since have filled it. The
+          # action's own setup-go restoring it again failed on every file already there (its
+          # read-only files: "Cannot open: File exists" from gtar on macOS, DESIGN.md section 19).
+          cache: false
 
   # Runs the stand-alone setup scripts as a new developer would, non-interactively and with --spike,
   # on a runner without the pinned Go (no setup-go here: the runner's own Go is a different version,

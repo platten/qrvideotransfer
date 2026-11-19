@@ -194,7 +194,7 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string,
 	long := fs.Bool("long", false, "include long tests (QRVT_LONG_TESTS=1)")
 	short := fs.Bool("short", false, "pass -short to go test")
 	untagged := fs.Bool("untagged", false, "test the default build, without the release build tags")
-	only := fs.String("pkg", "", "comma-separated packages to test instead of ./..., in one go test run (for example ./internal/vision,.,./internal/pipeline)")
+	only := fs.String("pkg", "", "comma-separated packages to test instead of ./..., split as ./... is: the root package, internal/pipeline and internal/video each in a go test run of its own (for example ./internal/vision,.,./internal/pipeline)")
 	p := fs.String("part", "", "others: every package but internal/video, the root package and internal/pipeline; isolated: each of those alone")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
 	if *untagged {
@@ -205,7 +205,7 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string,
 	if *race {
 		// internal/video's engine tests take minutes under the race detector on the slowest runner
 		// (macos-26-intel), past go test's default of 10 minutes per package; 18 minutes stays inside
-		// the CI step's 20.
+		// the isolated race step's 20.
 		// -count=1: a cached race pass reuses one old run's luck for the nondeterministic tests
 		// (internal/fec/conv's parallel test, internal/fec/rs's subprocess test), and setup-go
 		// restores the test cache across runs (DESIGN.md section 17).
@@ -508,15 +508,12 @@ func selectRuns(runs [][]string, part string) ([][]string, error) {
 }
 
 // fixedStepsBudget is the time, in minutes, that the check job's limit allows for every step but
-// the two race steps a runner runs. With those at their limits (2 x 20) it gives the job's 70
-// minutes: the split's own arithmetic, not an allowance for slow hosts (DESIGN.md section 17).
-// Source: on macos-26-intel, the slowest runner, the non-race steps took 21 min 55 s in run
-// 43811766030 and 20 min 13 s in run 43958754789 (three packages restored from the cache). The
-// earlier budget of 20 was exceeded in both runs, and trimming vision's always-on statistics did
-// not bring the steps back under it, so the budget is 30, which leaves roughly 8 to 10 minutes of
-// margin. (Earlier, run 43797784643 took 16 min 54 s with no cache restored, and the slow host of
-// run 43774194055 23 min 09 s; such a host is a runner fault, and the limits are not sized for it.)
-const fixedStepsBudget = 30
+// the two race steps a runner runs. With those at their limits (15 + 20) it gives the job's 70
+// minutes (DESIGN.md section 17). Source: on macos-26-intel, the slowest runner, the non-race
+// steps took 17.8 to 28.0 minutes, median 21.2, in the six passing runs before the steps' limits
+// were set to about twice their normal times (runs 44474815418 to 44627182924); 35 is 1.65 times
+// that median. Twice it, 42, would take the job to 77 minutes, which the designer decides.
+const fixedStepsBudget = 35
 
 // checkJobLimits returns, from ci.yml, the check job's timeout-minutes and the timeout-minutes of
 // each of its race steps, in order.
