@@ -23,9 +23,11 @@ import (
 // noise: between any two points of a sweep, the better one's rate may exceed the worse one's by at
 // most twice the standard deviation of the difference, taking each error count as Poisson. And
 // every point stays within rawBERTolerance of the reference stored in testdata/rawber.json at the
-// M3 exit (2026-11-19). The references are integer counts; the 10% band also covers the few bits
+// M3 exit (2026-11-19). Both are asserted in the long version only (TestRawBERSweeps, 4 captures a
+// point); the always-on TestRawBERReference is a regression check of one point at one capture
+// against its own stored count, and asserts no monotonicity. The references are integer counts; the 10% band also covers the few bits
 // by which a platform whose compiler fuses multiply-adds (arm64) may differ from amd64 in the
-// equaliser's floating point: every stored point has at least 90 errors, so a difference of a few
+// equaliser's floating point: every stored point has at least 64 errors, so a difference of a few
 // bits is a few percent at most.
 
 // rawBERTolerance is the largest relative difference from a stored rate.
@@ -39,13 +41,16 @@ type berPoint struct {
 	Preset string  `json:"preset"`
 	Param  string  `json:"param"` // blur (sigma, camera pixels), noise (sigma, 8-bit codes) or step (stand-in quantiser step, 8-bit codes; 0 lossless)
 	Value  float64 `json:"value"`
+	Caps   int     `json:"captures"`
 	Errors int     `json:"errors"`
 	Bits   int     `json:"bits"`
 }
 
 func (p berPoint) rate() float64 { return float64(p.Errors) / float64(max(p.Bits, 1)) }
 
-func (p berPoint) key() string { return fmt.Sprintf("%s/%s=%g", p.Preset, p.Param, p.Value) }
+func (p berPoint) key() string {
+	return fmt.Sprintf("%s/%s=%g/%d captures", p.Preset, p.Param, p.Value, p.Caps)
+}
 
 // berSweep is one parameter's values, worst first.
 type berSweep struct {
@@ -71,15 +76,15 @@ var berSweeps = []berSweep{
 // 8 random frames shown at 30 fps.
 func berSession(t testing.TB) *radSession { return newRadSession(t, 212, 120, 4, 2, 8, 0x92, false) }
 
-// measureBER films the session with preset name at 1600 x 900, edited by set, for 4 captures at a
+// measureBER films the session with preset name at 1600 x 900, edited by set, for n captures at a
 // fixed seed and counts the errors of the credited bits.
-func measureBER(t *testing.T, s *radSession, name, param string, v float64, set func(*channel.Config, float64)) berPoint {
+func measureBER(t *testing.T, s *radSession, name, param string, v float64, set func(*channel.Config, float64), n int) berPoint {
 	t.Helper()
 	c := preset(t, name, 1600, 900)
 	set(&c, v)
-	caps := s.shoot(t, c, time.Second/30, 4, 0xb2)
+	caps := s.shoot(t, c, time.Second/30, n, 0xb2)
 	tab, _, _, _ := s.calibrate(t, caps, false)
-	p := berPoint{Preset: name, Param: param, Value: v}
+	p := berPoint{Preset: name, Param: param, Value: v, Caps: n}
 	for j := range calBuckets {
 		p.Bits += tab.n[j]
 		p.Errors += tab.errs[j]
@@ -151,7 +156,7 @@ func TestRawBERSweeps(t *testing.T) {
 			t.Run(name+"/"+sw.param, func(t *testing.T) {
 				var pts []berPoint
 				for _, v := range sw.vals {
-					p := measureBER(t, s, name, sw.param, v, sw.set)
+					p := measureBER(t, s, name, sw.param, v, sw.set, 4)
 					t.Logf("%s: %d errors in %d bits, %.5f", p.key(), p.Errors, p.Bits, p.rate())
 					pts = append(pts, p)
 					if !update {
@@ -170,6 +175,7 @@ func TestRawBERSweeps(t *testing.T) {
 		}
 	}
 	if update {
+		all = append(all, measureBER(t, s, "tripod", berSweeps[0].param, 1, berSweeps[0].set, 1))
 		b, err := json.MarshalIndent(all, "", "  ")
 		if err != nil {
 			t.Fatal(err)
@@ -180,13 +186,14 @@ func TestRawBERSweeps(t *testing.T) {
 	}
 }
 
-// TestRawBERReference is the always-on regression point of the assertion: `tripod`'s own
-// parameters (the blur sweep's point at 1.0) within rawBERTolerance of its reference. About 0.5 s
+// TestRawBERReference is the always-on regression check: `tripod`'s own parameters (the blur
+// sweep's point at 1.0) filmed for one capture, within rawBERTolerance of its own stored one-capture
+// count. It asserts no monotonicity; that is the long version's (TestRawBERSweeps). About 0.2 s
 // pinned to 4 CPUs.
 func TestRawBERReference(t *testing.T) {
 	raceSkipStatistics(t)
 	sw := berSweeps[0]
-	checkStored(t, loadBER(t), measureBER(t, berSession(t), "tripod", sw.param, 1, sw.set))
+	checkStored(t, loadBER(t), measureBER(t, berSession(t), "tripod", sw.param, 1, sw.set, 1))
 }
 
 // TestRiseBeyondNoise checks the monotonicity rule on known counts.
