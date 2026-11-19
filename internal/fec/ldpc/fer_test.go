@@ -50,7 +50,7 @@ const margin = 0.5
 // llrScale is the soft-bit scale of the simulated channel: one unit of LLR is 4 soft-bit steps.
 const llrScale = 4
 
-func long() bool { return os.Getenv("QRVT_LONG_TESTS") != "" }
+func long() bool { return os.Getenv("QRVT_LONG_TESTS") == "1" }
 
 // channel returns quantised BPSK/AWGN soft bits for sent bits at Eb/N0 ebn0 dB for a code of rate
 // rate (information bits per sent bit), positive meaning 0.
