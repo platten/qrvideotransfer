@@ -251,6 +251,10 @@ sections 5 and 13, FORMAT.md section 14) and the planning figures in DESIGN.md s
 | Pipeline and API | `internal/pipeline`, the root package, `tools/dev testvideos` | SHA-256 round trip for every row of the matrix in DESIGN.md section 15; several recordings passed to one decode add up, and two that each fail alone succeed together; start mid-loop; frame loss at the two levels given in DESIGN.md section 15; `DryRun` reports length, size and filming time without rendering; the JSON report; cancellation leaves no temporary files; typed errors. Then: the frame vectors and the reference video of FORMAT.md section 13, and the committed set of synthetic test clips |
 | Hostile inputs | `testdata/hostile/`, fuzz targets, end-to-end tests | Everything in SECURITY.md sections 9.1 to 9.6 |
 
+Moved out of M3 (designer's ruling, 2026-11-19): `tools/dev testvideos` and the committed set of
+synthetic test clips go to M5, where the clips are used; the committed corpora of the fuzz targets
+that have none go to M7, alongside `FuzzDecode`'s reach.
+
 **Exit**: every row of the assertion table and of the round-trip matrix in DESIGN.md section 15 passes.
 Then, if S2 has not been analysed because the recordings are missing, stop and ask for them.
 
@@ -273,6 +277,11 @@ Infer the frame index of a capture whose four header copies fail from the last i
 markers, carrying the quad from tracking (deferred from M2, DESIGN §7 rule 1). Decode mirrored
 recordings, which the detector assumes away in M2 (FORMAT §4.1).
 
+Build `tools/dev testvideos` and commit the small set of synthetic "as filmed" clips (DESIGN §15,
+test videos), moved here from M3 because M5 is where they are used (designer's ruling,
+2026-11-19). Their size budget, in the same 2 MB class as M3's reference video and vectors, is ruled
+then.
+
 ### M6. Scale and HDR output (3 agents)
 
 - Sliced parallel encode and decode; resuming with `--state-dir`; and the memory bounds of DESIGN.md
@@ -286,6 +295,10 @@ Then stop for **G2**.
 
 Follow SECURITY.md section 10 exactly. The reviewers must be agents that have seen none of the
 implementation history. Exit: no open finding of high or medium severity.
+
+Before the pass, commit a corpus for each of the 9 fuzz targets that have none (SECURITY §9.1),
+moved here from M3 to be built alongside the work on `FuzzDecode`'s reach (DESIGN §19; designer's
+ruling, 2026-11-19).
 
 ### M8. Documentation and release (2 agents)
 

@@ -251,8 +251,11 @@ Rules for version 1:
    12 fps on a 30 fps camera with 50 ms to spare, and for 30 fps on a 60 fps camera when *E + tr* is
    under 16.7 ms.
 5. **Slow cameras.** When the camera is slower than twice the display rate, the mixed band is discarded in
-   each capture. Its position drifts between loop passes, so several passes fill in. `decode` reports the
-   clean fraction and recommends a lower display rate. Single-pass success is not promised.
+   each capture. Its position moves between loop passes only as far as the camera's rate drifts against
+   the display's, so several passes fill in when it drifts; a camera locked to the display rate repeats
+   the same mixing every pass, and some phase offsets then never decode (section 15, measured). `decode`
+   reports the clean fraction and recommends a lower display rate. Single-pass success is not promised,
+   and equal rates are not a supported setting.
 6. **Loop wrap.** The frame count is padded to a multiple of 4 so the phase sequence is continuous across
    the seam. Black frames or a freeze at the seam simply fail finder detection.
 7. **Duplicates.** Soft bits are added. The first capture of a code frame in a pass has weight 1; adjacent
@@ -910,6 +913,13 @@ Whether a setting works depends on the camera. All of these must hold (simulated
    under the handheld blur (3.6 for budget-android) and 4.4 under the 10-bit HLG preset, so the
    planning point of 5 leaves a margin of about 1.25 and 1.1 times; at 5 the cell-centre error is
    about 0.05 cell RMS.
+   **Condition 2's `normal` minimum leaves no glare margin.** At 6.0 camera pixels per cell on
+   `handheld`, four greys `normal` decodes without glare but with a specular patch over 5% of the
+   code at 0 or 1 of 4 patch positions (short, where it fails, by 4 to 54 of the 259 shards
+   needed, 0.79 to 0.98 of them); at 6.4 it decodes at all four (simulated, 2026-11-19; section 15, glare row). A setting that must tolerate glare
+   needs that margin, or `robust`. Both margins were measured on a 212 x 120 grid and do not carry
+   over to the smallest grids: on a 120 x 120 grid `normal` with a 5% patch at 6.4 and `robust`
+   with 20% each decoded at 3 of 4 patch positions (section 19).
 3. Recorder bits per cell per code frame `q = 0.9 x bitrate / (rate x cells)` at least 9 for `fast`,
    5.5 for `normal`, 2.5 for `robust` with HEVC; 1.4 times those with H.264.
 4. The display video's bitrate, `8.4 x cells x rate`, stays playable: 33 Mbit/s for 1080p30,
@@ -1660,14 +1670,14 @@ How the parameters are read, and the values every preset shares:
 | Impairment | Asserted property |
 | --- | --- |
 | Perspective to 25 degrees, lens distortion, rolling shear | Cell-centre error at most 0.15 cell RMS; finders found in at least 99.9% of 1,000 random poses; the header read in at least 99.5% of captures on `handheld` |
-| Blur, noise, recorder quantiser | Raw bit error rate never rises as a parameter improves, and stays within 10% of reference values stored when M2 is merged |
+| Blur, noise, recorder quantiser | Raw bit error rate never rises as a parameter improves by more than counting noise, and stays within 10% of reference values stored at the M3 exit (2026-11-19); the M2 stages are unchanged since M2 merged. A rise fails when the better point's rate exceeds the worse one's by more than twice the standard deviation of the difference, each error count taken as Poisson, between any two points of a sweep. Measured at true positions on the radiometry bench (render, simulator, the bench's sampler, phase field, equaliser, `SoftBits`): four greys, 212 x 120 grid, 1600 x 900 camera, 4 captures per point, on `tripod` and `handheld`, sweeping blur 3 to 0.5, noise 16 to 0 and the stand-in quantiser step 60 to 0 (lossless). **Long only:** both properties, all 36 points against `internal/vision/testdata/rawber.json` (`TestRawBERSweeps`). **Always on:** a regression check only, `tripod`'s own point filmed for one capture within 10% of its own stored one-capture count (`TestRawBERReference`, 64 errors in 30,456 bits); it asserts no monotonicity. The references are integer counts of wrong and credited bits, the 4-capture ones identical at the last M2 merge (973c897), where the only non-test changes since to the stages measured are the simulator's k2 lens term, inactive at k2 = 0. Every stored point has at least 64 errors, so the 10% band also covers the few bits by which arm64's fused multiply-adds may change a count. Black and white (Gray2) is excluded: 0 or 1 errors at most points. Reversals measured, within counting noise: `handheld` noise 4, 2 and 0 give 0.06903, 0.06940 and 0.06952; with one capture per point there are more (`tripod` noise 2 to 0 and step 10 to 0, `handheld` noise 8 to 0 and step 20 to 10), so each point uses four. |
 | Gamma, white balance, tone curve, vignetting | Confidence is honest: with soft bits grouped into ten buckets by stated confidence, the observed error rate of every bucket holding at least 10,000 bits is at most twice the stated rate. A bucket passes when its error count is consistent, at the 0.1% level of a Poisson test, with that rate; in the tables pooled over the variants, wherever at least 100 errors are expected, the observed rate itself must also be at most twice the stated one. Credited cells that are wholly one frame and those that hold some of another are also pooled and judged apart, so that errors in opposite directions cannot cancel. Only overconfidence is asserted: by the designer's ruling of 2026-11-15 no lower edge is asserted anywhere, at true positions or through the pipeline, and underconfidence is logged. Met in M2 on `tripod` and `handheld` for Gray4, Gray2 and RGB8 under gamma error +-0.3, white balance +-0.10 and vignetting 0.25, each case alone and pooled, at true cell positions; and through the geometry pipeline (detector, mesh fitter and sampler; Gray4, 480 x 270 grid, 4K cameras; the preset and two variants, gamma error +0.3 and white balance -0.10, in CI, the preset and five variants in the long version). The one exception is `tripod`'s partly mixed cells, bounded at 12 times (through the pipeline, pooled bucket 1: 9.76 times for the partly mixed cells and 8.69 for the whole table at CI size, 11.08 and 10.25 in the long version, a margin of only 1.08; an open residual for S2, section 10 step 7). Underconfidence measured in the long versions (480 x 270 grid, 4K cameras): `handheld` down to 0.13 times the stated rate (Gray4 pooled bucket 2: 31 errors where 239 are expected; RGB8 down to 0.10 times in one case), `tripod`'s clean cells down to 0.035 times (Gray4 pooled bucket 1: 4 errors where 115 are expected), and through the pipeline `handheld` down to 0.02 times. On clean captures the soft bits are therefore several times more cautious than the measured error rate justifies, which costs capacity: the LDPC decoder is given less confidence than it could use. Calibrating it is a likely gain to look for in the S2 analysis, where real noise replaces the simulator's |
 | Moire fringes, flicker bands | Decoding succeeds with stripe cancellation on at an amplitude where it fails with it off. Met in M2: on `handheld`, Gray4 with `normal`, at fringe amplitude 24 every codeword decodes with it on and none with it off, for three fringe periods and directions |
 | Frame mixing, any boundary direction | No soft bit is ever credited to the wrong code frame; every credited cell's true weight is at least 0.80; per preset, the share of truly clean cells (true weight at least 0.92) that are credited is at least its measured value less 0.02 and never under 0.96 (M2, CI and long version: `tripod` 0.9843 and 0.9863, floors 0.964 and 0.966; `handheld` 0.9930 and 0.9904, floors 0.973 and 0.970); as a regression check, the phase weight error is at most 0.09 at cells interpolated between four observed anchors and 0.16 beyond the outermost anchors and beside the finders. CI runs `handheld` with the panel scanning left to right at roll 60, which reaches 0.082 inner error; the smallest credited true weight, 0.802, and the pocket error closest to its bound, 0.149 against 0.16 (the tightest margin), occur only in the long run. The cost of this accepted phase accuracy is the clean-cell yield: of the cells that truly show one frame (weight at least 0.92), 0.99 are credited on `handheld` (0.9930 CI, 0.9904 long) and 0.986 on `tripod` (0.9843 CI, 0.9863 long); the designer accepted it on 2026-11-15. These replace "phase weight error at most 0.05" by the owner's decision of 2026-11-15, after five estimators were measured on `tripod` and `handheld` (largest error, inner / pockets): weights divided by the anchor's white with bilinear interpolation and nearest-neighbour fill, 0.13 / 0.44 on a 212 x 120 grid; the same with linear prediction of missing anchors, 0.07 / 0.15 on the 480 x 270 grid with 4K cameras; bicubic Catmull-Rom interpolation, no gain and worse at a sharp ramp's kinks; weights divided by the quadrants' own total, as built, 0.082 / 0.149; a boundary model fitted to all anchors at once (a quadratic surface of display time and the blur of exposure and panel response), 0.01-0.04 where the anchors see the blend but 0.067 / 0.15 where it lies beyond them, not adopted. None credited a cell to the wrong frame. The residual error comes from blends the anchors cannot locate (opposite scan directions, blends beyond the outermost anchors); per-cell estimation from the cells' own observations is not built, and the question is revisited in M5 only if the S2 or G1 recordings show that the cells it discards matter. Through the geometry pipeline (Gray4, 480 x 270 grid, 4K cameras; the long version all directions at rolls 0, 30 and 60, 191 captures, every one found and fitted): no wrong credit; the smallest credited true weight 0.8668 (CI) and 0.8018 (long); yield 0.9730 and 0.9864 on `tripod`, 0.9975 and 0.9894 on `handheld`, the CI `tripod` figure 0.009 above its floor of 0.964 (0.013 above 0.96); the phase weight error up to 0.058 inner and 0.139 in the pockets in CI, and 0.1105 and 0.1724 in the long version, set by `handheld` scanning left to right at roll 60, where the rectifier's anchors are less exact than the true positions. The pipeline's regression bounds are therefore 0.12 inner and 0.19 in the pockets, beside the 0.09 and 0.16 at true positions; the owner's floors (no wrong credit, credited weight at least 0.80, yield at least 0.96) are unchanged. The weight floor is met with almost no margin: 0.8018 against 0.80 in the long version, on one pose, both at true positions and through the pipeline. It passes, but not comfortably, and S2 checks it on real captures |
-| Camera at twice the display rate, any phase offset | One pass succeeds for every offset |
-| Camera equal to the display rate | At 30 fps both, 4 ms exposure and 8 ms readout: succeeds within 4 loop passes |
+| Camera at twice the display rate, any phase offset | One pass succeeds for every offset. Met (2026-11-19): 96 of 96 cases decode from one pass (2F captures): black and white, four greys and colour, `normal` and `robust`, on `tripod` (4 ms exposure, 8 ms readout) and `handheld` (8 and 8), at 8 offsets spread over one display period; a 480p code at 30 fps filmed at 60 by a 1600 x 900 camera. **Long only:** the 96 cases (`TestCameraTwiceDisplay`). **Always on:** four greys `normal` on `tripod` at offset 1/8 on the smallest setting, a 480 x 480 code (120 x 120 grid, 500 bytes, F = 4) filmed at 908 x 908 (6.8 camera pixels per cell), where every offset decoded when measured |
+| Camera equal to the display rate | Locked equal rates are not a supported or recommended setting: section 11's condition 1 asks for a camera at least twice the display rate, and `calibrate` (M4) recommends one. With the camera locked to the display (30 against 30 fps, 4 or 8 ms exposure, 8 ms readout), some phase offsets never decode, because every pass repeats the same frame mixing. **Always on:** a locked recording that does not decode (four greys `normal`, 500 bytes, offset 1/8, one pass) ends, through the public `Decode`, in the typed `NotEnoughDataError` and writes nothing (`TestLockedRateNotEnoughData`); the guidance sentence the command line adds to that error is asserted in `internal/cli` (`TestGuidance`, `TestDecodeFailureGuidance`). **Long only:** every locked case below must give the files or the not-enough-data error, never a wrong result (`internal/pipeline`'s `TestLockedRateSafety`: 69 of 96 decoded and 27 did not, as measured), and the drift assertion below. Measured (2026-11-19, simulated: a 480p code at 30 fps, `tripod` timing, a 1600 x 900 camera, 8 offsets over one display period, up to 4 passes; black and white, four greys and colour alike): `normal` decodes at 5 of 8 offsets at both exposures, `robust` at 7 of 8 at 4 ms and 6 of 8 at 8 ms, each in one pass except `normal` at 8 ms and offset 7/8 in black and white and four greys (two); at the failing offsets the clean fraction stays at 0.23 to 0.73 pass after pass and the codewords decoded reach at most 0.88 of those needed after 4 passes (0.73 of all codewords: colour `normal`, 8 ms, offset 2/8, 227 of 311). A camera that drifts against the display, 29.97 against 30 fps, carries the mixed band across the code: `robust` then decodes at every offset within 8 passes (the slowest 7, colour at 8 ms; 4 in black and white, 6 in four greys, with F = 24, so a longer loop drifts further per pass), asserted as best effort, long only (`TestDriftBestEffort`: every modulation, both exposures and offsets; where the locked rate fails, the drift needs 30 to 40 captures, too many for an always-on case). `normal` decodes within 4 passes at 5 or 6 of 8 offsets, totals equal to or better than locked: the drift gains offset 2/8 except colour at 4 ms, but at 8 ms black and white and four greys `normal` lose offset 7/8, which the locked rate decoded in 2 passes (measured). With 1 ms RMS capture jitter at locked rates instead, `normal` decodes within 4 passes at 5 of 8 offsets at 4 ms and 6 of 8 at 8 ms, and `robust` within 8 passes at every offset at 4 ms but at 7 of 8 (black and white, colour) and 6 of 8 (four greys) at 8 ms; recorded, not asserted. |
 | Dropped frames, bursts, mid-loop start | With parity 20, whose budget is 16.7% of frames: succeeds at 14.7% random loss; at 18.7% reports which blocks are short and writes nothing |
-| Glare patches, overlays | `normal` succeeds with a patch over 5% of the code; `robust` with 20%. M2 measured the cells under a patch over 5% of the code that keep soft bits (section 10, step 5): at true positions 0% to 4.6%, bounded at 0.05; through the geometry pipeline, where the sampler's clipping flag and the equaliser's rule act together, 0.037 to 0.038 on `tripod` and 0.012 to 0.013 on `handheld`, bounded at 0.06 |
+| Glare patches, overlays | `robust` succeeds with a patch over 20% of the code; `normal` with a patch over 5% at settings with a margin over section 11's condition 2. Measured (2026-11-19; 480p at 30 fps filmed at 60 for one pass, 4 patch positions): `robust` at 20% decodes at every position in black and white, four greys and colour on `tripod` and `handheld` at 1600 x 900; `normal` at 5% decodes at every position for every modulation on `tripod` (6.8 camera pixels per cell) and for black and white and colour on `handheld` (6.0), but four greys `normal` on `handheld` at 6.0, condition 2's minimum, where it decodes without the patch, is short, where it fails, by 4 to 54 of the 259 shards needed (0.79 to 0.98 of them) over six transfers; at 6.0 it decoded at 0 of 4 patch positions in four of them and at 1 of 4 in two, since the transfer's bytes then varied from run to run with the files' modification times, which the manifest records (the tests now fix them: that transfer decodes at position 2 and is short by 16, 24 and 28 at the others); at 6.4 it decodes at all four, so it is asserted there. **Always on:** four greys `normal` at 6.4 on `handheld` with a 5% patch, one patch position, 500 bytes, on the measured 212 x 120 grid (`TestGlareDecode`). **Long only:** every case above at 4 positions, `robust` at 20% included. These margins were measured on the 212 x 120 grid and do not carry over to the smallest grids: on a 120 x 120 grid (a 480 x 480 code, 500 bytes) four greys `normal` with a 5% patch at 6.4 (960 x 960) and `robust` with 20% (900 x 900) each decoded at 3 of 4 patch positions (measured, not asserted). The patch is the same share of the code there, but the cells the glare rule gives up around it are a fixed number of cells (section 10, step 5), a larger share of a small code: a likely cause, not traced (section 19). M2 measured the cells under a patch over 5% of the code that keep soft bits (section 10, step 5): at true positions 0% to 4.6%, bounded at 0.05; through the geometry pipeline, where the sampler's clipping flag and the equaliser's rule act together, 0.037 to 0.038 on `tripod` and 0.012 to 0.013 on `handheld`, bounded at 0.06 |
 | Two partial recordings | Each alone fails; together they succeed |
 | Whole system | SHA-256 round trip for every row of the matrix below; identical raw frame hashes on every platform |
 
@@ -1843,9 +1853,11 @@ by GoReleaser).
   always-on sizes are in section 19.
   **The long run (`QRVT_LONG_TESTS=1`, `go run ./tools/dev test -long`) runs in no CI job**; the
   nightly simulator-matrix job is still a placeholder, and a nightly long-test job is deferred to M6
-  (section 19). Until then the long-only assertions are checked locally, by the per-pull-request
+  (section 19). That deferral covers the placeholder too: the nightly "full simulator matrix (M3)"
+  below is not built in M3 but decided at M6 with the long-test job (designer's ruling,
+  2026-11-19). Until then the long-only assertions are checked locally, by the per-pull-request
   rule and at each milestone exit (below), and by no CI job. Every test that reads
-  `QRVT_LONG_TESTS` (directly, or through `geomLong`, `geomLongSize`, `longTests` or LDPC's `long`),
+  `QRVT_LONG_TESTS` (directly, or through `geomLong`, `geomLongSize`, `longTests`, `rateLong` or LDPC's `long`),
   with what only its long version asserts:
   - root package: `TestRoundTripMatrix`, every row with each preset's own camera and
     `matrixSessions` sessions (PR #47); `TestRoundTripMatrixX264`, its long rows with
@@ -1854,10 +1866,15 @@ by GoReleaser).
     16 and 32, **a SECURITY.md section 9.5 resource bound** (always: 16 frames at 848 x 480);
     `TestLocatedRecordingResources` at 4K and `TestTamperedStreamEndToEnd`'s full tamper matrix
     and `TestInterleavedSessions`' second order (PR #49); `TestEvictionLoopCost` (long only);
-    `TestFrameLoss` at 100 frames and `TestLoopback`'s nine pairs (PR #47).
+    `TestFrameLoss` at 100 frames and `TestLoopback`'s nine pairs (PR #47); the frame-rate and
+    glare rows of section 15 at full size (M3 exit): `TestCameraTwiceDisplay`'s 96 cases,
+    `TestLockedRateSafety`'s 96 locked cases (long only), `TestDriftBestEffort`'s 48 drifting
+    `robust` cases (long only: the drift best-effort assertion) and `TestGlareDecode`'s every case
+    and patch position, `robust` with a 20% patch included.
   - `internal/vision`, long only: `TestGeometryPresetsLong`, `TestGeometryHarshLong`,
     `TestGeometryHarshRegression`, `TestDetectModuleSweep`, `TestGlareStudy`, `TestDecoyMatrix`,
-    `TestDecoyMatrixReview`, `TestPipelineMixedCost`; long sizes: `TestHonestConfidence`,
+    `TestDecoyMatrixReview`, `TestPipelineMixedCost`, `TestRawBERSweeps` (section 15's blur,
+    noise and quantiser row, M3 exit: the full sweeps and the monotonicity claim); long sizes: `TestHonestConfidence`,
     `TestPipelineHonesty`, `TestPhaseWeights`, `TestPipelinePhase`, `TestPipelineGlare`,
     `TestGlareUnknown`, `TestStripeCancellation`, and the eight the vision test trim moved
     (section 19).
@@ -1871,7 +1888,9 @@ by GoReleaser).
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
   simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
-  alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice until then.
+  alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice until then. The
+  full simulator matrix's step stays a placeholder until M6, under the deferral of the nightly
+  long-test job (section 19).
 - **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
   Dependabot for Go modules and actions, except wazero and go-ffmpreg: every engine speed, memory and
   sandbox figure of spike S1 was measured on their pinned versions, so they are updated by hand, with
@@ -2000,13 +2019,13 @@ writing each package format by hand.
 | S2 | The owner films a test pattern on each device; the real channel is measured and the default mode confirmed or changed. Does not block M1-M3 |
 | M1 | Building blocks in parallel, including keys and signing |
 | M2 | Vision, including header reading and stripe cancellation |
-| M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards 1.46-2.80% of black-and-white cells of a perfect frame, mean about 2.1% (section 10, step 4) |
+| M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards 1.46-2.80% of black-and-white cells of a perfect frame, mean about 2.1% (section 10, step 4). `tools/dev testvideos` and the committed "as filmed" clips moved to M5, and the fuzz corpora to M7 (designer's ruling, 2026-11-19) |
 | M4 | `calibrate`, `inspect`, profiles |
 | G1 | The owner films the calibration video and sample transfers, including one tripod take |
-| M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings; inferring the frame index of a capture whose header copies all fail, from the last index and the phase markers with the quad carried by tracking (deferred from M2, section 7 rule 1); mirrored recordings (FORMAT.md section 4.1) |
+| M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings; inferring the frame index of a capture whose header copies all fail, from the last index and the phase markers with the quad carried by tracking (deferred from M2, section 7 rule 1); mirrored recordings (FORMAT.md section 4.1); `tools/dev testvideos` and the committed synthetic "as filmed" clips (section 15, test videos), moved from M3 because M5 is where they are used, their size budget (the 2 MB class) ruled then |
 | M6 | 1 GB scale, resuming with `--state-dir`; experimental `--hdr` |
 | G2 | The owner films one large transfer |
-| M7 | Final security pass |
+| M7 | Final security pass; committed corpora for the 9 fuzz targets that have none (SECURITY.md section 9.1), moved from M3 to be built alongside `FuzzDecode`'s reach (section 19) |
 | M8 | Website, packaging, signing, release dry run, a delta security review of everything since M7, then the first release candidate |
 
 Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
@@ -2062,6 +2081,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   finder that fails the confirmation as absent; mark the cells outside the anchors' hull at that
   corner unknown instead of rejecting the frame. `TestGeometryMoustacheCorner` is skipped until
   then: the simulator's lens is the detector's own model, which extrapolates correctly.
+  **Recording 3's regression is assigned to M5** (designer's ruling, 2026-11-19), with the real-device
+  tuning that diagnoses it.
 - **The acceptance measure is not met on rescaled playback (S2, Phone A, recording 1).** After the
   S2 geometry fix, the confident-error rate (bits with |s| of 39 and more) at the code's edges
   improved but does not match the interior. By segment, the left 10% of columns went from
@@ -2090,7 +2111,7 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   None of their headers was wrong. The located counts there fell slightly too (budget-android at
   3.2: 192 to 186; iphone-hdr at 3.2: 81 to 71). A wrong quad below the reliable sizes relies on the header's
   CRC and, downstream, on each codeword's CRC to keep wrong cells out of the payload. Nothing is
-  tuned to move these numbers.
+  tuned to move these numbers. **Assigned to M5** (designer's ruling, 2026-11-19).
 - **Small grids.** The confirmation needs eight located anchors (section 10, step 1), and the
   anchor lattice (every 32 columns and 30 rows) gives small grids fewer, so they are never located,
   even on a perfect capture where the header reads and every anchor is found:
@@ -2116,9 +2137,10 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   the range, SECURITY.md section 9.1) takes 33 ms at 1080p and 56 ms at 4K, against 18 and 44 for
   the rendered frame, and the 4K gate header 196 ms, 3.5 times the reference against its bound of
   6 (5.3 times against the rendered frame, before the reference was redefined). The hostile noise
-  frame's 301 ms is the figure to beat.
+  frame's 301 ms is the figure to beat. **Assigned to M6** (designer's ruling, 2026-11-19), the
+  performance and scale work.
 - **Infeasible, not a defect (designer's ruling, 2026-11-18): `budget-android` 720p12 Gray4
-  `normal`.** The row decoded in 1 of 5 repeatable sessions with the stand-in and 0 of 3 with x264.
+  `normal`.** The row decoded in 1 of 5 sessions with the stand-in and 0 of 3 with x264 (sessions with fixed seeds, but whose transfers changed from run to run until the M3 exit fixed the inputs' modification times; see below).
   It was traced in one bounded pass with the simulator's truth, on the row's own setting (320 x 180
   grid, 1080p30 camera, 12 fps display, 4.62 measured camera pixels per cell).
 
@@ -2170,14 +2192,14 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   on the same bench samples give 0.0001, and mapping every cell corner exactly (`nodeStep` 1) changes
   nothing. So the fault is in what the bench feeds the equaliser (its palette or anchor sampling),
   not in its cell sampling. Not a few-line fix, so not fixed. Results that use the bench with blur
-  off should not be trusted until it is.
+  off should not be trusted until it is. **Assigned to M5** (designer's ruling, 2026-11-19).
 - **Coverage margins (M3 part 2).** PR #48's first run failed the coverage gate on windows-11-arm
   alone: `internal/pipeline` at 95.0% (95.2 to 95.4% on the other runners; the error paths of the
   repair, the shard store and the hash check were never covered, and two cancellation returns
   only sometimes). Deterministic tests of those paths bring it to 96.5% (measured over three runs, with the
   defensive guard in `attemptDue` kept uncovered). `internal/video` stood at 95.8% (windows-2025) and 95.6% (windows-11-arm)
   in that run: a margin item for the next pull request that changes `internal/video`, not fixed
-  in this one.
+  in this one. **Assigned to M5** (designer's ruling, 2026-11-19).
 - **Round-trip matrix with x264 (M3 part 2).** `TestRoundTripMatrixX264` with `QRVT_LONG_TESTS=1`
   runs the 13 rows that have a recorder bitrate (not `ideal`, whose recorder is lossless) with
   x264 at the preset's bitrate and camera, three sessions each, 855 s on the development machine:
@@ -2201,9 +2223,10 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   **If it ever fails in CI, it is replaced by `iphone-hdr` four greys `robust`, and is not rerun.**
   Also open: no 10-bit x264 recording runs end to end outside the long version (`iphone-hdr` is
   its only 10-bit row, and the engine's 10-bit round trip of a recording,
-  `TestEncodeBitrateRoundTrip`, decodes a synthetic clip).
+  `TestEncodeBitrateRoundTrip`, decodes a synthetic clip). **Assigned to M6, with `--hdr`**
+  (designer's ruling, 2026-11-19).
 - **Round-trip matrix (M3): one row fails.** `TestRoundTripMatrix` with `QRVT_LONG_TESTS=1` runs
-  every row of section 15 through the public API with five repeatable sessions each: the files
+  every row of section 15 through the public API with five sessions each (fixed session ids and seeds; repeatable since the M3 exit, which fixed the inputs' modification times, below): the files
   (6.5 KB) are encoded to an MP4 by the embedded engine, decoded, filmed for two passes (three on
   `harsh`) by the preset's camera with the pure-Go recorder stand-in, not x264 at the preset's
   bitrate, and decoded. 21 of the 22 rows decode in all five sessions. `budget-android`, 720p at
@@ -2344,15 +2367,19 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   (`internal/vision` 3,249 s, `internal/fec/ldpc` 3,141 s, the root package 1,617 s) and is
   expected to take several hours on a 4-vCPU runner, so it needs splitting or long-size trims
   before it can be a CI job; the decision is due at M6, the scale work, which owns the nightly 1 GB
-  loopback anyway. **Recorded, not fixed (reviewer's LOW, 2026-11-19):** most guards turn the long
+  loopback anyway. The deferral also covers the nightly workflow's "full simulator matrix (M3)"
+  step, still a placeholder (section 17): it is decided at M6 with the long-test job, not built
+  in M3 (designer's ruling, 2026-11-19). **Recorded, not fixed (reviewer's LOW, 2026-11-19):** most guards turn the long
   tests on only for `QRVT_LONG_TESTS=1` (`== "1"`), but three treat any non-empty value as on:
   `internal/vision`'s `geomLong`, `internal/fec/ldpc`'s `long` and `internal/fec/conv`'s
   `TestCorrectsThreeErrors`; so `QRVT_LONG_TESTS=0` runs the long sizes in those packages only.
   Making them all `== "1"` touches three places, more than the designer's two-helper limit for this
-  pull request, so it waits for a later one. **Also for later (reviewer's LOW, 2026-11-19):**
+  pull request, so it waits for a later one: **assigned to M4's tooling work** (designer's ruling,
+  2026-11-19). **Also for later (reviewer's LOW, 2026-11-19):**
   `tools/dev test -pkg` runs its packages in one `go test` run, without the isolation split that
   `./...` gets (`isolatedRuns`); until it goes through the same split, section 17 asks for the root
-  package, `internal/pipeline` and `internal/video` in `-pkg` invocations of their own. The
+  package, `internal/pipeline` and `internal/video` in `-pkg` invocations of their own. **Assigned
+  to M4's tooling work** (designer's ruling, 2026-11-19). The
   designer accepted -31% (2026-11-18), with the honesty statistics and the concurrency tests kept
   in full; the macos-26-intel figure above stays a projection until this pull request's CI run
   measures it. Half, the target, was not reached. What remains is
@@ -2469,6 +2496,54 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   run). With the 1 s watchdog tick and a stall clock that starts at the reservation, which is not
   aligned to a tick, an instance is cancelled between the limit and the limit plus 1 s after its
   reservation.
+- **Glare margin against grid size (M3 exit, 2026-11-19).** Section 15's glare margins were
+  measured on a 212 x 120 grid (`normal` with a 5% patch decodes at 6.4 camera pixels per cell,
+  `robust` with 20% at 1600 x 900) and do not carry over to the smallest grids: on a 120 x 120 grid
+  each decoded at 3 of 4 patch positions. The likely cause, not traced, is that the cells the glare
+  rule gives up around a patch are a fixed number of cells, a larger share of a small code.
+  **Assigned to M5:** characterise the glare margin against grid size. No small-grid assertion is
+  made until then.
+- **End-to-end transfers were not repeatable before the M3 exit (fixed 2026-11-19).** The
+  payload's manifest records each input's modification time, and every end-to-end test built its
+  inputs as fresh files (`payloadDir` in the root package, `writeInputs` in `internal/pipeline`),
+  so each run encoded different bytes (with compression on, as in the root package's encodes, a
+  different stream throughout). Fixed seeds therefore did not fix the transfer: four runs of the
+  short `TestRoundTripMatrix` gave clean fractions of 0.888 to 0.904 on one row (reviewer's
+  survey). Both helpers now set every input's modification time to a fixed instant (`fixTimes`,
+  one per package), and the always-on matrix rows and the x264 row then gave identical captures
+  and clean fractions over 5 runs. M4's first pull request checks that no test builds inputs
+  another way. The tests affected, by the reviewer's survey:
+  - **Near a margin, asserting only "decodes", could flip in CI:**
+    `TestRoundTripMatrix/iphone-hdr-1080p30-gray4-normal` (always on, below section 11's condition
+    2 by design) and `TestRoundTripMatrixX264/budget-android-720p12-bw-normal` (always on). No
+    remaining test asserted an exact count on an outcome that depends on the bytes; the
+    expected-failure case `TestLockedRateNotEnoughData` was the dangerous kind and was fixed first
+    (d62a274); `TestSoftBitsAddUp`'s threshold held with a large margin over 12 runs.
+  - **Affected, asserting "decodes" or a matching SHA-256, with margin:** `TestRoundTripMatrix`'s
+    other always-on rows and every long row (its "five repeatable sessions" were not repeatable),
+    every long row of `TestRoundTripMatrixX264`, `TestStartMidLoop` and `TestSoftBitsAddUp`.
+  - **Bytes varied, outcome could not** (a lossless channel, or a comparison within one run): in
+    the root package `TestEncodeDecode`, `TestEncodeDefaults`, `TestDryRun`, `TestTypedErrors`,
+    `TestSigningEndToEnd` and `TestFilmPrefix`; in `internal/pipeline` `TestFrameLoss`,
+    `TestLoopback`, `TestOtherSessionIgnored`, `TestEncodeConfig`, `TestDryRun`, `TestEvents`,
+    `TestCancel`, `TestInterleavedSessions` and the hostile tests' signed stream, `TestFileFaults`,
+    `TestCompleteSkipsRest`, `TestBackendFaults`, `TestTinyGrid`, `TestHostileDescriptorRecording`,
+    `TestEmbeddedInProcess`, `TestDiskSpaceLimit`, `TestReorderBounded`, the resource tests'
+    located frames, `FuzzDecode`'s seed and the accumulation tests built on their shared fixture.
+  Two earlier observations are reassessed. The x264 shortfall of `budget-android` Gray4 `normal`,
+  48 to 54 shards over repeated runs of the same sessions (2026-11-18, then put down to x264's
+  frame threading, not established), is likely this cause: the stand-in matrix alone varied from
+  run to run, so the sessions never had the same bytes; x264's threading may add to it but is not
+  needed to explain the range. The same row's "1 of 5 repeatable sessions" with the stand-in may
+  have been affected as a count (a rerun could give 0 or 2 of 5), but not the conclusion that the
+  row is infeasible, which rests on the radiometry bench's trace with fixed seeds and no file
+  inputs (raw bit error rate about 0.107, set by the blur and the camera pixels per cell).
+- **`scripts/setup.sh` hung on apt (2026-11-19).** On PR #52's CI run 44474815418 the setup step
+  stalled in apt on a package mirror until the step's 35-minute limit; one infrastructure rerun was
+  allowed by the designer's ruling. **Assigned to M4's first pull request, the tooling one:**
+  `apt-get update` and `install` get Acquire timeouts and retries, and every package-manager command
+  a per-command timeout, so that a mirror stall fails within a few minutes with a clear message;
+  the same for any dnf, pacman, brew or winget step that can hang.
 
 ## 20. Sources
 

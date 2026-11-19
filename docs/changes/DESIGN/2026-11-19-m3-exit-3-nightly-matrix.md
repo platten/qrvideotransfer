@@ -1,0 +1,1 @@
+Sections 17 and 19 state that the M6 deferral of the nightly long-test job (designer's ruling, 2026-11-19) also covers the nightly workflow's "full simulator matrix (M3)" step, which stays a placeholder until M6 decides both.

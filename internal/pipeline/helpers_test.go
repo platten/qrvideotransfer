@@ -20,7 +20,8 @@ import (
 
 // writeInputs writes a folder of pseudo-random files of the given sizes (incompressible, so that
 // the stream length follows the sizes) and returns it with the SHA-256 of each file by its path
-// relative to the folder's parent, as a decode recreates it.
+// relative to the folder's parent, as a decode recreates it. Their modification times are fixed
+// (fixTimes), so the transfer repeats from run to run.
 func writeInputs(t testing.TB, seed uint64, sizes ...int) (string, map[string][32]byte) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "payload")
@@ -43,7 +44,30 @@ func writeInputs(t testing.TB, seed uint64, sizes ...int) (string, map[string][3
 		}
 		want[filepath.ToSlash(filepath.Join("payload", name))] = sha256.Sum256(b)
 	}
+	fixTimes(t, root)
 	return root, want
+}
+
+// fixTimes sets the modification time of everything under dir to a fixed instant. The manifest
+// records modification times, so without it the transfer's bytes, and with them a filmed or noisy
+// recording's outcome, would change from run to run.
+func fixTimes(t testing.TB, dir string) {
+	t.Helper()
+	at := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	err = fs.WalkDir(r.FS(), ".", func(p string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return r.Chtimes(p, at, at)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // checkOutput compares the regular files under dir with want.
@@ -194,7 +218,12 @@ func film(t testing.TB, path string, cell int, c channel.Config, r channel.Run) 
 // filmFrames records the looping video frames, shown at fps, as film does.
 func filmFrames(t testing.TB, frames []*video.Frame, fps, cell int, c channel.Config, r channel.Run) string {
 	t.Helper()
-	period := time.Second / time.Duration(fps)
+	return filmPeriod(t, frames, time.Second/time.Duration(fps), cell, c, r)
+}
+
+// filmPeriod records the looping video frames, each shown for period, as film does.
+func filmPeriod(t testing.TB, frames []*video.Frame, period time.Duration, cell int, c channel.Config, r channel.Run) string {
+	t.Helper()
 	for i, f := range frames {
 		f.Index, f.PTS = i, time.Duration(i)*period
 	}
