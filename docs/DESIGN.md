@@ -1917,12 +1917,14 @@ by GoReleaser).
   could not run is reported as NOT RUN with its reason, never as a pass. **The long tests**, which
   no CI job runs (see the coverage-step paragraph above): at the same point, once per pull request,
   the developer runs them for the packages the pull request changes, and also for the root package
-  and `internal/pipeline` whenever the non-test code of any internal package changes; a pull request
-  that changes only documents, or only the tests of one package, runs that package's long tests
-  only (`go run ./tools/dev test -long -pkg ./internal/vision,.,./internal/pipeline`, one `go test`
-  run over the listed packages). The result goes in the pull request's text: wall time, pass or
-  fail per package, and what was skipped. The full long run, every package (`go run ./tools/dev
-  test -long`), runs once at each milestone exit, locally, and its result goes in the exit check.
+  and `internal/pipeline` whenever the non-test code of any internal package changes; a docs-only
+  pull request runs none; a pull request changing only tests runs the long tests of those packages
+  only. `go run ./tools/dev test -long -pkg ./internal/vision,./internal/fec/ldpc` runs the listed
+  packages in one `go test` run, without the test task's isolation split, so the root package,
+  `internal/pipeline` and `internal/video` each run in a `-pkg` invocation of their own (for
+  example `-pkg .`, then `-pkg ./internal/pipeline`). The result goes in the pull request's text:
+  wall time, pass or fail per package, and what was skipped. The full long run, every package
+  (`go run ./tools/dev test -long`), runs once at each milestone exit, locally, and its result goes in the exit check.
   The task gives each package 120 minutes (`-timeout=120m`; given with `-race` too, it comes after
   and replaces the race task's 18 minutes), so that a hang fails: at go test's
   default of 10 minutes the root package (in `TestRoundTripMatrix`), `internal/fec/ldpc`
@@ -2347,7 +2349,10 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   `internal/vision`'s `geomLong`, `internal/fec/ldpc`'s `long` and `internal/fec/conv`'s
   `TestCorrectsThreeErrors`; so `QRVT_LONG_TESTS=0` runs the long sizes in those packages only.
   Making them all `== "1"` touches three places, more than the designer's two-helper limit for this
-  pull request, so it waits for a later one. The
+  pull request, so it waits for a later one. **Also for later (reviewer's LOW, 2026-11-19):**
+  `tools/dev test -pkg` runs its packages in one `go test` run, without the isolation split that
+  `./...` gets (`isolatedRuns`); until it goes through the same split, section 17 asks for the root
+  package, `internal/pipeline` and `internal/video` in `-pkg` invocations of their own. The
   designer accepted -31% (2026-11-18), with the honesty statistics and the concurrency tests kept
   in full; the macos-26-intel figure above stays a projection until this pull request's CI run
   measures it. Half, the target, was not reached. What remains is
