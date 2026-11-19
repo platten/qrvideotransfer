@@ -2448,11 +2448,11 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   limit, against 5 s. The pull request behind the run changed nothing in `internal/video`. Cause:
   the test measured from the instance's turn, while the stall clock starts when the instance's
   512 MiB of linear memory has been reserved (section 12), so the turn-to-reservation phase counted
-  against the margin. The watchdog itself was on time: the cancellation came within 1 ms of a tick,
-  and the instance returned at most 75 ms after it. A figure of a whole number of seconds plus under
-  1 ms is what a reservation of 5 to 6 s followed by an on-time tick gives; that split is inferred,
-  since the run logged no per-instance breakdown. Locally, pinned to 4 and 2 CPUs with and without
-  the race detector and background load (245 runs), the overshoot measured from the turn was always
+  against the margin. Every instance returned at most 75 ms after its cancellation (observed). The
+  figure, a whole number of seconds plus under 1 ms, is consistent with a cancellation within 1 ms
+  of a tick after a reservation of 5 to 6 s; that split, and the tick timing, are inferred, since
+  the run logged no per-instance breakdown. Locally, pinned to 4 and 2 CPUs with and without the
+  race detector and background load (165 runs of the test), the overshoot measured from the turn was always
   the turn-to-reservation time plus up to one 1 s tick; the timers were on time in the capped case
   (median 1 ms late) and wazero reached its cancellation check within 23 ms. The test now measures
   from the reservation, with the same 5 s for race and non-race builds, logs the turn-to-reservation
@@ -2461,8 +2461,9 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   slot is released); no guest code runs and no input is read in it, so a hostile file cannot
   stretch it.
 - **Performance, noted and not tuned: the reservation tail and the 1 s tick.** The 512 MiB
-  reservation (a Go `make`) usually takes 35 to 70 ms, but under contention it reached 4.4 s locally
-  (4 CPUs, non-race, other loads running) and is inferred at 5 to 6 s on macos-26-intel in run
+  reservation (a Go `make`) usually takes 35 to 70 ms, but under contention it reached 4.74 s
+  locally (2 CPUs, race, background load, in the uncapped case) and 4.4 s in the capped case (4
+  CPUs, non-race, other loads running), and it is inferred at 5 to 6 s on macos-26-intel in run
   44400775718; the inferred figure is unverified until the first CI run that logs the breakdown.
   The cause of the tail is not established (stop-the-world pauses were at most 1 ms in a traced
   run). With the 1 s watchdog tick and a stall clock that starts at the reservation, which is not
