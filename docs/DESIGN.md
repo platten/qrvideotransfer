@@ -1192,7 +1192,7 @@ Costs a user should expect:
   every instance, but not promptly: uncapped, stops were up to 8 times late on a CI runner
   (macos-26-intel, GOMAXPROCS + 1 spinning instances, 16.8 s against a 2 s limit), while the capped
   run stayed within its bound; on a 16-thread development machine GOMAXPROCS + 2 uncapped instances
-  were stopped on time (`TestWatchdogUnderLoad` asserts, in the capped case, that each instance is cancelled at most 5 s after its turn plus the limit and that every one stops; it logs how long each took to return after its cancellation, and logs the uncapped case).
+  were stopped on time (`TestWatchdogUnderLoad` asserts, in the capped case, that each instance is cancelled at most 5 s after its memory reservation plus the limit, with or without the race detector, and that every one stops; it logs the time from each turn to its reservation and how long each took to return after its cancellation, and logs the uncapped case. The time from the turn to the reservation is bounded separately by `video.EngineLoadLimit` (10 minutes): `TestReservationLoadLimit` asserts that an instance still reserving when the limit runs out is cancelled with that limit's error and its slot is released. A hostile file cannot stretch that phase, because no guest code runs and no input is read before the reservation. The test counted from the turn until main's push run at df8e9b5 (CI run 44400775718) failed it on macos-26-intel at 6.0 s against 5 s, where the reservation is inferred to have taken 5 to 6 s; section 19).
   The cap stays as a real defence. Its hazard: waiting for a turn has no limit but the
   context, so a caller holding that many decoders open without reading them waits for ever on the next
   (`TestHoldAndWait`). This cap applies to instances in qrvt's own process (section 8).
@@ -2327,8 +2327,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   **The main margin risk for the coverage step was `internal/vision`'s CI-size cost**, 600 to 714 s
   on macos-26-intel. The vision test trim (2026-11-18) cut the package, pinned to 4 CPUs and
   uncached, back to back on the development machine, from 127.7 and 126.8 s to 89.6 and 84.8 s
-  (-31%; at the 4.7 to 5 times that runner took before, roughly 400 to 450 s there, a projection
-  until a CI run measures it). No bound, tolerance or ratio changed. Three means: the hostile-cost
+  (-31%). On macos-26-intel PR #51's CI run (44453075933) measured `internal/vision` at 264.3 s
+  in the coverage step, down from 600 to 714 s, about -60% (the projection had been 400 to 450 s). No bound, tolerance or ratio changed. Three means: the hostile-cost
   tests (about 20 s) skip in a coverage build and are asserted without coverage (section 17); the
   pose sweeps run their vision code one capture at a time in a coverage build (section 17); and
   these always-on cases shrank, their full sizes running with `QRVT_LONG_TESTS=1`:
@@ -2442,6 +2442,33 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   failure); the reason is a candidate for M4's `inspect`, its first consumer (designer's ruling).
   The real-device check took 210-500 s per recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
   1, 255 s); a round-trip matrix row takes 3-14 s alone.
+- **Main red at df8e9b5: `TestWatchdogUnderLoad` (2026-11-18).** Main's push run 44400775718 failed
+  in the check job on macos-26-intel, step "Race tests, isolated packages (Unix)": in the capped
+  case (5 instances in 3 slots) one instance was cancelled 6.0008 s after its turn plus the 2 s
+  limit, against 5 s. The pull request behind the run changed nothing in `internal/video`. Cause:
+  the test measured from the instance's turn, while the stall clock starts when the instance's
+  512 MiB of linear memory has been reserved (section 12), so the turn-to-reservation phase counted
+  against the margin. Every instance returned at most 75 ms after its cancellation (observed). The
+  figure, a whole number of seconds plus under 1 ms, is consistent with a cancellation within 1 ms
+  of a tick after a reservation of 5 to 6 s; that split, and the tick timing, are inferred, since
+  the run logged no per-instance breakdown. Locally, pinned to 4 and 2 CPUs with and without the
+  race detector and background load (165 runs of the test), the overshoot measured from the turn was always
+  the turn-to-reservation time plus up to one 1 s tick; the timers were on time in the capped case
+  (median 1 ms late) and wazero reached its cancellation check within 23 ms. The test now measures
+  from the reservation, with the same 5 s for race and non-race builds, logs the turn-to-reservation
+  time, and logs the instance's breakdown on a late cancellation. The phase before the reservation
+  stays bounded by `EngineLoadLimit` (`TestReservationLoadLimit`, which now also checks that the
+  slot is released); no guest code runs and no input is read in it, so a hostile file cannot
+  stretch it.
+- **Performance, noted and not tuned: the reservation tail and the 1 s tick.** The 512 MiB
+  reservation (a Go `make`) usually takes 35 to 70 ms, but under contention it reached 4.74 s
+  locally (2 CPUs, race, background load, in the uncapped case) and 4.4 s in the capped case (4
+  CPUs, non-race, other loads running), and it is inferred at 5 to 6 s on macos-26-intel in run
+  44400775718; the inferred figure is unverified until the first CI run that logs the breakdown.
+  The cause of the tail is not established (stop-the-world pauses were at most 1 ms in a traced
+  run). With the 1 s watchdog tick and a stall clock that starts at the reservation, which is not
+  aligned to a tick, an instance is cancelled between the limit and the limit plus 1 s after its
+  reservation.
 
 ## 20. Sources
 

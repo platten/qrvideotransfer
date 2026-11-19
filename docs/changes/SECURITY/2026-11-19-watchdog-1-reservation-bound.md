@@ -1,0 +1,1 @@
+Section 5, Engine progress row: TestWatchdogUnderLoad bounds each capped instance's cancellation from its memory reservation plus the limit, not from its turn; the turn-to-reservation phase is bounded by EngineLoadLimit (TestReservationLoadLimit), and a hostile file cannot stretch it because no guest code runs and no input is read before the reservation (CI run 44400775718).

@@ -76,11 +76,16 @@ func TestReservationNotStall(t *testing.T) {
 
 // TestReservationLoadLimit: an in-process instance whose reservation outlasts EngineLoadLimit
 // (shortened to 2 s; the reservation takes 5 s) is stopped with that limit's error, cancelled when
-// the limit runs out after it got its turn, and not stopped as a stall (1 s) before then. Not
-// parallel: it replaces a package hook and shortens the limit.
+// the limit runs out after it got its turn, and not stopped as a stall (1 s) before then; its slot
+// is released when it returns. This bounds the time from the turn to the reservation, which the
+// stall watchdog (TestWatchdogUnderLoad) does not count. Not parallel: it replaces a package hook,
+// the slots and shortens the limit.
 func TestReservationLoadLimit(t *testing.T) {
 	loadLimit = 2 * time.Second
 	t.Cleanup(func() { loadLimit = EngineLoadLimit })
+	old := slots
+	slots = make(chan struct{}, 1)
+	t.Cleanup(func() { slots = old })
 	e := engineFor(t)
 	m := &meter{}
 	delayReserve(t, m, 5*time.Second)
@@ -95,6 +100,9 @@ func TestReservationLoadLimit(t *testing.T) {
 	// windows-2025, CI run 43903238445).
 	if d := time.Duration(m.cancelledAt.Load() - m.readyAt.Load()); d < loadLimit || d > loadLimit+time.Second {
 		t.Errorf("cancelled %v after its turn, limit %v", d, loadLimit)
+	}
+	if len(slots) != 0 {
+		t.Errorf("%d slots still held after the instance returned", len(slots))
 	}
 }
 
