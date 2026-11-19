@@ -1841,17 +1841,31 @@ by GoReleaser).
   instrumented, and run the vision code on them one at a time (`geomVisionLock`); what they assert
   is unchanged. The concurrency tests keep their goroutines, as the race step needs them. The
   always-on sizes are in section 19.
-  **The long run (`QRVT_LONG_TESTS=1`, `go run ./tools/dev test -long`) runs in no CI job yet**;
-  the nightly simulator-matrix job is still a placeholder. Until the next pull request wires a
-  nightly job to run it on ubuntu-24.04, no CI job asserts: the cases PR #49 moved to the long run
-  (the located recordings' resources at 4K, the full signing and tamper matrices, the second order
-  of the interleaved sessions, and `TestEvictionLoopCost`);
-  those PR #47 moved (the full simulator matrix with each preset's own camera, `TestFrameLoss` at
-  100 frames, `TestLoopback`'s nine pairs); the eight full sizes the vision test trim moved
-  (section 19); and the long-only tests from before (in `internal/vision` the M2 1,000-pose
-  geometry runs, the glare and decoy studies, the harsh regression and the radiometry statistics'
-  long sizes; the long LDPC and convolutional-code checks; `spikes/pattern`'s long analysis). Until
-  then they are asserted only by the local long run each pull request makes (below).
+  **The long run (`QRVT_LONG_TESTS=1`, `go run ./tools/dev test -long`) runs in no CI job**; the
+  nightly simulator-matrix job is still a placeholder, and a nightly long-test job is deferred to M6
+  (section 19). Until then the long-only assertions are checked locally, by the per-pull-request
+  rule and at each milestone exit (below), and by no CI job. Every test that reads
+  `QRVT_LONG_TESTS` (directly, or through `geomLong`, `geomLongSize`, `longTests` or LDPC's `long`),
+  with what only its long version asserts:
+  - root package: `TestRoundTripMatrix`, every row with each preset's own camera and
+    `matrixSessions` sessions (PR #47); `TestRoundTripMatrixX264`, its long rows with
+    `x264Sessions` sessions; `TestSigningEndToEnd`, the unsigned recording (PR #49).
+  - `internal/pipeline`: `TestHostileRecordingResources`, 32 frames at 3840 x 2160 with GOMAXPROCS
+    16 and 32, **a SECURITY.md section 9.5 resource bound** (always: 16 frames at 848 x 480);
+    `TestLocatedRecordingResources` at 4K and `TestTamperedStreamEndToEnd`'s full tamper matrix
+    and `TestInterleavedSessions`' second order (PR #49); `TestEvictionLoopCost` (long only);
+    `TestFrameLoss` at 100 frames and `TestLoopback`'s nine pairs (PR #47).
+  - `internal/vision`, long only: `TestGeometryPresetsLong`, `TestGeometryHarshLong`,
+    `TestGeometryHarshRegression`, `TestDetectModuleSweep`, `TestGlareStudy`, `TestDecoyMatrix`,
+    `TestDecoyMatrixReview`, `TestPipelineMixedCost`; long sizes: `TestHonestConfidence`,
+    `TestPipelineHonesty`, `TestPhaseWeights`, `TestPipelinePhase`, `TestPipelineGlare`,
+    `TestGlareUnknown`, `TestStripeCancellation`, and the eight the vision test trim moved
+    (section 19).
+  - `internal/fec/ldpc`, long only: `TestErrorRateCurves`, `TestPairedM1B`,
+    `TestDecoderCandidates`, `TestSoftBitUnits`, `TestMinSumVariants`; long sizes: `TestErrorRate`
+    (20,000 frames per rate) and `TestShortenedErrorRate` (20,000 frames per check).
+  - `internal/fec/conv`: `TestCorrectsThreeErrors`, exhaustive over three errors.
+  - `spikes/pattern`: `TestAnalyseSimulated` at 96 captures.
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
@@ -1900,19 +1914,27 @@ by GoReleaser).
   before the push that opens it, `go run ./tools/dev platforms -full` runs every step and fails if
   any step could not run, and it takes no `-skip` (`-strict` fails on steps that could not run
   alone; `-skip` leaves named steps out of a routine run and refuses unknown names). A step that
-  could not run is reported as NOT RUN with its reason, never as a pass. At the same point, once
-  per pull request, the developer also runs the long tests, `go run ./tools/dev test -long`, and
-  reports the result in the pull request's text (wall time; pass or fail per package; what was
-  skipped): no CI job runs them yet (see the coverage-step paragraph above). The task sets no
-  per-package time limit for them (`-timeout=0`): at go test's default of 10 minutes the root
-  package (in `TestRoundTripMatrix`), `internal/fec/ldpc` (`TestDecoderCandidates`) and
-  `internal/vision` (`TestDetectModuleSweep`) panicked with the rest of their tests unrun. Without
-  it, at the vision test trim's head on the machine below, the long run passed every package in
+  could not run is reported as NOT RUN with its reason, never as a pass. **The long tests**, which
+  no CI job runs (see the coverage-step paragraph above): at the same point, once per pull request,
+  the developer runs them for the packages the pull request changes, and also for the root package
+  and `internal/pipeline` whenever the non-test code of any internal package changes; a pull request
+  that changes only documents, or only the tests of one package, runs that package's long tests
+  only (`go run ./tools/dev test -long -pkg ./internal/vision,.,./internal/pipeline`, one `go test`
+  run over the listed packages). The result goes in the pull request's text: wall time, pass or
+  fail per package, and what was skipped. The full long run, every package (`go run ./tools/dev
+  test -long`), runs once at each milestone exit, locally, and its result goes in the exit check.
+  The task gives each package 120 minutes (`-timeout=120m`; given with `-race` too, it comes after
+  and replaces the race task's 18 minutes), so that a hang fails: at go test's
+  default of 10 minutes the root package (in `TestRoundTripMatrix`), `internal/fec/ldpc`
+  (`TestDecoderCandidates`) and `internal/vision` (`TestDetectModuleSweep`) panicked with the rest
+  of their tests unrun, and the slowest package takes 54 minutes. With no limit, at the vision test
+  trim's head on the machine below, the long run passed every package in
   90 min 51 s: `internal/vision` 3,249 s and `internal/fec/ldpc` 3,141 s side by side, then the
   root package 1,617 s, `internal/pipeline` 163 s and `internal/video` 155 s each alone; the only
   skips were the two helper tests that run only as a child process (`TestWorkerCountChild`,
   `TestStoreWriterProcess`). It is longer than `platforms -full` (about 48 minutes) on its own, so
-  folding it into that task would take the pair past two hours.
+  folding it into that task would take the pair past two hours; that run counts as the vision test
+  trim's long run.
   - *compile*: `go vet` and `go test -c` of every package for all six targets, `CGO_ENABLED=0`, with
     no tags, the release build tags, and the release tags with the HEVC fast path's
     `unsandboxedhevc` (the set of CI's "HEVC fast-path tests" step). This catches build-constraint files, signature changes and
@@ -2312,10 +2334,20 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   12 of 24, `TestDetectModuleLimit` 12 of 24 per case, `TestGeometryPresetsSmall` 12 of 24 per
   preset, `TestGeometryPresets4K` 2 of 4 per preset, `TestGeometry16x10` 6 of 12, `TestGlareOnFinder`
   2 poses (3 before, 6 in the long run) and `TestSampleGlareFlagged` 1 of 2. **Gap:** no CI job
-  runs the long tests yet, so these eight full sizes, and the cases PR #49 moved (the located
+  runs the long tests, so these eight full sizes, and the cases PR #49 moved (the located
   recordings' resources at 4K, the full signing and tamper matrices, the second interleave order),
-  are asserted only by the local long run each pull request makes before the push that opens it
-  (section 17); a nightly job running them on ubuntu-24.04 comes in the next pull request. The
+  are checked only locally (section 17: per pull request for the packages it touches, and the full
+  run at each milestone exit). **A nightly long-test job is deferred** (designer's ruling,
+  2026-11-19): the full long run took about 91 minutes on the 16-thread development machine
+  (`internal/vision` 3,249 s, `internal/fec/ldpc` 3,141 s, the root package 1,617 s) and is
+  expected to take several hours on a 4-vCPU runner, so it needs splitting or long-size trims
+  before it can be a CI job; the decision is due at M6, the scale work, which owns the nightly 1 GB
+  loopback anyway. **Recorded, not fixed (reviewer's LOW, 2026-11-19):** most guards turn the long
+  tests on only for `QRVT_LONG_TESTS=1` (`== "1"`), but three treat any non-empty value as on:
+  `internal/vision`'s `geomLong`, `internal/fec/ldpc`'s `long` and `internal/fec/conv`'s
+  `TestCorrectsThreeErrors`; so `QRVT_LONG_TESTS=0` runs the long sizes in those packages only.
+  Making them all `== "1"` touches three places, more than the designer's two-helper limit for this
+  pull request, so it waits for a later one. The
   designer accepted -31% (2026-11-18), with the honesty statistics and the concurrency tests kept
   in full; the macos-26-intel figure above stays a projection until this pull request's CI run
   measures it. Half, the target, was not reached. What remains is

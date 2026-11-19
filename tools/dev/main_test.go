@@ -278,7 +278,8 @@ func TestTestCommand(t *testing.T) {
 		{nil, "CGO_ENABLED=0", "test -tags=noasm,nounsafe ./..."},
 		{[]string{"-race"}, "CGO_ENABLED=1", "test -tags=noasm,nounsafe -race -timeout=18m -count=1 ./..."},
 		{[]string{"-untagged"}, "CGO_ENABLED=0", "test ./..."},
-		{[]string{"-long", "-short", "--", "-count=1"}, "CGO_ENABLED=0 QRVT_LONG_TESTS=1", "test -tags=noasm,nounsafe -timeout=0 -short -count=1 ./..."},
+		{[]string{"-long", "-short", "--", "-count=1"}, "CGO_ENABLED=0 QRVT_LONG_TESTS=1", "test -tags=noasm,nounsafe -timeout=120m -short -count=1 ./..."},
+		{[]string{"-long", "-pkg", "./internal/vision,.,./internal/pipeline"}, "CGO_ENABLED=0 QRVT_LONG_TESTS=1", "test -tags=noasm,nounsafe -timeout=120m ./internal/vision . ./internal/pipeline"},
 	}
 	for _, c := range cases {
 		env, args, _ := testCommand(c.args, "noasm,nounsafe")

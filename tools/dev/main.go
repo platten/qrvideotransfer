@@ -189,6 +189,7 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 	long := fs.Bool("long", false, "include long tests (QRVT_LONG_TESTS=1)")
 	short := fs.Bool("short", false, "pass -short to go test")
 	untagged := fs.Bool("untagged", false, "test the default build, without the release build tags")
+	only := fs.String("pkg", "", "comma-separated packages to test instead of ./..., in one go test run (for example ./internal/vision,.,./internal/pipeline)")
 	p := fs.String("part", "", "others: every package but internal/video, the root package and internal/pipeline; isolated: each of those alone")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
 	if *untagged {
@@ -208,15 +209,19 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 	if *long {
 		// The long tests run for longer than go test's default of 10 minutes per package: at that
 		// limit the root package, internal/fec/ldpc and internal/vision panicked, the rest of their
-		// tests unrun (DESIGN.md section 17). No limit: the run is local and watched, or bounded by
-		// the step that runs it.
+		// tests unrun; the slowest, internal/vision, took 54 minutes on 16 threads (DESIGN.md
+		// section 17). 120 minutes leaves room and still fails a hang.
 		env = append(env, "QRVT_LONG_TESTS=1")
-		extra = append(extra, "-timeout=0")
+		extra = append(extra, "-timeout=120m")
 	}
 	if *short {
 		extra = append(extra, "-short")
 	}
-	extra = append(append(extra, fs.Args()...), "./...")
+	target := []string{"./..."}
+	if *only != "" {
+		target = strings.Split(*only, ",")
+	}
+	extra = append(append(extra, fs.Args()...), target...)
 	return env, goTest(tags, extra...), *p
 }
 

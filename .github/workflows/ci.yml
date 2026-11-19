@@ -134,21 +134,23 @@ jobs:
         timeout-minutes: 5
         shell: bash
         # This step is where CI asserts the ratios (the coverage step skips them), so it fails unless
-        # all four tests ran and passed: a skip would otherwise pass green.
+        # all four tests ran and passed: a skip would otherwise pass green. The log goes to the
+        # runner's temporary directory (cygpath turns its Windows form into Git bash's).
         run: |
+          out="$(cygpath -u "$RUNNER_TEMP" 2>/dev/null || printf '%s' "$RUNNER_TEMP")/hostile-cost.txt"
           go test -count=1 -v \
             -run '^(TestDetectThreeHostile|TestDetectThreeHostile4K|TestDetectHostileGrid|TestDetectHostileGrid4K)$' \
-            ./internal/vision/ > hostile-cost.txt 2>&1 || status=$?
-          grep -E 'real-code neighbours|_test\.go:[0-9]+:|^(--- |ok|FAIL|panic)' hostile-cost.txt || true
+            ./internal/vision/ > "$out" 2>&1 || status=$?
+          grep -E 'real-code neighbours|_test\.go:[0-9]+:|^(--- |ok|FAIL|panic)' "$out" || true
           if [ "${status:-0}" -ne 0 ]; then
             echo "::error::go test failed (exit ${status})"
             exit 1
           fi
-          if grep -q -- '--- SKIP' hostile-cost.txt; then
+          if grep -q -- '--- SKIP' "$out"; then
             echo "::error::a hostile-cost test was skipped; this step must assert all four"
             exit 1
           fi
-          passed=$(grep -c -- '^--- PASS' hostile-cost.txt || true)
+          passed=$(grep -c -- '^--- PASS' "$out" || true)
           if [ "$passed" -ne 4 ]; then
             echo "::error::${passed} hostile-cost tests passed, want 4"
             exit 1
