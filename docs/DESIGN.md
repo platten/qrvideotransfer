@@ -1744,8 +1744,9 @@ GoReleaser from source took 2-5 minutes per CI runner and once hung for 55 minut
 takes seconds. Other `tools/dev` tasks: `licenses` (licence compatibility), `vulncheck` (govulncheck
 over the release build), `check-workflows` (the
 action-pinning and permissions policy, then actionlint), `release-snapshot` (the whole release without
-publishing, then a check that every target and package format was produced) and `sign-windows` (called
-by GoReleaser).
+publishing, then a check that every target and package format was produced), `sign-windows` (called
+by GoReleaser) and `format-vectors` (regenerates the frame vectors and the reference video, FORMAT.md
+section 13).
 
 ## 17. CI and release
 
