@@ -503,9 +503,23 @@ and reviewed by hand against this document:
 | Header: fixed field values to 236 slot bits | Section 6 |
 | Shuffle(10, 1) and the first 4 SplitMix64 outputs for state 0 | Section 1 |
 | LDPC (`ldpc.json`, frozen in M1): for each inner code, an all-zero shard and a fixed pseudo-random shard (big-endian SplitMix64 outputs from state = inner-code id) to sent bits, packed most significant bit first with zero padding; and `H c = 0` for both | Section 8 |
-| Frame: fixed stream, session and seed to the SHA-256 of the luma plane of frames 0 and 1, for Gray2, Gray4 and RGB8 at 480p | Sections 4 to 11 |
+| Frame (`frames.json`): fixed stream, session and seed to the SHA-256 of the luma plane of frames 0 and 1, for Gray2, Gray4 and RGB8 at 480p. The stream's bytes are included: one read-only file (mode 0444, which every system reports alike) with a fixed modification time, packed without compression, unsigned. The session and outer order seed are the encoder's 12 random bytes, given; inner code 2, parity 20, 12 fps, 4-pixel cells; luma hashed one byte per sample | Sections 4 to 11 |
 | Stream (`stream.json`): fixed inputs to stream bytes with compression 0, unsigned and signed with a fixed key (seed bytes 0 to 31); zstd, xz and age-encrypted streams of the same inputs that must still decode; one manifest per path rule that must be refused, and manifests at the edge of a rule that must be accepted (a file of exactly 64 components). The tar bytes are those Go's `archive/tar` writes for the headers section 12 lists (pax format, with a pax record only where ustar cannot hold a field, such as a long or non-ASCII path). An encoder that wants identical bytes must match that; a decoder accepts any conforming pax tar | Section 12 |
-| Reference video: a small encoded MP4 that every later release must decode | Whole format |
+| Reference video (`reference-v1.mp4`, described by `reference-v1.json`): a small encoded MP4 that every later release must decode, one per format version. Version 1's is 96,041 bytes: 848 x 480, Gray4, inner code 2, parity 20, 12 fps, 4 frames, carrying one 120-byte file compressed with zstd and signed with the key of seed bytes 0 to 31. The test decodes it through the public API with the default backend and checks the file's SHA-256 and the signer | Whole format |
+
+The frame vectors and the reference video come from the reference encoder (`go run ./tools/dev
+format-vectors`), not from scripts independent of it as the other vectors do. Until version 1 of this
+format is frozen, a change to this document that alters them regenerates both in the same pull
+request; the denser anchor lattice for small grids planned for M5 is such a change. Once v1 is frozen
+they are immutable, and a later format version adds a reference video of its own beside v1's.
+
+What is immutable is the committed reference video, not the encoder's output: the test decodes the
+committed file and never compares a fresh encode with it. An encoder's MP4 is not byte-reproducible
+in general: another H.264 encoder, another x264 or ffmpeg build (the `system` backend), other x264
+settings or another number of workers (the frames are encoded in runs, one per worker, and joined)
+can give other bytes for the same cells. The embedded engine with one worker, regenerating from the same
+inputs, gave identical bytes on linux/amd64, windows/amd64 and linux/arm64 (emulated) on 2026-11-19;
+macOS was not checked, and nothing relies on it.
 
 Worked numbers for cross-checking, at 480 x 270, Gray4, `normal`, parity 20:
 
