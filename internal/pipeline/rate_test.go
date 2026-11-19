@@ -150,12 +150,12 @@ func TestLockedRateSafety(t *testing.T) {
 // 2, and `robust` with 20%. Four greys `normal` on `handheld` fails with a 5% patch at 6.0 camera
 // pixels per cell, condition 2's minimum (at 0 or 1 of 4 patch positions over six transfers, short
 // where it fails by 4 to 54 of the 259 shards needed, measured 2026-11-19), and decodes at 6.4
-// (camera 1696 x 954), where it is asserted. These margins were measured on the 212 x 120 grid and do not carry over to the
-// smallest grids (section 15). One pass at a 60 fps camera (2F + 2 captures). Always on: four
-// greys `normal` at 6.4 on `handheld`, one patch position, 500 bytes. The long version runs four
-// positions each of that case, `robust` at 20% for every modulation on `tripod` and `handheld`, and
-// `normal` at 5% for every modulation on `tripod` and black and white and colour on `handheld` at
-// 1600 x 900. Statistical: skipped under the race detector.
+// (camera 1696 x 954), where it is asserted. These margins were measured on the 212 x 120 grid and
+// do not carry over to the smallest grids (section 15). One pass at a 60 fps camera (2F + 2
+// captures). Always on: four greys `normal` at 6.4 on `handheld`, one patch position, 500 bytes.
+// The long version runs four positions each of that case, `robust` at 20% for every modulation on
+// `tripod` and `handheld`, and `normal` at 5% for every modulation on `tripod` and black and white
+// and colour on `handheld` at 1600 x 900. Statistical: skipped under the race detector.
 func TestGlareDecode(t *testing.T) {
 	raceSkipStatistics(t)
 	type glareCase struct {

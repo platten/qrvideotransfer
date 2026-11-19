@@ -26,9 +26,9 @@ import (
 // M3 exit (2026-11-19). Both are asserted in the long version only (TestRawBERSweeps, 4 captures a
 // point); the always-on TestRawBERReference is a regression check of one point at one capture
 // against its own stored count, and asserts no monotonicity. The references are integer counts;
-// the 10% band also covers the few bits by which a platform whose compiler fuses multiply-adds (arm64) may differ from amd64 in the
-// equaliser's floating point: every stored point has at least 64 errors, so a difference of a few
-// bits is a few percent at most.
+// the 10% band also covers the few bits by which a platform whose compiler fuses multiply-adds
+// (arm64) may differ from amd64 in the equaliser's floating point: every stored point has at least
+// 64 errors, so a difference of a few bits is a few percent at most.
 
 // rawBERTolerance is the largest relative difference from a stored rate.
 const rawBERTolerance = 0.10

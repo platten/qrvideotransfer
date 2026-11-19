@@ -12,7 +12,7 @@ import (
 // The descriptors and frame headers of the hostile corpus (SECURITY.md section 9.2,
 // testdata/hostile/ at the module's root); internal/payload runs the rest.
 
-func hostileFixture(t *testing.T, name string, v any) {
+func hostileFixture(t testing.TB, name string, v any) {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "hostile", name))
 	if err != nil {
@@ -23,26 +23,41 @@ func hostileFixture(t *testing.T, name string, v any) {
 	}
 }
 
-// TestHostileDescriptors: every change of descriptors.json to a valid descriptor (its CRC
-// recomputed unless the case says not) is refused with ErrDescriptor and the reason given.
-func TestHostileDescriptors(t *testing.T) {
-	var cases []struct {
-		Name   string `json:"name"`
-		Byte   int    `json:"byte"`
-		Xor    byte   `json:"xor"`
-		CRC    bool   `json:"crc"`
-		Reason string `json:"reason"`
-	}
+// hostileDescriptor is one case of descriptors.json, applied to exampleDescriptor.
+type hostileDescriptor struct {
+	Name   string `json:"name"`
+	Byte   int    `json:"byte"`
+	Xor    byte   `json:"xor"`
+	CRC    bool   `json:"crc"`
+	Reason string `json:"reason"`
+	bytes  []byte
+}
+
+// hostileDescriptors returns the cases of descriptors.json with their bytes: exampleDescriptor
+// changed as each case says, its CRC recomputed unless the case says not.
+func hostileDescriptors(t testing.TB) []hostileDescriptor {
+	t.Helper()
+	var cases []hostileDescriptor
 	hostileFixture(t, "descriptors.json", &cases)
-	d, h, c := exampleDescriptor()
+	d, _, _ := exampleDescriptor()
 	good := d.Marshal()
-	for _, k := range cases {
+	for i, k := range cases {
 		b := good
 		b[k.Byte] ^= k.Xor
 		if k.CRC {
 			fixCRC(b[:])
 		}
-		_, err := ParseDescriptor(b[:], h, c)
+		cases[i].bytes = b[:]
+	}
+	return cases
+}
+
+// TestHostileDescriptors: every case of descriptors.json is refused with ErrDescriptor and the
+// reason given.
+func TestHostileDescriptors(t *testing.T) {
+	_, h, c := exampleDescriptor()
+	for _, k := range hostileDescriptors(t) {
+		_, err := ParseDescriptor(k.bytes, h, c)
 		if !errors.Is(err, ErrDescriptor) || !strings.Contains(err.Error(), k.Reason) {
 			t.Errorf("%s: got %v, want ErrDescriptor with %q", k.Name, err, k.Reason)
 		}

@@ -14,11 +14,20 @@ tests of the package named below; a change to any value is a format change.
 | `render.json` | SHA-256 of the Y, Cb, Cr planes of whole frames in every modulation, frames 0 and 1, at 480p with fixed symbols (sections 4 to 7) | `internal/render` |
 | `ldpc.json` | For each inner code, the all-zero shard and a pseudo-random shard (big-endian SplitMix64 outputs from state = id) to packed sent bits (section 8) | `internal/fec/ldpc` |
 | `stream.json` | Unsigned and signed streams from fixed inputs; zstd, xz and age streams that must keep decoding; manifests that must be refused and accepted (section 12) | `internal/payload` |
+| `frames.json` | A fixed stream (its bytes included), session and outer order seed, encoded in Gray2, Gray4 and RGB8 at 480p, to the SHA-256 of the luma plane of frames 0 and 1 (sections 4 to 11) | `internal/pipeline` (`TestFrameVectors`) |
+| `reference-v1.mp4`, `reference-v1.json` | The reference video of format version 1 (96,041 bytes, 4 frames, 480p Gray4 `normal`, zstd, signed) and the file it must decode to, with its SHA-256 and signer | root package (`TestReferenceVideo`, through the public API) |
 
-Provenance: every value was computed by small scripts written from FORMAT.md alone, independently of
-the Go code, using exact integer and fraction arithmetic, and then reproduced by the Go
-implementation. The numbers printed in FORMAT.md sections 5.3 and 13 are also asserted literally in
-the tests.
+Provenance: every value except those of `frames.json` and the reference video was computed by small
+scripts written from FORMAT.md alone, independently of the Go code, using exact integer and fraction
+arithmetic, and then reproduced by the Go implementation. The numbers printed in FORMAT.md sections
+5.3 and 13 are also asserted literally in the tests. `frames.json` and the reference video were
+produced by the Go encoder (`go run ./tools/dev format-vectors`), not reproduced independently; they
+are regenerated if FORMAT.md changes before v1 is frozen and are immutable after (FORMAT.md section
+13). The reference video's bytes are what is immutable: the test decodes the committed file, and a
+regeneration need not give the same bytes (it gave identical bytes on linux/amd64, windows/amd64 and
+linux/arm64; macOS is unverified, and no test compares a regenerated video with the committed one).
+The reference video is signed with a public test key, the Ed25519 seed of bytes 0 to 31 written in
+`reference_test.go`; it must never be trusted for anything else.
 
 Not a format vector: `channel.json` holds the SHA-256 of each simulator preset's captures and ground
 truth on a fixed input (DESIGN.md section 15), checked by `internal/channel`; regenerate it with
