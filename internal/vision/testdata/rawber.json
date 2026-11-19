@@ -1,0 +1,254 @@
+[
+  {
+    "preset": "tripod",
+    "param": "blur",
+    "value": 3,
+    "errors": 28178,
+    "bits": 154284
+  },
+  {
+    "preset": "tripod",
+    "param": "blur",
+    "value": 2.5,
+    "errors": 21587,
+    "bits": 153676
+  },
+  {
+    "preset": "tripod",
+    "param": "blur",
+    "value": 2,
+    "errors": 13391,
+    "bits": 153100
+  },
+  {
+    "preset": "tripod",
+    "param": "blur",
+    "value": 1.5,
+    "errors": 5521,
+    "bits": 152686
+  },
+  {
+    "preset": "tripod",
+    "param": "blur",
+    "value": 1,
+    "errors": 152,
+    "bits": 152616
+  },
+  {
+    "preset": "tripod",
+    "param": "blur",
+    "value": 0.5,
+    "errors": 90,
+    "bits": 152580
+  },
+  {
+    "preset": "tripod",
+    "param": "noise",
+    "value": 16,
+    "errors": 3285,
+    "bits": 45696
+  },
+  {
+    "preset": "tripod",
+    "param": "noise",
+    "value": 12,
+    "errors": 2032,
+    "bits": 151658
+  },
+  {
+    "preset": "tripod",
+    "param": "noise",
+    "value": 8,
+    "errors": 181,
+    "bits": 152606
+  },
+  {
+    "preset": "tripod",
+    "param": "noise",
+    "value": 4,
+    "errors": 152,
+    "bits": 152610
+  },
+  {
+    "preset": "tripod",
+    "param": "noise",
+    "value": 2,
+    "errors": 152,
+    "bits": 152616
+  },
+  {
+    "preset": "tripod",
+    "param": "noise",
+    "value": 0,
+    "errors": 144,
+    "bits": 152614
+  },
+  {
+    "preset": "tripod",
+    "param": "step",
+    "value": 60,
+    "errors": 629,
+    "bits": 152774
+  },
+  {
+    "preset": "tripod",
+    "param": "step",
+    "value": 40,
+    "errors": 201,
+    "bits": 152690
+  },
+  {
+    "preset": "tripod",
+    "param": "step",
+    "value": 30,
+    "errors": 171,
+    "bits": 152674
+  },
+  {
+    "preset": "tripod",
+    "param": "step",
+    "value": 20,
+    "errors": 155,
+    "bits": 152612
+  },
+  {
+    "preset": "tripod",
+    "param": "step",
+    "value": 10,
+    "errors": 148,
+    "bits": 152654
+  },
+  {
+    "preset": "tripod",
+    "param": "step",
+    "value": 0,
+    "errors": 144,
+    "bits": 152624
+  },
+  {
+    "preset": "handheld",
+    "param": "blur",
+    "value": 3,
+    "errors": 27984,
+    "bits": 124044
+  },
+  {
+    "preset": "handheld",
+    "param": "blur",
+    "value": 2.5,
+    "errors": 21692,
+    "bits": 122516
+  },
+  {
+    "preset": "handheld",
+    "param": "blur",
+    "value": 2,
+    "errors": 15034,
+    "bits": 119284
+  },
+  {
+    "preset": "handheld",
+    "param": "blur",
+    "value": 1.5,
+    "errors": 8163,
+    "bits": 118246
+  },
+  {
+    "preset": "handheld",
+    "param": "blur",
+    "value": 1,
+    "errors": 1574,
+    "bits": 117294
+  },
+  {
+    "preset": "handheld",
+    "param": "blur",
+    "value": 0.5,
+    "errors": 107,
+    "bits": 116998
+  },
+  {
+    "preset": "handheld",
+    "param": "noise",
+    "value": 16,
+    "errors": 8537,
+    "bits": 100764
+  },
+  {
+    "preset": "handheld",
+    "param": "noise",
+    "value": 12,
+    "errors": 8325,
+    "bits": 115294
+  },
+  {
+    "preset": "handheld",
+    "param": "noise",
+    "value": 8,
+    "errors": 8170,
+    "bits": 118124
+  },
+  {
+    "preset": "handheld",
+    "param": "noise",
+    "value": 4,
+    "errors": 8163,
+    "bits": 118246
+  },
+  {
+    "preset": "handheld",
+    "param": "noise",
+    "value": 2,
+    "errors": 8212,
+    "bits": 118324
+  },
+  {
+    "preset": "handheld",
+    "param": "noise",
+    "value": 0,
+    "errors": 8231,
+    "bits": 118390
+  },
+  {
+    "preset": "handheld",
+    "param": "step",
+    "value": 60,
+    "errors": 8943,
+    "bits": 118182
+  },
+  {
+    "preset": "handheld",
+    "param": "step",
+    "value": 40,
+    "errors": 8491,
+    "bits": 118322
+  },
+  {
+    "preset": "handheld",
+    "param": "step",
+    "value": 30,
+    "errors": 8363,
+    "bits": 119080
+  },
+  {
+    "preset": "handheld",
+    "param": "step",
+    "value": 20,
+    "errors": 8133,
+    "bits": 117834
+  },
+  {
+    "preset": "handheld",
+    "param": "step",
+    "value": 10,
+    "errors": 8098,
+    "bits": 118244
+  },
+  {
+    "preset": "handheld",
+    "param": "step",
+    "value": 0,
+    "errors": 8063,
+    "bits": 118350
+  }
+]
