@@ -1,0 +1,1 @@
+Section 2, the row on checks before every push: tools/dev test -pkg now runs the root package, internal/pipeline and internal/video each in a go test run of its own (DESIGN.md section 17), so the row no longer asks for -pkg runs of their own.

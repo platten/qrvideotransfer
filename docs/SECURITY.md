@@ -201,7 +201,8 @@ passphrase. age authenticates its ciphertext, so tampering is also detected at d
 
 ### 9.1 Fuzz targets
 
-Each runs briefly on every pull request and for longer nightly, with its corpus committed.
+Each runs briefly on every pull request and for longer nightly, with its corpus committed. The
+committed corpora of the 9 targets that have none yet moved to M7 (DESIGN.md section 18).
 
 | Target | Must hold |
 | --- | --- |

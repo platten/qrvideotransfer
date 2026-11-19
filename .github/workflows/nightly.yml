@@ -1,6 +1,7 @@
 # Nightly checks (DESIGN.md section 17): long fuzzing of every Fuzz target, and placeholders for the
-# full simulator matrix (milestone M3), the 1 GB loopback with memory assertions (M6) and benchmarks
-# with regression alerts (M6). Scheduled, and startable by hand from the Actions tab.
+# full simulator matrix (deferred to M6 with a nightly long-test job, DESIGN.md sections 17 and 19),
+# the 1 GB loopback with memory assertions (M6) and benchmarks with regression alerts (M6).
+# Scheduled, and startable by hand from the Actions tab.
 name: nightly
 
 on:
@@ -74,8 +75,8 @@ jobs:
           retention-days: 90
 
   # PLACEHOLDERS. Each job runs its tools/dev task once that task exists and otherwise skips
-  # with a notice: simulator-matrix (milestone M3), loopback-1gb and bench (M6). The milestone that
-  # adds the task fills in its flags and thresholds here.
+  # with a notice: simulator-matrix (deferred to M6, DESIGN.md section 19), loopback-1gb and bench
+  # (M6). The milestone that adds the task fills in its flags and thresholds here.
   placeholder:
     name: "placeholder (${{ matrix.milestone }}): ${{ matrix.what }}"
     if: github.repository == 'platten/qrvideotransfer'
@@ -84,7 +85,7 @@ jobs:
       matrix:
         include:
           - task: simulator-matrix
-            milestone: M3
+            milestone: M6
             what: full simulator matrix
           - task: loopback-1gb
             milestone: M6
