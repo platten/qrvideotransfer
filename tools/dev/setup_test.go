@@ -45,7 +45,7 @@ var (
 	// A package-manager command, in setup.sh's code with its quoted strings removed.
 	pmCommand = regexp.MustCompile(`\b(apt-get|dnf|pacman|brew)\s+(\$apt_opts\s+)?(update|install|-Syu)\b`)
 	// The same command run through bounded; apt-get with the Acquire timeouts and retries.
-	pmBounded  = regexp.MustCompile(`\bbounded\s+(\$sudo\s+)?(apt-get\s+\$apt_opts|dnf|pacman|brew)\s+(update|install|-Syu)\b`)
+	pmBounded  = regexp.MustCompile(`\bbounded\s+""\s+(\$sudo\s+)?(apt-get\s+\$apt_opts|dnf|pacman|brew)\s+(update|install|-Syu)\b`)
 	shQuoted   = regexp.MustCompile(`"(\\.|[^"\\])*"|'[^']*'`)
 	aptOptions = `apt_opts="-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3"`
 )
