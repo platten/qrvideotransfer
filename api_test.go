@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/platten/qrvideotransfer/internal/payload"
 	"github.com/platten/qrvideotransfer/internal/pipeline"
@@ -24,7 +25,8 @@ const testSpec = "raw-test"
 func init() { testBackends = map[string]video.Backend{testSpec: video.NewRaw()} }
 
 // payloadDir writes a folder of pseudo-random files and returns it with each file's SHA-256 by its
-// path as a decode recreates it.
+// path as a decode recreates it. Their modification times are fixed (fixTimes), so the transfer
+// repeats from run to run.
 func payloadDir(t testing.TB, seed uint64, sizes ...int) (string, map[string][32]byte) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "docs")
@@ -44,7 +46,30 @@ func payloadDir(t testing.TB, seed uint64, sizes ...int) (string, map[string][32
 		}
 		want["docs/"+name] = sha256.Sum256(b)
 	}
+	fixTimes(t, root)
 	return root, want
+}
+
+// fixTimes sets the modification time of everything under dir to a fixed instant. The manifest
+// records modification times, so without it the transfer's bytes, and with them a filmed or noisy
+// recording's outcome, would change from run to run.
+func fixTimes(t testing.TB, dir string) {
+	t.Helper()
+	at := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	err = fs.WalkDir(r.FS(), ".", func(p string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return r.Chtimes(p, at, at)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // sameFiles compares the regular files under dir with want.

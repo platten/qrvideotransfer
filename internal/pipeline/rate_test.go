@@ -3,7 +3,6 @@ package pipeline
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"testing"
 	"time"
@@ -40,35 +39,12 @@ type rateTransfer struct {
 func rateCode(t *testing.T, mod, inner uint8, width, size int) rateTransfer {
 	t.Helper()
 	in, want := writeInputs(t, 40+uint64(mod), size)
-	fixTimes(t, in)
 	cfg := profile480(in)
 	cfg.Width, cfg.FPS, cfg.Modulation, cfg.Inner = width, 30, mod, inner
 	cfg.Random = &prngReader{prng.SplitMix64{State: 0x7a7e + 16*uint64(mod) + uint64(inner)}}
 	path, res := encodeRaw(t, cfg)
 	frames, _ := readFrames(t, video.NewRaw(), path)
 	return rateTransfer{frames, res, want}
-}
-
-// fixTimes sets the modification time of everything under dir to a fixed instant: the manifest
-// records it, so without this the transfer's bytes, and with them a filmed recording's outcome,
-// change from run to run.
-func fixTimes(t *testing.T, dir string) {
-	t.Helper()
-	at := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
-	r, err := os.OpenRoot(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = r.Close() }()
-	err = fs.WalkDir(r.FS(), ".", func(p string, _ fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		return r.Chtimes(p, at, at)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 // decodeAll decodes rec and requires the transfer's files.
@@ -173,8 +149,8 @@ func TestLockedRateSafety(t *testing.T) {
 // `normal` with a patch over 5% of the code at settings with a margin over section 11's condition
 // 2, and `robust` with 20%. Four greys `normal` on `handheld` fails with a 5% patch at 6.0 camera
 // pixels per cell, condition 2's minimum (at 0 or 1 of 4 patch positions over six transfers, short
-// where it fails by 4 to 54 of the 259 shards needed, measured 2026-11-19), and decodes at 6.4 (camera 1696 x 954), where it is
-// asserted. These margins were measured on the 212 x 120 grid and do not carry over to the
+// where it fails by 4 to 54 of the 259 shards needed, measured 2026-11-19), and decodes at 6.4
+// (camera 1696 x 954), where it is asserted. These margins were measured on the 212 x 120 grid and do not carry over to the
 // smallest grids (section 15). One pass at a 60 fps camera (2F + 2 captures). Always on: four
 // greys `normal` at 6.4 on `handheld`, one patch position, 500 bytes. The long version runs four
 // positions each of that case, `robust` at 20% for every modulation on `tripod` and `handheld`, and

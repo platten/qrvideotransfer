@@ -3,7 +3,6 @@ package qrvt
 import (
 	"errors"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,8 +18,9 @@ import (
 // to that error is asserted in internal/cli (TestGuidance and TestDecodeFailureGuidance); the two
 // together cover the row's safety property. A 500-byte transfer (F = 4) at 848 x 480, filmed for
 // one pass at offset 1/8 by `tripod` at 1600 x 900, falls short by 7 shards (the 30,000-byte
-// transfers of the long sweep decoded no codeword there in 4 passes). The long sweep over every modulation, protection, exposure and offset is
-// internal/pipeline's TestLockedRateSafety. Statistical: skipped under the race detector.
+// transfers of the long sweep decoded no codeword there in 4 passes). The long sweep over every
+// modulation, protection, exposure and offset is internal/pipeline's TestLockedRateSafety.
+// Statistical: skipped under the race detector.
 func TestLockedRateNotEnoughData(t *testing.T) {
 	if raceEnabled {
 		t.Skip("asserted in the non-race test step")
@@ -28,21 +28,6 @@ func TestLockedRateNotEnoughData(t *testing.T) {
 	defer func() { testRandom = nil }()
 	testRandom = &prngReader{prng.SplitMix64{State: 0x10c4}}
 	in, _ := payloadDir(t, 41, 500)
-	// The manifest records modification times; fixed, the transfer and the outcome repeat.
-	at := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
-	r, err := os.OpenRoot(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = r.Close() }()
-	if err := fs.WalkDir(r.FS(), ".", func(p string, _ fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		return r.Chtimes(p, at, at)
-	}); err != nil {
-		t.Fatal(err)
-	}
 	p := profile480
 	p.FPS = 30
 	path, rep := encodeTest(t, EncodeOptions{Inputs: []string{in}, Profile: p})
