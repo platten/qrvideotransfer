@@ -40,7 +40,8 @@ var referenceMTime = time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
 // referenceProfile is the reference video's profile: 480p, four greys, `normal`.
 var referenceProfile = Profile{Width: 848, Height: 480, Cell: 4, FPS: 12, Modulation: Gray4, Protection: Normal, ParityPercent: 20}
 
-// referenceKey is the signing key: the Ed25519 seed of bytes 0 to 31, as the stream vectors use.
+// referenceKey is the signing key: the Ed25519 seed of bytes 0 to 31, as the stream vectors use. It
+// is a public test key and must never be trusted for anything else.
 func referenceKey() ed25519.PrivateKey {
 	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {

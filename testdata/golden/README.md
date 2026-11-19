@@ -24,7 +24,10 @@ arithmetic, and then reproduced by the Go implementation. The numbers printed in
 produced by the Go encoder (`go run ./tools/dev format-vectors`), not reproduced independently; they
 are regenerated if FORMAT.md changes before v1 is frozen and are immutable after (FORMAT.md section
 13). The reference video's bytes are what is immutable: the test decodes the committed file, and a
-regeneration need not give the same bytes.
+regeneration need not give the same bytes (it gave identical bytes on linux/amd64, windows/amd64 and
+linux/arm64; macOS is unverified, and no test compares a regenerated video with the committed one).
+The reference video is signed with a public test key, the Ed25519 seed of bytes 0 to 31 written in
+`reference_test.go`; it must never be trusted for anything else.
 
 Not a format vector: `channel.json` holds the SHA-256 of each simulator preset's captures and ground
 truth on a fixed input (DESIGN.md section 15), checked by `internal/channel`; regenerate it with
