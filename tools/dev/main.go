@@ -4,8 +4,8 @@
 //	go run ./tools/dev <task> [flags] [-- extra go test arguments]
 //
 // Tasks: install-tools, check-tools, build, test, cover, lint, fuzz, licenses, vulncheck, changes, changelog,
-// check-workflows, release-snapshot and sign-windows. Run a task with -h for its flags. Builds and
-// ordinary tests run with CGO_ENABLED=0; the race detector needs cgo.
+// check-workflows, release-snapshot, sign-windows and format-vectors. Run a task with -h for its flags.
+// Builds and ordinary tests run with CGO_ENABLED=0; the race detector needs cgo.
 package main
 
 import (
@@ -50,6 +50,7 @@ var tasks = map[string]func(args []string) error{
 	"check-workflows":  checkWorkflows,
 	"release-snapshot": releaseSnapshot,
 	"sign-windows":     signWindows,
+	"format-vectors":   formatVectors,
 }
 
 func main() {
