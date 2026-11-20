@@ -1827,22 +1827,41 @@ section 13).
   go-test-coverage step see every package); the second runs even when the first failed. The isolated
   packages' race step and `internal/video`'s coverage step do not run alone after an earlier failure
   skipped the step before them.
-  **Step limits.** Each step of the `check` job has a limit of about twice its normal time on
-  macos-26-intel, the slowest runner (designer's ruling, 2026-11-19), taken from the six passing
-  runs 44474815418 to 44627182924 (median, then the most of the six): the coverage step's other
-  packages 8.5 min (13.2 at most), limit 18; `internal/video`'s coverage 3.5 min (4.3), limit 8;
-  race, other packages 7.5 min (9.0), limit 15; race, isolated packages 10.2 min (14.6), limit 20;
-  the HEVC fast path 3.6 min (4.5), limit 8; lint, static build and vulnerability scan under 2
-  min on every runner (the static build 2.5 min on windows-2025 once), limit 5, as for the steps
-  that were at 5 already. The coverage step's 20 minutes, which one slow host passed in attempt 1 of
-  run 44581210423 (every package about twice its usual time, section 19), became 18 + 8; that
-  host's other packages took 16.3 minutes. The `check` job's limit is 70 minutes, the two race
-  steps a runner runs at 15 and 20 plus 35 for every other step (`tools/dev` `fixedStepsBudget`,
-  checked by a test against all four race steps). On macos-26-intel the non-race steps took 21.2
-  minutes (median; 17.8 to 28.0) and the whole job 38.9 (32.8 to 51.5), so 35 is 1.65 times the
-  non-race median, and twice the job's median, about 78 minutes, is past the job's limit: a host
-  twice as slow throughout is cut off by the job limit, not by a step's. Whether the job limit
-  follows the steps to about 80 minutes is the designer's decision; it stays at 70 until then.
+  **Step limits** (designer's ruling, 2026-11-19). Each step of the `check` job has a limit of
+  the larger of twice its median on the runner where that median is largest and 1.3 times the
+  largest passing time on any runner, rounded up to a whole minute, and never below 5 minutes.
+  The sample is the six passing runs of 2026-11-19 (UTC, 06:48 to 22:50): 44474815418,
+  44479932125, 44581210423 (attempt 2), 44595183829, 44619325521 and 44627182924, each on all
+  six runners; the two coverage parts are timed from the job logs of the step they were then
+  together in. Minutes:
+
+  | Step | Slowest median (runner) | Max, any runner | 2 x median | 1.3 x max | Limit |
+  | --- | --- | --- | --- | --- | --- |
+  | Coverage, other packages | 8.53 (macos-26-intel) | 13.23 | 17.06 | 17.20 | 18 |
+  | Coverage gate, `internal/video` | 3.49 (macos-26-intel) | 4.25 | 6.98 | 5.52 | 7 |
+  | Tests without the release tags | 8.13 (ubuntu-24.04, its only runner) | 8.43 | 16.27 | 10.96 | 17 |
+  | HEVC fast path | 3.62 (macos-26-intel) | 4.48 | 7.25 | 5.83 | 8 |
+  | Race, other packages | 7.47 (macos-26-intel) | 8.95 | 14.95 | 11.63 | 15 |
+  | Race, isolated packages | 10.20 (macos-26-intel) | 14.58 | 20.40 | 18.96 | 21 |
+  | Static build | 1.76 (ubuntu-24.04) | 2.53 (windows-2025) | 3.52 | 3.29 | 5 |
+  | Lint | 1.05 (macos-26-intel) | 1.35 | 2.10 | 1.75 | 5 |
+  | Vulnerability scan | 1.08 (windows-2025) | 1.20 | 2.17 | 1.56 | 5 |
+  | Hostile-cost ratios | 0.63 (macos-26-intel) | 0.78 | 1.27 | 1.02 | 5 |
+  | Install the linter, import rule | under 0.1 | 0.63 | | | 5 |
+
+  The lint and static-build figures come from runs whose build and module caches setup-go
+  restored warm; a cold cache, as after a `go.sum` change such as a Dependabot update, is
+  unmeasured on the runners (locally, pinned to 4 cores, a cold `build -all` took 61 s and a cold
+  lint 39 s). The coverage step's 20 minutes, which one slow host passed in attempt 1 of run
+  44581210423 (every package about twice its usual time, section 19), became 18 + 7; that host's
+  other packages took 16.3 minutes. **The job's limit** is 85 minutes: the two race steps a runner
+  runs, 15 + 21, plus 45 for every other step (`tools/dev` `fixedStepsBudget`, checked by a test
+  against all four race steps) make 81, rounded up to a multiple of 5. The 45 is about twice the
+  non-race steps' median on macos-26-intel, 21.2 minutes (17.8 to 28.0; ubuntu-24.04, whose steps
+  differ, 23.6); the whole job there took 38.9 minutes (median; 32.8 to 51.5), and 85 is above
+  twice that. **Not covered, by design:** a host about twice as slow as usual on every step at
+  once can stay inside each step's limit and still reach the job's 85 minutes, and fails there;
+  one more than twice as slow fails at the first step it overruns.
   The detector's hostile-cost tests (`TestDetectThreeHostile` 16 times, `TestDetectThreeHostile4K`
   and `TestDetectHostileGrid4K` 6, `TestDetectHostileGrid` 2; SECURITY.md section 9.1) bound a
   ratio to a real code's Detect in the same process and run serially. The ratio is the median, over
@@ -2403,7 +2422,6 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   now read `== "1"` like the others, and `tools/dev`'s `TestLongTestGuards` refuses any other
   reading of the variable in a test file. The
   designer accepted -31% (2026-11-18), with the honesty statistics and the concurrency tests kept
-  designer accepted -31% (2026-11-18), with the honesty statistics and the concurrency tests kept
   in full; the macos-26-intel figure above stays a projection until this pull request's CI run
   measures it. Half, the target, was not reached. What remains is
   mostly the parallel statistics: `TestHonestConfidence` (31 to 40 s within the run) and
@@ -2551,10 +2569,10 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   reports its own modes), and the manifest records the mode, so a transfer repeats from run to run
   on one machine but its bytes can differ between machines (the development machine and a CI
   runner, say). A filmed outcome near a margin could therefore differ between a local run and CI;
-  fixing it means setting the modes in both `fixTimes`, which this tooling pull request leaves to
-  the designer. The frame vectors and the reference video (FORMAT.md section 13) fix their input's
-  mode as well as its time: a read-only file, which every system reports as 0444, since the
-  manifest records the mode.
+  fixing it means setting the modes in both `fixTimes`, **deferred to M4's second pull request**,
+  knowingly (designer's ruling, 2026-11-19). The frame vectors and the reference video (FORMAT.md
+  section 13) fix their input's mode as well as its time: a read-only file, which every system
+  reports as 0444, since the manifest records the mode.
   The tests affected, by the reviewer's survey:
   - **Near a margin, asserting only "decodes", could flip in CI:**
     `TestRoundTripMatrix/iphone-hdr-1080p30-gray4-normal` (always on, below section 11's condition
@@ -2614,10 +2632,16 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   with a limit, 15 minutes and 5 for `apt-get update` (`QRVT_PM_TIMEOUT`), after which it is
   stopped (SIGTERM, then SIGKILL with its children 10 s later) and the script fails, naming the
   command; apt-get gets Acquire timeouts of 30 s and 3 retries, and the archive downloads a stall
-  limit and retries. The run above, at 13 minutes, would still have passed. `TestSetupShBounded`
-  and `TestSetupPs1Bounded` check that every such command is bounded, and the `...Runs` tests run
-  both scripts' functions (PowerShell where there is one). Not exercised: a real mirror stall, and
-  stopping a command under `sudo`, which the tests cannot reach without a password.
+  limit and retries. Ctrl-C during such a command stops it too, rather than leaving it running
+  detached with dpkg's lock. The run above, at 13 minutes, would still have passed.
+  `TestSetupShBounded` and `TestSetupPs1Bounded` check that every such command is bounded; the
+  `...Runs`, `...KillsChildless` and `...CleansUp` tests run both scripts' functions (setup.sh's
+  under sh, dash and bash, PowerShell where there is one): a command that ignores SIGTERM, with
+  or without a child, is killed within the limit and the grace, and nothing is left behind. **Under
+  `sudo`** the command runs as root: SIGTERM reaches sudo, which relays it to the command, but
+  SIGKILL cannot reach the command, so one that also ignores SIGTERM runs on, and the CI step's own
+  limit (35 minutes for the setup scripts) is the backstop. **Not exercised:** a real mirror stall,
+  and stopping a command under `sudo`, which the tests cannot reach without a password.
 - **A cache-restore error in the check job on macos-26-intel (2026-11-19).** In each of the
   eight job logs read, the "Vulnerability scan" step logged about 17,000 lines of
   `##[error]/usr/local/bin/gtar: ...: Cannot open: File exists` (for example
