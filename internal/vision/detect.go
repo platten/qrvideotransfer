@@ -46,6 +46,11 @@ type FinderDetector struct {
 
 var _ Detector = (*FinderDetector)(nil)
 
+// Refusal reports what the last Detect saw. Stub.
+func (d *FinderDetector) Refusal() (finders bool, reject frame.HeaderError) {
+	return false, frame.HeaderError{}
+}
+
 // detectCluster is a finder candidate: the mean of the scan hits near one place.
 type detectCluster struct {
 	sum    gpt     // sum of hit centres, downscaled pixels

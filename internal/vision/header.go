@@ -34,12 +34,17 @@ func (SlotReader) Read(f *video.Frame, q Quad) ([]frame.Header, bool) {
 	if !ok {
 		return nil, false
 	}
-	out := decodeCopies(&soft)
+	out := decodeCopies(&soft, nil)
 	return out, len(out) > 0
 }
 
+// ReadReason is Read, returning the strongest refusal instead of a flag. Stub.
+func (SlotReader) ReadReason(f *video.Frame, q Quad) ([]frame.Header, frame.HeaderError) {
+	return nil, frame.HeaderError{}
+}
+
 // decodeCopies decodes the copies' soft bits as Read describes.
-func decodeCopies(soft *[4][frame.HeaderSlots]int8) []frame.Header {
+func decodeCopies(soft *[4][frame.HeaderSlots]int8, rej *frame.HeaderError) []frame.Header {
 	var out []frame.Header
 	try := func(copies ...int) bool {
 		var sum [frame.HeaderSlots]int8
@@ -165,7 +170,7 @@ func headerModelLens(v *geomLuma, q Quad, withK2 bool) (geomModel, [4][frame.Hea
 		if score > bestScore {
 			best, bestSoft, bestScore, found, better = m, soft, score, true, true
 		}
-		if len(decodeCopies(&soft)) > 0 {
+		if len(decodeCopies(&soft, nil)) > 0 {
 			best, bestSoft, found = m, soft, true
 			return true, better
 		}
