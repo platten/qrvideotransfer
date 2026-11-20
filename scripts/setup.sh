@@ -98,28 +98,35 @@ apt_opts="-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire:
 # reaches sudo, which relays it to the command, but SIGKILL cannot reach the command, which runs as
 # root: a command that also ignores SIGTERM is then left to the CI step's own limit.
 bounded() {
+	# Every command here that can fail before the cleanup is guarded (|| ..., or set +e in the
+	# watchdog and the trap), so that set -e cannot end the script half-way.
 	b_limit=$1
 	shift
+	b_status=0
 	if [ "$b_limit" -eq 0 ]; then
-		"$@"
-		return
+		"$@" || b_status=$?
+		return "$b_status"
 	fi
 	b_mark=$(mktemp -d)
 	"$@" &
 	b_pid=$!
-	# The watchdog, without set -e (a pkill that finds no child must not end it): its sleeps run
-	# in the background so that the TERM it gets when the command ends interrupts its wait at once.
+	# The watchdog, without set -e (a pkill that finds no child must not end it). Its sleeps run in
+	# the background so that the TERM it gets when the command ends interrupts its wait at once; a
+	# TERM that arrives before a sleep's process ID is known sets b_stop, checked right after.
 	(
 		set +e
-		b_sleep=
-		trap '[ -z "$b_sleep" ] || kill "$b_sleep" 2>/dev/null; exit 0' TERM
+		b_sleep='' b_stop=''
+		trap 'if [ -n "$b_sleep" ]; then kill "$b_sleep" 2>/dev/null; exit 0; fi; b_stop=1' TERM
 		sleep "$b_limit" &
 		b_sleep=$!
+		if [ -n "$b_stop" ]; then kill "$b_sleep" 2>/dev/null; exit 0; fi
 		wait "$b_sleep" || exit 0
 		: >"$b_mark/expired"
 		kill -TERM "$b_pid" 2>/dev/null || exit 0
+		b_sleep=''
 		sleep 10 &
 		b_sleep=$!
+		if [ -n "$b_stop" ]; then kill "$b_sleep" 2>/dev/null; exit 0; fi
 		wait "$b_sleep" || exit 0
 		command -v pkill >/dev/null 2>&1 && pkill -KILL -P "$b_pid"
 		kill -KILL "$b_pid"
@@ -127,20 +134,22 @@ bounded() {
 	b_dog=$!
 	# Ctrl-C reaches the shell, not the command, which as a background job ignores SIGINT: stop
 	# it, and the watchdog, rather than leave them running detached (holding dpkg's lock, say).
-	trap 'command -v pkill >/dev/null 2>&1 && pkill -P "$b_dog"; kill -TERM "$b_pid" "$b_dog" 2>/dev/null; rm -rf "$b_mark"; exit 130' INT TERM
-	b_status=0
+	# The trap is set only now: a watchdog forked with it in place could lose its TERM (under dash,
+	# once in 60 runs, it then waited on its sleep for good). It runs without set -e, as any of its
+	# kills may find nothing left to signal.
+	trap 'set +e; command -v pkill >/dev/null 2>&1 && pkill -P "$b_dog"; kill -TERM "$b_pid" "$b_dog" 2>/dev/null; rm -rf "$b_mark"; exit 130' INT TERM
 	wait "$b_pid" || b_status=$?
 	trap - INT TERM
-	# The watchdog's sleep first, by its parent (a TERM between its fork and b_sleep=$! would
-	# leave it running), then the watchdog.
+	# The watchdog's sleep first, by its parent, then the watchdog, whose trap also covers a sleep
+	# not yet forked.
 	if command -v pkill >/dev/null 2>&1; then pkill -P "$b_dog" 2>/dev/null || true; fi
 	kill "$b_dog" 2>/dev/null || true
 	wait "$b_dog" 2>/dev/null || true
 	if [ -e "$b_mark/expired" ]; then
-		printf 'setup: %s did not finish within %s s (a package mirror may be stalled); run setup again, or set QRVT_PM_TIMEOUT to a longer limit in seconds (0: none)\n' "$*" "$b_limit" >&2
+		printf 'setup: %s did not finish within %s s (a package mirror may be stalled); run setup again, or set QRVT_PM_TIMEOUT to a longer limit in seconds (0: none)\n' "$*" "$b_limit" >&2 || true
 		b_status=124
 	fi
-	rm -rf "$b_mark"
+	rm -rf "$b_mark" || true
 	return "$b_status"
 }
 

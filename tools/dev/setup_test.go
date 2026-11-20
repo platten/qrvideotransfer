@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -208,7 +209,11 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 			t.Parallel()
 			// A limit no other process uses, so that a stray watchdog sleep can be found by its arguments.
 			limit := fmt.Sprintf("%d%d", 7000+os.Getpid()%1000, shell[0]) // one per shell (sh, dash, bash), which run in parallel
-			cmd := exec.Command(shell, "-c", "set -eu\n"+fn+"i=0; while [ $i -lt 20 ]; do bounded "+limit+" true; i=$((i+1)); done")
+			// A watchdog that misses its TERM would hold the loop until its sleep ends: fail in a minute.
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, shell, "-c", "set -eu\n"+fn+"i=0; while [ $i -lt 20 ]; do bounded "+limit+" true; i=$((i+1)); done")
+			cmd.WaitDelay = time.Second
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%s: %v: %s", shell, err, out)
 			}
