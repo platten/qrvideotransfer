@@ -251,6 +251,108 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 	}
 }
 
+// TestSetupShBoundedMktempFails: when mktemp cannot make the marker folder (TMPDIR missing),
+// bounded fails with status 1 without running the command, also where set -e is off because it was
+// called on the left of || (review of PR #55).
+func TestSetupShBoundedMktempFails(t *testing.T) {
+	fn := scriptFunc(t, readScript(t, "setup.sh"), "bounded() {")
+	for _, shell := range boundedShells(t) {
+		t.Run(shell, func(t *testing.T) {
+			t.Parallel()
+			for _, c := range []struct {
+				call, wantOut string
+				wantExit      bool // the shell ends with a failure status, set -e applying
+			}{
+				{`bounded 30 sh -c 'echo ran > "$OUT"' || echo "status $?"`, "status 1\n", false},
+				{`bounded 30 sh -c 'echo ran > "$OUT"'; echo after`, "", true},
+			} {
+				dir := t.TempDir()
+				out := filepath.Join(dir, "out")
+				cmd := exec.Command(shell, "-c", "set -eu\n"+fn+c.call)
+				cmd.Env = append(os.Environ(), "OUT="+out, "TMPDIR="+filepath.Join(dir, "missing"))
+				stdout, err := cmd.Output()
+				if string(stdout) != c.wantOut || (err != nil) != c.wantExit {
+					t.Errorf("%s: %s: %v, stdout %q; want %q, failure %v", shell, c.call, err, stdout, c.wantOut, c.wantExit)
+				}
+				if _, err := os.Stat(out); err == nil {
+					t.Errorf("%s: %s: the command ran", shell, c.call)
+				}
+			}
+		})
+	}
+}
+
+// TestSetupShBoundedEarlyInterrupt: an interrupt at any moment of bounded's start, including the
+// moments between making the marker folder, starting the command and the watchdog, and setting the
+// trap (review of PR #55), leaves neither the folder, nor the command, nor the watchdog's sleep. The
+// shell is interrupted 300 times, after a delay swept from 0 to 7.9 ms in steps of 0.1 ms (the
+// scheduler adds its own jitter): either the interrupt comes before bounded starts and ends the
+// shell at once, or bounded ends it with status 130. Under bash the interrupt reaches only the
+// shell, as here, and arrives while it waits for mktemp, bash ignores it unless a trap is set, since
+// mktemp did not die of it (bash's wait-and-cooperative-exit rule); the flag trap covers that too.
+func TestSetupShBoundedEarlyInterrupt(t *testing.T) {
+	fn := scriptFunc(t, readScript(t, "setup.sh"), "bounded() {")
+	for _, shell := range boundedShells(t) {
+		t.Run(shell, func(t *testing.T) {
+			t.Parallel()
+			// Arguments no other process uses: the watchdog's limit and the command's sleep.
+			n := 7000 + os.Getpid()%1000
+			limit, long := fmt.Sprintf("%d%d1", n, shell[0]), fmt.Sprintf("%d%d2", n, shell[0])
+			marks := t.TempDir()
+			var before, trapped int
+			const runs = 300
+			for i := range runs {
+				cmd := exec.Command(shell, "-c", "set -eu\n"+fn+"bounded "+limit+" sleep "+long)
+				cmd.Env = append(os.Environ(), "TMPDIR="+marks)
+				if err := cmd.Start(); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(time.Duration(i%80) * 100 * time.Microsecond)
+				_ = cmd.Process.Signal(os.Interrupt)
+				done := make(chan error, 1)
+				go func() { done <- cmd.Wait() }()
+				var err error
+				select {
+				case err = <-done:
+				case <-time.After(10 * time.Second):
+					_ = cmd.Process.Kill()
+					err = <-done
+					t.Errorf("%s: run %d (%d x 0.1 ms): the interrupt did not end the shell", shell, i, i%80)
+				}
+				var exit *exec.ExitError
+				switch {
+				case errors.As(err, &exit) && exit.ExitCode() == 130:
+					trapped++
+				case errors.As(err, &exit) && exit.ExitCode() == -1 && exit.Sys().(syscall.WaitStatus).Signal() == syscall.SIGINT:
+					before++ // ended by the signal itself, before bounded set a trap
+				case errors.As(err, &exit) && exit.ExitCode() == -1:
+					// killed above, already reported
+				default:
+					t.Errorf("%s: run %d: %v; want status 130 or the interrupt", shell, i, err)
+				}
+				if left, _ := os.ReadDir(marks); len(left) > 0 {
+					t.Errorf("%s: run %d (%d x 0.1 ms): %d entries left in TMPDIR", shell, i, i%80, len(left))
+					for _, e := range left {
+						_ = os.RemoveAll(filepath.Join(marks, e.Name()))
+					}
+				}
+			}
+			time.Sleep(300 * time.Millisecond)
+			ps, err := exec.Command("ps", "-eo", "args").Output()
+			if err != nil {
+				t.Skipf("no ps: %v", err)
+			}
+			for _, a := range []string{"sleep " + limit, "sleep " + long} {
+				if c := strings.Count(string(ps), a+"\n"); c > 0 {
+					t.Errorf("%s: %d processes %q outlived an interrupt", shell, c, a)
+					_ = exec.Command("pkill", "-f", "^"+a+"$").Run()
+				}
+			}
+			t.Logf("%s: %d of %d runs interrupted before bounded began, %d ended by its trap", shell, before, runs, trapped)
+		})
+	}
+}
+
 // TestSetupPs1Bounded: setup.ps1 installs through winget only by way of Invoke-Bounded, and gives
 // its downloads a timeout.
 func TestSetupPs1Bounded(t *testing.T) {
