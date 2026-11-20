@@ -66,9 +66,10 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-2025, windows-11-arm]
     runs-on: ${{ matrix.os }}
-    # The 2 race steps' 15 + 20 minutes + 35 for the rest (tools/dev fixedStepsBudget, DESIGN.md
-    # section 17). Each step's limit is about twice its normal time on macos-26-intel.
-    timeout-minutes: 70
+    # The 2 race steps' 15 + 21 minutes + 45 for the rest (tools/dev fixedStepsBudget), rounded up to
+    # 85. Each step's limit: the larger of 2x the slowest runner's median and 1.3x the largest
+    # passing time on any runner, rounded up, at least 5 minutes (DESIGN.md section 17).
+    timeout-minutes: 85
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,7 +115,7 @@ jobs:
         run: scripts/test.sh cover -part rest
       - name: Tests with coverage gate, internal/video (Unix)
         if: ${{ !cancelled() && runner.os != 'Windows' && steps.cover-rest.outcome != 'skipped' }}
-        timeout-minutes: 8
+        timeout-minutes: 7
         shell: bash
         run: scripts/test.sh cover -part video
       - name: Tests with coverage, other packages (Windows)
@@ -125,7 +126,7 @@ jobs:
         run: scripts/test.ps1 cover -part rest
       - name: Tests with coverage gate, internal/video (Windows)
         if: ${{ !cancelled() && runner.os == 'Windows' && steps.cover-rest-windows.outcome != 'skipped' }}
-        timeout-minutes: 8
+        timeout-minutes: 7
         shell: pwsh
         run: scripts/test.ps1 cover -part video
 
@@ -133,7 +134,7 @@ jobs:
       # that ships; this step keeps the default, untagged build covered too.
       - name: Tests without the release build tags
         if: matrix.os == 'ubuntu-24.04'
-        timeout-minutes: 20
+        timeout-minutes: 17
         shell: bash
         run: scripts/test.sh -untagged
 
@@ -194,7 +195,7 @@ jobs:
         run: scripts/test.sh -race -part others
       - name: Race tests, isolated packages (Unix)
         if: ${{ !cancelled() && runner.os != 'Windows' && steps.race-others.outcome != 'skipped' }}
-        timeout-minutes: 20
+        timeout-minutes: 21
         shell: bash
         run: scripts/test.sh -race -part isolated
       - name: Race tests, other packages (Windows)
@@ -205,7 +206,7 @@ jobs:
         run: scripts/test.ps1 -race -part others
       - name: Race tests, isolated packages (Windows)
         if: ${{ !cancelled() && matrix.os == 'windows-2025' && steps.race-others-windows.outcome != 'skipped' }}
-        timeout-minutes: 20
+        timeout-minutes: 21
         shell: pwsh
         run: scripts/test.ps1 -race -part isolated
 

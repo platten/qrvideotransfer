@@ -205,7 +205,7 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string,
 	if *race {
 		// internal/video's engine tests take minutes under the race detector on the slowest runner
 		// (macos-26-intel), past go test's default of 10 minutes per package; 18 minutes stays inside
-		// the isolated race step's 20.
+		// the isolated race step's 21.
 		// -count=1: a cached race pass reuses one old run's luck for the nondeterministic tests
 		// (internal/fec/conv's parallel test, internal/fec/rs's subprocess test), and setup-go
 		// restores the test cache across runs (DESIGN.md section 17).
@@ -508,12 +508,12 @@ func selectRuns(runs [][]string, part string) ([][]string, error) {
 }
 
 // fixedStepsBudget is the time, in minutes, that the check job's limit allows for every step but
-// the two race steps a runner runs. With those at their limits (15 + 20) it gives the job's 70
-// minutes (DESIGN.md section 17). Source: on macos-26-intel, the slowest runner, the non-race
-// steps took 17.8 to 28.0 minutes, median 21.2, in the six passing runs before the steps' limits
-// were set to about twice their normal times (runs 44474815418 to 44627182924); 35 is 1.65 times
-// that median. Twice it, 42, would take the job to 77 minutes, which the designer decides.
-const fixedStepsBudget = 35
+// the two race steps a runner runs (designer's ruling, 2026-11-19; DESIGN.md section 17). On
+// macos-26-intel the non-race steps took 17.8 to 28.0 minutes, median 21.2, in the six passing
+// runs 44474815418 to 44627182924 (ubuntu-24.04, whose steps differ, a median of 23.6); 45 is
+// about twice that. With the race steps at their limits (15 + 21) it makes 81, and the job's
+// limit is 85.
+const fixedStepsBudget = 45
 
 // checkJobLimits returns, from ci.yml, the check job's timeout-minutes and the timeout-minutes of
 // each of its race steps, in order.
