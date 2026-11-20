@@ -21,12 +21,14 @@ const (
 	// lockSample bounds the frames the locked-rate check follows: every frame of a loop of up to
 	// lockSample frames, else every ceil(F / lockSample)th.
 	lockSample = 4096
-	// lockTolerance is how far a pass's best clean fraction of a frame may lie from the first
-	// pass's and still count as unchanged. Locked simulated recordings varied by up to 0.03 from
-	// pass to pass with the noise of the phase field (2026-11-20).
+	// lockTolerance is how far the later passes' best clean fractions may lie from the first
+	// pass's, on average over the frames compared, and still count as unchanged. One capture's
+	// clean fraction varies with the noise of the phase field: in locked simulated recordings by up
+	// to 0.03 from pass to pass on a 120 x 120 grid and up to 0.1 on a 212 x 120 grid (2026-11-20),
+	// which the average over the frames removes; a drift that moves the mixing shifts them all.
 	lockTolerance = 0.05
 	// lockMinPairs is the fewest comparisons of a later pass with the first that the check needs.
-	lockMinPairs = 2
+	lockMinPairs = 4
 	// lockMixed is the mean first-pass clean fraction below which part of every capture is mixed:
 	// at or above it, more passes add clean data and the generic guidance holds.
 	lockMixed = 0.9
@@ -109,13 +111,15 @@ func (g *diagnostics) agreed() *frame.HeaderError {
 // lockTrack tells a camera locked to the display rate from the captures of the decoded transfer
 // (DESIGN.md section 13). A pass over a frame is a run of consecutive captures whose first header
 // names it; for each followed frame it keeps the best clean fraction of its first pass and of its
-// latest. The camera is locked when, for the frames seen in more than one pass, a later pass's best
-// lies within lockTolerance of the first's in at least three quarters of the comparisons, of
-// which there are at least lockMinPairs, and the first passes' mean is under lockMixed.
+// latest. The camera is locked when, for the frames seen in more than one pass, the later passes'
+// bests differ from the first's by at most lockTolerance on average (signed, so that the noise of
+// single captures cancels), over at least lockMinPairs comparisons, and the first passes' mean is
+// under lockMixed.
 type lockTrack struct {
-	stride      uint32
-	frames      []lockFrame // followed frames, frame k at k / stride
-	pairs, same int         // comparisons of finished later passes, and those unchanged
+	stride uint32
+	frames []lockFrame // followed frames, frame k at k / stride
+	pairs  int         // comparisons of finished later passes with the first
+	diff   float64     // their differences from the first pass, summed
 }
 
 // lockFrame is one followed frame's passes.
@@ -156,9 +160,7 @@ func (t *lockTrack) see(k uint32, index int, clean float32) {
 // compare counts the comparison of e's latest pass with its first.
 func (t *lockTrack) compare(e *lockFrame) {
 	t.pairs++
-	if math.Abs(float64(e.cur-e.first)) <= lockTolerance {
-		t.same++
-	}
+	t.diff += float64(e.cur - e.first)
 }
 
 // locked reports whether the camera is locked to the display rate.
@@ -172,5 +174,5 @@ func (t *lockTrack) locked() bool {
 			n++
 		}
 	}
-	return u.pairs >= lockMinPairs && 4*u.same >= 3*u.pairs && sum < lockMixed*float64(n)
+	return u.pairs >= lockMinPairs && math.Abs(u.diff) <= lockTolerance*float64(u.pairs) && sum < lockMixed*float64(n)
 }
