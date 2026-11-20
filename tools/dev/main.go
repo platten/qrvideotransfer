@@ -539,8 +539,12 @@ func checkJobLimits(b []byte) (job int, race []int) {
 	return job, race
 }
 
-// packages lists the packages that patterns name, with the given build tags.
+// packages lists the packages that patterns name, with the given build tags; without a pattern,
+// the whole module (module/..., from any directory), not go list's default of the current directory.
 func packages(tags string, patterns ...string) ([]string, error) {
+	if len(patterns) == 0 {
+		patterns = []string{module + "/..."}
+	}
 	args := []string{"list"}
 	if tags != "" {
 		args = append(args, "-tags="+tags)
