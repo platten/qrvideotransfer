@@ -77,10 +77,10 @@ type Shortfall struct {
 type ShortError struct {
 	Blocks []Shortfall
 	// What the recordings showed, for the failure guidance of DESIGN.md section 13.
-	Captures    int                // captures read
-	Located     int                // captures in which a quad of finders was found and its header read
-	HeadersRead int                // captures whose header was read, of any transfer
-	Other       int                // of those, captures of a transfer other than the one decoded
+	Captures    int64              // captures read
+	Located     int64              // captures in which a quad of finders was found and its header read
+	HeadersRead int64              // captures whose header was read, of any transfer
+	Other       int64              // of those, captures of a transfer other than the one decoded
 	FramesSeen  int                // code frames of the decoded transfer seen
 	FramesTotal int                // its code frames, F; 0 when no header was read
 	Descriptor  bool               // the stream descriptor was read

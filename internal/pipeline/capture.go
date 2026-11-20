@@ -108,19 +108,22 @@ func (w *captureWorker) process(f *video.Frame, index int) captureResult {
 	return r
 }
 
-// see runs the vision chain on f, filling r's key, located, cells and clean, and calls each with
-// the geometry of the header's grid and the descrambled soft bits, by bit position, of every code
-// frame the capture shows.
+// see runs the vision chain on f, filling r's key, first, located, cells, clean, finders and
+// reject, and calls each with the geometry of the header's grid and the descrambled soft bits, by
+// bit position, of every code frame the capture shows.
 func (w *captureWorker) see(f *video.Frame, r *captureResult, each func(g *geometry, frame uint32, soft []int8)) {
 	q, ok := w.det.Detect(f, nil)
 	if !ok {
+		r.finders, r.reject = w.det.Refusal()
 		return
 	}
-	hs, ok := vision.SlotReader{}.Read(f, q)
-	if !ok || len(hs) == 0 {
+	r.finders = true
+	hs, rej := vision.SlotReader{}.ReadReason(f, q)
+	if len(hs) == 0 {
+		r.reject = rej
 		return
 	}
-	r.key = paramsOf(hs[0])
+	r.key, r.first = paramsOf(hs[0]), hs[0].FrameIndex
 	var idxs []uint32
 	for _, h := range hs {
 		if paramsOf(h) == r.key {

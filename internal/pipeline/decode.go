@@ -143,6 +143,9 @@ type decoder struct {
 	bitErrs, bitsAll int64
 	warnings         []Warning
 	warned           map[string]bool
+
+	diag diagnostics // what the captures showed short of a code
+	lock lockTrack   // the decoded transfer's clean fractions pass after pass
 }
 
 func (d *decoder) close() {
@@ -326,6 +329,7 @@ func (d *decoder) apply(r captureResult) error {
 // add sums one capture's soft bits into the accumulators.
 func (d *decoder) add(r captureResult) error {
 	d.stats.Captures++
+	d.diag.note(&r, d.key)
 	if !r.located {
 		return nil
 	}
@@ -341,6 +345,7 @@ func (d *decoder) add(r captureResult) error {
 		d.descSoft = make([]int8, g.sent)
 		d.stats.FramesTotal = int(r.key.frames)
 		d.seen = make([]uint64, (r.key.frames+63)/64)
+		d.lock = newLockTrack(r.key.frames)
 	}
 	if r.key != *d.key {
 		return nil // another transfer, or a false header: counted as a capture, nothing more
@@ -348,6 +353,7 @@ func (d *decoder) add(r captureResult) error {
 	d.located++
 	if r.cells > 0 {
 		d.cleanSum += float64(r.clean) / float64(r.cells)
+		d.lock.see(r.first, r.index, float32(r.clean)/float32(r.cells))
 	}
 	if r.clean == 0 {
 		d.warn(StageDemodulate, WarnExposureTooLong, "No part of a capture shows a single code frame: "+
@@ -540,12 +546,14 @@ func (d *decoder) flush() error {
 	return nil
 }
 
-// shortfall describes what is missing.
+// shortfall describes what is missing, and what the captures showed.
 func (d *decoder) shortfall() error {
+	e := ShortError{Captures: d.stats.Captures, Located: d.diag.finders, HeadersRead: d.diag.headers, Other: d.diag.other,
+		FramesSeen: d.framesSeen, FramesTotal: d.stats.FramesTotal, Descriptor: d.desc != nil, Reject: d.diag.agreed(),
+		LockedRate: d.lock.locked()}
 	if d.store == nil {
-		return &ShortError{}
+		return &e
 	}
-	var e ShortError
 	for b := range d.plan.Blocks {
 		if h := d.store.Have(b); h < d.plan.K {
 			e.Blocks = append(e.Blocks, Shortfall{Block: b, Have: h, Need: d.plan.K})

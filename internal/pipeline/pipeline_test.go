@@ -175,8 +175,8 @@ func TestFrameLoss(t *testing.T) {
 				t.Errorf("short blocks %+v, want %+v", short.Blocks, wantShort)
 			}
 			// The diagnostics of a lossless recording: every capture located, its header read.
-			k := len(kept)
-			diag := ShortError{Blocks: short.Blocks, Captures: k, Located: k, HeadersRead: k, FramesSeen: k, FramesTotal: res.Frames,
+			k := int64(len(kept))
+			diag := ShortError{Blocks: short.Blocks, Captures: k, Located: k, HeadersRead: k, FramesSeen: len(kept), FramesTotal: res.Frames,
 				Descriptor: true}
 			if short.Reject != nil || short.LockedRate || !reflect.DeepEqual(*short, diag) {
 				t.Errorf("diagnostics %+v, want %+v", *short, diag)
