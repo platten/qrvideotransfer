@@ -54,9 +54,9 @@ func TestGuidance(t *testing.T) {
 		o     *qrvt.DecodeOptions
 		want  string
 	}{
-		{short, stats, &qrvt.DecodeOptions{Recordings: []string{"a"}}, "2.5% short: record one more loop and pass both files"},
-		{short, stats, &qrvt.DecodeOptions{Recordings: []string{"a", "b"}}, "2.5% short: record one more loop and pass all the recordings"},
-		{short, stats, &qrvt.DecodeOptions{Recordings: []string{"a"}, StateDir: "s"}, "2.5% short: record one more loop and decode it with the same --state-dir"},
+		{short, stats, &qrvt.DecodeOptions{Recordings: []string{"a"}}, "2.5% short: 50 shards missing in 2 of 2 blocks. Record one more loop and pass both files"},
+		{short, stats, &qrvt.DecodeOptions{Recordings: []string{"a", "b"}}, "2.5% short: 50 shards missing in 2 of 2 blocks. Record one more loop and pass all the recordings"},
+		{short, stats, &qrvt.DecodeOptions{Recordings: []string{"a"}, StateDir: "s"}, "2.5% short: 50 shards missing in 2 of 2 blocks. Record one more loop and decode it with the same --state-dir"},
 		{short, nil, &qrvt.DecodeOptions{Recordings: []string{"a"}}, "2.5% short"},
 		{&qrvt.NotEnoughDataError{Blocks: []qrvt.Shortfall{{Have: 1, Need: 4}}}, &qrvt.Stats{BlocksTotal: 10}, nil, "7.5% short"},
 		{&qrvt.NotEnoughDataError{}, nil, nil, "record one more loop"},
@@ -98,7 +98,7 @@ func TestDecodeFailureGuidance(t *testing.T) {
 		err:    &qrvt.NotEnoughDataError{Blocks: []qrvt.Shortfall{{Have: 980, Need: 1000}, {Block: 1, Have: 970, Need: 1000}}},
 	}
 	_, errOut, err := run(t, fa, nil, "--plain", "decode", f.r1, "-o", f.dir)
-	if ExitCode(err) != 3 || !strings.Contains(errOut, "2.5% short: record one more loop and pass both files") {
+	if ExitCode(err) != 3 || !strings.Contains(errOut, "2.5% short: 50 shards missing in 2 of 2 blocks. Record one more loop and pass both files") {
 		t.Errorf("exit %d, stderr %q", ExitCode(err), errOut)
 	}
 }
