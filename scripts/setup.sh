@@ -94,7 +94,9 @@ apt_opts="-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire:
 
 # bounded SECONDS COMMAND...: runs COMMAND, limited to SECONDS (0: no limit). Past it the command
 # gets SIGTERM, and 10 s later SIGKILL, with its child processes (where pkill exists); bounded
-# then says so and returns 124. Otherwise it returns the command's status.
+# then says so and returns 124. Otherwise it returns the command's status. Under sudo, SIGTERM
+# reaches sudo, which relays it to the command, but SIGKILL cannot reach the command, which runs as
+# root: a command that also ignores SIGTERM is then left to the CI step's own limit.
 bounded() {
 	b_limit=$1
 	shift
@@ -105,10 +107,12 @@ bounded() {
 	b_mark=$(mktemp -d)
 	"$@" &
 	b_pid=$!
-	# The watchdog: its sleeps run in the background so that the TERM it gets when the command
-	# ends interrupts its wait at once.
+	# The watchdog, without set -e (a pkill that finds no child must not end it): its sleeps run
+	# in the background so that the TERM it gets when the command ends interrupts its wait at once.
 	(
-		trap 'kill "$b_sleep" 2>/dev/null; exit 0' TERM
+		set +e
+		b_sleep=
+		trap '[ -z "$b_sleep" ] || kill "$b_sleep" 2>/dev/null; exit 0' TERM
 		sleep "$b_limit" &
 		b_sleep=$!
 		wait "$b_sleep" || exit 0
@@ -117,12 +121,19 @@ bounded() {
 		sleep 10 &
 		b_sleep=$!
 		wait "$b_sleep" || exit 0
-		if command -v pkill >/dev/null 2>&1; then pkill -KILL -P "$b_pid"; fi
+		command -v pkill >/dev/null 2>&1 && pkill -KILL -P "$b_pid"
 		kill -KILL "$b_pid"
 	) </dev/null >/dev/null 2>&1 &
 	b_dog=$!
+	# Ctrl-C reaches the shell, not the command, which as a background job ignores SIGINT: stop
+	# it, and the watchdog, rather than leave them running detached (holding dpkg's lock, say).
+	trap 'command -v pkill >/dev/null 2>&1 && pkill -P "$b_dog"; kill -TERM "$b_pid" "$b_dog" 2>/dev/null; rm -rf "$b_mark"; exit 130' INT TERM
 	b_status=0
 	wait "$b_pid" || b_status=$?
+	trap - INT TERM
+	# The watchdog's sleep first, by its parent (a TERM between its fork and b_sleep=$! would
+	# leave it running), then the watchdog.
+	if command -v pkill >/dev/null 2>&1; then pkill -P "$b_dog" 2>/dev/null || true; fi
 	kill "$b_dog" 2>/dev/null || true
 	wait "$b_dog" 2>/dev/null || true
 	if [ -e "$b_mark/expired" ]; then

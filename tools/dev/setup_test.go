@@ -141,30 +141,33 @@ func startBounded(t *testing.T, shell, fn, call string) (*exec.Cmd, *bytes.Buffe
 func TestSetupShBoundedRuns(t *testing.T) {
 	fn := scriptFunc(t, readScript(t, "setup.sh"), "bounded() {")
 	for _, shell := range boundedShells(t) {
-		for _, c := range []struct {
-			call, wantOut, wantErr string
-			max                    time.Duration
-		}{
-			{`bounded 1 sleep 60 || echo "status $?"`, "status 124\n", "sleep 60 did not finish within 1 s", 15 * time.Second},
-			// SIGTERM ignored: SIGKILL follows, to the command and its child.
-			{`bounded 1 sh -c 'trap "" TERM; sleep 60' || echo "status $?"`, "status 124\n", "did not finish within 1 s", 18 * time.Second},
-			{`bounded 30 sh -c 'exit 3' || echo "status $?"`, "status 3\n", "", 5 * time.Second},
-			{`bounded 30 true && echo done`, "done\n", "", 5 * time.Second},
-			{`bounded 0 sh -c 'exit 4' || echo "status $?"`, "status 4\n", "", 5 * time.Second},
-		} {
-			var out, errOut bytes.Buffer
-			cmd := exec.Command(shell, "-c", "set -eu\n"+fn+c.call)
-			cmd.Stdout, cmd.Stderr = &out, &errOut
-			start := time.Now()
-			err := cmd.Run()
-			took := time.Since(start)
-			if err != nil || out.String() != c.wantOut || !strings.Contains(errOut.String(), c.wantErr) || (c.wantErr == "" && errOut.Len() > 0) {
-				t.Errorf("%s: %s: %v, stdout %q, stderr %q; want %q, %q", shell, c.call, err, out.String(), errOut.String(), c.wantOut, c.wantErr)
+		t.Run(shell, func(t *testing.T) {
+			t.Parallel()
+			for _, c := range []struct {
+				call, wantOut, wantErr string
+				max                    time.Duration
+			}{
+				{`bounded 1 sleep 60 || echo "status $?"`, "status 124\n", "sleep 60 did not finish within 1 s", 15 * time.Second},
+				// SIGTERM ignored: SIGKILL follows, to the command and its child.
+				{`bounded 1 sh -c 'trap "" TERM; sleep 60' || echo "status $?"`, "status 124\n", "did not finish within 1 s", 18 * time.Second},
+				{`bounded 30 sh -c 'exit 3' || echo "status $?"`, "status 3\n", "", 5 * time.Second},
+				{`bounded 30 true && echo done`, "done\n", "", 5 * time.Second},
+				{`bounded 0 sh -c 'exit 4' || echo "status $?"`, "status 4\n", "", 5 * time.Second},
+			} {
+				var out, errOut bytes.Buffer
+				cmd := exec.Command(shell, "-c", "set -eu\n"+fn+c.call)
+				cmd.Stdout, cmd.Stderr = &out, &errOut
+				start := time.Now()
+				err := cmd.Run()
+				took := time.Since(start)
+				if err != nil || out.String() != c.wantOut || !strings.Contains(errOut.String(), c.wantErr) || (c.wantErr == "" && errOut.Len() > 0) {
+					t.Errorf("%s: %s: %v, stdout %q, stderr %q; want %q, %q", shell, c.call, err, out.String(), errOut.String(), c.wantOut, c.wantErr)
+				}
+				if took > c.max {
+					t.Errorf("%s: %s took %v, want at most %v", shell, c.call, took, c.max)
+				}
 			}
-			if took > c.max {
-				t.Errorf("%s: %s took %v, want at most %v", shell, c.call, took, c.max)
-			}
-		}
+		})
 	}
 }
 
@@ -174,21 +177,24 @@ func TestSetupShBoundedRuns(t *testing.T) {
 func TestSetupShBoundedKillsChildless(t *testing.T) {
 	fn := scriptFunc(t, readScript(t, "setup.sh"), "bounded() {")
 	for _, shell := range boundedShells(t) {
-		start := time.Now()
-		cmd, errOut, pid, _ := startBounded(t, shell, fn, `bounded 1 sh -c 'trap "" TERM; echo $$ > "$PIDFILE"; exec sleep 60'`)
-		err := cmd.Wait()
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != 124 || !strings.Contains(errOut.String(), "did not finish within 1 s") {
-			t.Errorf("%s: %v, stderr %q; want status 124 and the message", shell, err, errOut.String())
-		}
-		if took := time.Since(start); took > 15*time.Second {
-			t.Errorf("%s: took %v, want the limit and the grace, 11 s", shell, took)
-		}
-		if alive(pid, time.Second) {
-			t.Errorf("%s: the command (pid %d) outlived bounded", shell, pid)
-			p, _ := os.FindProcess(pid)
-			_ = p.Kill()
-		}
+		t.Run(shell, func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			cmd, errOut, pid, _ := startBounded(t, shell, fn, `bounded 1 sh -c 'trap "" TERM; echo $$ > "$PIDFILE"; exec sleep 60'`)
+			err := cmd.Wait()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 124 || !strings.Contains(errOut.String(), "did not finish within 1 s") {
+				t.Errorf("%s: %v, stderr %q; want status 124 and the message", shell, err, errOut.String())
+			}
+			if took := time.Since(start); took > 15*time.Second {
+				t.Errorf("%s: took %v, want the limit and the grace, 11 s", shell, took)
+			}
+			if alive(pid, time.Second) {
+				t.Errorf("%s: the command (pid %d) outlived bounded", shell, pid)
+				p, _ := os.FindProcess(pid)
+				_ = p.Kill()
+			}
+		})
 	}
 }
 
@@ -198,33 +204,36 @@ func TestSetupShBoundedKillsChildless(t *testing.T) {
 func TestSetupShBoundedCleansUp(t *testing.T) {
 	fn := scriptFunc(t, readScript(t, "setup.sh"), "bounded() {")
 	for _, shell := range boundedShells(t) {
-		// A limit no other process uses, so that a stray watchdog sleep can be found by its arguments.
-		limit := fmt.Sprintf("%d", 7000+os.Getpid()%1000)
-		cmd := exec.Command(shell, "-c", "set -eu\n"+fn+"i=0; while [ $i -lt 20 ]; do bounded "+limit+" true; i=$((i+1)); done")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%s: %v: %s", shell, err, out)
-		}
-		time.Sleep(300 * time.Millisecond)
-		if ps, err := exec.Command("ps", "-eo", "args").Output(); err == nil && strings.Contains(string(ps), "sleep "+limit+"\n") {
-			t.Errorf("%s: a watchdog's sleep %s outlived bounded", shell, limit)
-			_ = exec.Command("pkill", "-f", "^sleep "+limit+"$").Run()
-		}
+		t.Run(shell, func(t *testing.T) {
+			t.Parallel()
+			// A limit no other process uses, so that a stray watchdog sleep can be found by its arguments.
+			limit := fmt.Sprintf("%d%d", 7000+os.Getpid()%1000, shell[0]) // one per shell (sh, dash, bash), which run in parallel
+			cmd := exec.Command(shell, "-c", "set -eu\n"+fn+"i=0; while [ $i -lt 20 ]; do bounded "+limit+" true; i=$((i+1)); done")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%s: %v: %s", shell, err, out)
+			}
+			time.Sleep(300 * time.Millisecond)
+			if ps, err := exec.Command("ps", "-eo", "args").Output(); err == nil && strings.Contains(string(ps), "sleep "+limit+"\n") {
+				t.Errorf("%s: a watchdog's sleep %s outlived bounded", shell, limit)
+				_ = exec.Command("pkill", "-f", "^sleep "+limit+"$").Run()
+			}
 
-		cmd, _, pid, marks := startBounded(t, shell, fn, `bounded 300 sh -c 'echo $$ > "$PIDFILE"; exec sleep 60'`)
-		_ = cmd.Process.Signal(os.Interrupt)
-		err := cmd.Wait()
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != 130 {
-			t.Errorf("%s: after an interrupt: %v; want exit status 130", shell, err)
-		}
-		if alive(pid, 5*time.Second) {
-			t.Errorf("%s: the command (pid %d) outlived the interrupt", shell, pid)
-			p, _ := os.FindProcess(pid)
-			_ = p.Kill()
-		}
-		if left, _ := os.ReadDir(marks); len(left) > 0 {
-			t.Errorf("%s: %d entries left in TMPDIR after the interrupt", shell, len(left))
-		}
+			cmd, _, pid, marks := startBounded(t, shell, fn, `bounded 300 sh -c 'echo $$ > "$PIDFILE"; exec sleep 60'`)
+			_ = cmd.Process.Signal(os.Interrupt)
+			err := cmd.Wait()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 130 {
+				t.Errorf("%s: after an interrupt: %v; want exit status 130", shell, err)
+			}
+			if alive(pid, 5*time.Second) {
+				t.Errorf("%s: the command (pid %d) outlived the interrupt", shell, pid)
+				p, _ := os.FindProcess(pid)
+				_ = p.Kill()
+			}
+			if left, _ := os.ReadDir(marks); len(left) > 0 {
+				t.Errorf("%s: %d entries left in TMPDIR after the interrupt", shell, len(left))
+			}
+		})
 	}
 }
 
