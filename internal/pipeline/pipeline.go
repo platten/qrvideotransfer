@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/platten/qrvideotransfer/internal/frame"
 	"github.com/platten/qrvideotransfer/internal/payload"
 	"github.com/platten/qrvideotransfer/internal/video"
 )
@@ -75,6 +76,16 @@ type Shortfall struct {
 // it is empty when no stream descriptor could be read, so that nothing about the blocks is known.
 type ShortError struct {
 	Blocks []Shortfall
+	// What the recordings showed, for the failure guidance of DESIGN.md section 13.
+	Captures    int                // captures read
+	Located     int                // captures in which a quad of finders was found and its header read
+	HeadersRead int                // captures whose header was read, of any transfer
+	Other       int                // of those, captures of a transfer other than the one decoded
+	FramesSeen  int                // code frames of the decoded transfer seen
+	FramesTotal int                // its code frames, F; 0 when no header was read
+	Descriptor  bool               // the stream descriptor was read
+	Reject      *frame.HeaderError // the refusal agreed by the captures (agreeCaptures), or nil
+	LockedRate  bool               // the camera is locked to the display rate (lockTrack)
 }
 
 // Error implements the error interface.

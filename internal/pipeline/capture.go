@@ -61,6 +61,10 @@ type captureResult struct {
 	key          params
 	phases       []phaseBits
 	cells, clean int // data cells, and those the phase field credits to one frame
+	// What the capture showed short of a code (failure diagnostics, DESIGN.md section 13).
+	finders bool              // a quad's header was read, whether or not it was refused
+	reject  frame.HeaderError // when no header was read: the strongest refusal (vision.SlotReader.ReadReason)
+	first   uint32            // the first header's frame index, when one was read
 }
 
 // captureWorker runs the vision chain of DESIGN.md section 10 on captures. It owns its detector

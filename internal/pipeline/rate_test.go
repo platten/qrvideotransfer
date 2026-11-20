@@ -145,6 +145,32 @@ func TestLockedRateSafety(t *testing.T) {
 	}
 }
 
+// TestLockedRateGuidance: a recording that falls short with the camera locked to the display rate
+// says so (ShortError.LockedRate), so that the guidance can ask for a faster camera rather than
+// more passes (DESIGN.md section 13). The setting is TestLockedRateSafety's, `tripod` at 4 ms
+// exposure and 8 ms readout locked to 30 fps, at offset 1/8, on the smallest code, a 480 x 480
+// four greys `normal` code (120 x 120 grid, F = 4) filmed at 908 x 908 for 3 passes: every pass
+// repeats the same frame mixing. Statistical: skipped under the race detector.
+func TestLockedRateGuidance(t *testing.T) {
+	raceSkipStatistics(t)
+	tr := rateCode(t, 2, 2, 480, 500)
+	c := preset(t, "tripod", 908, 908)
+	c.Timing.FPS, c.Timing.Exposure, c.Timing.Readout = 30, 4*time.Millisecond, 8*time.Millisecond
+	rec := filmFrames(t, tr.frames, 30, 4, c, channel.Run{Start: time.Second / 30 / 8, Captures: 3 * tr.res.Frames, Seed: 0x5eed + 1})
+	out, _, err := decodeTo(t, rec)
+	var short *ShortError
+	if !errors.As(err, &short) {
+		t.Fatalf("got %v, want a ShortError", err)
+	}
+	if fs := filesUnder(t, out); len(fs) != 0 {
+		t.Errorf("files written: %v", fs)
+	}
+	if !short.LockedRate || short.Captures != 3*tr.res.Frames {
+		t.Errorf("locked rate %v after %d captures, want true after %d (%+v)", short.LockedRate, short.Captures, 3*tr.res.Frames, *short)
+	}
+	t.Logf("F %d: %+v", tr.res.Frames, *short)
+}
+
 // TestGlareDecode: decoding succeeds with a specular glare patch on the code (DESIGN.md section 15):
 // `normal` with a patch over 5% of the code at settings with a margin over section 11's condition
 // 2, and `robust` with 20%. Four greys `normal` on `handheld` fails with a 5% patch at 6.0 camera
