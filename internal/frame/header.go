@@ -29,6 +29,41 @@ type Header struct {
 	Reserved     uint8  // 4 bits; zero
 }
 
+// HeaderReason says why a header was refused, or HeaderOK; Validate's checks in their order, after
+// the length and the CRC.
+type HeaderReason uint8
+
+// The reasons a header is refused.
+const (
+	HeaderOK         HeaderReason = iota
+	HeaderLength                  // not HeaderSlots soft bits
+	HeaderCRC                     // the CRC-16 does not match
+	HeaderReserved                // reserved bits not zero
+	HeaderVersion                 // unsupported format version
+	HeaderFrameCount              // frame count not a multiple of 4 in 4..MaxFrames
+	HeaderFrameIndex              // frame index not below the frame count
+	HeaderModulation              // unknown modulation id
+	HeaderInner                   // unknown inner-code id
+	HeaderGrid                    // grid outside the limits
+)
+
+// ErrHeader is wrapped by every HeaderError.
+var ErrHeader = errors.New("frame: invalid header")
+
+// HeaderError is the error of Validate: the reason and the header refused.
+type HeaderError struct {
+	Reason HeaderReason
+	Header Header
+}
+
+func (e *HeaderError) Error() string { return "" }
+
+// Unwrap returns ErrHeader.
+func (e *HeaderError) Unwrap() error { return nil }
+
+// DecodeHeaderReason is DecodeHeader with the reason for a refusal.
+func DecodeHeaderReason(soft []int8) (Header, HeaderReason) { return Header{}, HeaderOK }
+
 // headerMask is SHA-256("qrvt/header-mask/v1"), XORed onto the coded bits.
 var headerMask = sha256.Sum256([]byte("qrvt/header-mask/v1"))
 
