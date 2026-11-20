@@ -109,7 +109,8 @@ func lockedCamera(t *testing.T, exposure time.Duration) channel.Config {
 // TestLockedRateSafety: with the camera locked to the display rate (30 against 30 fps), some phase
 // offsets never decode, because every pass repeats the same frame mixing (DESIGN.md section 15).
 // Every modulation and protection at 4 and 8 ms exposure and 8 offsets, filmed for 4 passes, must
-// either give the files or end in a ShortError with nothing written: never a wrong result. Long
+// either give the files or end in a ShortError with nothing written: never a wrong result. The
+// ShortError must report the locked rate (ShortError.LockedRate), which gives the guidance. Long
 // only; the always-on safety case goes through the public API (the root package's
 // TestLockedRateNotEnoughData). Statistical: skipped under the race detector.
 func TestLockedRateSafety(t *testing.T) {
@@ -133,6 +134,9 @@ func TestLockedRateSafety(t *testing.T) {
 						case errors.As(err, &short):
 							if fs := filesUnder(t, out); len(fs) != 0 || dr != nil {
 								t.Errorf("not enough data, yet files written %v or a result %+v", fs, dr)
+							}
+							if !short.LockedRate {
+								t.Errorf("not enough data without the locked rate reported: %+v", *short)
 							}
 							t.Logf("not enough data: %v", err)
 						default:
@@ -165,7 +169,7 @@ func TestLockedRateGuidance(t *testing.T) {
 	if fs := filesUnder(t, out); len(fs) != 0 {
 		t.Errorf("files written: %v", fs)
 	}
-	if !short.LockedRate || short.Captures != 3*tr.res.Frames {
+	if !short.LockedRate || short.Captures != int64(3*tr.res.Frames) {
 		t.Errorf("locked rate %v after %d captures, want true after %d (%+v)", short.LockedRate, short.Captures, 3*tr.res.Frames, *short)
 	}
 	t.Logf("F %d: %+v", tr.res.Frames, *short)
