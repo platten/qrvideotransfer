@@ -290,10 +290,10 @@ func TestCheckJobLimit(t *testing.T) {
 			t.Errorf("the check job's limit is %d minutes, want at least %d + %d (race steps) + %d (other steps)", job, race[i], race[i+1], fixedStepsBudget)
 		}
 	}
-	// The designer's ruling: the budget about twice the non-race steps' median (21.2 minutes on
-	// macos-26-intel), and the job's limit the race pair plus it, rounded up to 5 minutes.
-	if fixedStepsBudget != 45 || job != 85 {
-		t.Errorf("fixedStepsBudget %d and job limit %d, want 45 and 85", fixedStepsBudget, job)
+	// The designer's ruling: the budget twice the largest non-race median of any runner, rounded up
+	// (2 x 23.6 minutes on ubuntu-24.04 = 47.2), and the job's limit the race pair plus it, 84, rounded up to 5.
+	if fixedStepsBudget != 48 || job != 85 {
+		t.Errorf("fixedStepsBudget %d and job limit %d, want 48 and 85", fixedStepsBudget, job)
 	}
 	wf := "jobs:\n  check:\n    timeout-minutes: 50\n    steps:\n      - name: Race tests, other packages (Unix)\n        timeout-minutes: 20\n" +
 		"      - name: Race tests, isolated packages (Windows)\n        timeout-minutes: 15\n      - name: Lint\n        timeout-minutes: 9\n  other:\n    timeout-minutes: 5\n"

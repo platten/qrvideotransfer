@@ -218,20 +218,29 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 				_ = exec.Command("pkill", "-f", "^sleep "+limit+"$").Run()
 			}
 
-			cmd, _, pid, marks := startBounded(t, shell, fn, `bounded 300 sh -c 'echo $$ > "$PIDFILE"; exec sleep 60'`)
-			_ = cmd.Process.Signal(os.Interrupt)
-			err := cmd.Wait()
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 130 {
-				t.Errorf("%s: after an interrupt: %v; want exit status 130", shell, err)
+			// Ten interrupts, each early in the watchdog's life, where the trap once failed under
+			// set -e (review of 193dbb8: a pkill or kill with nothing to signal).
+			for i := 0; i < 10; i++ {
+				cmd, _, pid, marks := startBounded(t, shell, fn, "bounded "+limit+` sh -c 'echo $$ > "$PIDFILE"; exec sleep 60'`)
+				_ = cmd.Process.Signal(os.Interrupt)
+				err := cmd.Wait()
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 130 {
+					t.Errorf("%s: interrupt %d: %v; want exit status 130", shell, i, err)
+				}
+				if alive(pid, 5*time.Second) {
+					t.Errorf("%s: interrupt %d: the command (pid %d) outlived it", shell, i, pid)
+					p, _ := os.FindProcess(pid)
+					_ = p.Kill()
+				}
+				if left, _ := os.ReadDir(marks); len(left) > 0 {
+					t.Errorf("%s: interrupt %d: %d entries left in TMPDIR", shell, i, len(left))
+				}
 			}
-			if alive(pid, 5*time.Second) {
-				t.Errorf("%s: the command (pid %d) outlived the interrupt", shell, pid)
-				p, _ := os.FindProcess(pid)
-				_ = p.Kill()
-			}
-			if left, _ := os.ReadDir(marks); len(left) > 0 {
-				t.Errorf("%s: %d entries left in TMPDIR after the interrupt", shell, len(left))
+			time.Sleep(300 * time.Millisecond)
+			if ps, err := exec.Command("ps", "-eo", "args").Output(); err == nil && strings.Contains(string(ps), "sleep "+limit+"\n") {
+				t.Errorf("%s: a watchdog's sleep %s outlived an interrupt", shell, limit)
+				_ = exec.Command("pkill", "-f", "^sleep "+limit+"$").Run()
 			}
 		})
 	}
