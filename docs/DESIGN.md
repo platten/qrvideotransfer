@@ -1519,6 +1519,9 @@ Added beside the frozen list, which it leaves unchanged (M4):
 // internal/frame
 func DecodeHeaderReason(soft []int8) (Header, HeaderReason) // DecodeHeader with the reason for a refusal
 type HeaderError struct{ Reason HeaderReason; Header Header } // Validate's error; wraps ErrHeader
+type HeaderReason uint8 // HeaderOK, HeaderLength, HeaderCRC, HeaderReserved, HeaderVersion,
+                        // HeaderFrameCount, HeaderFrameIndex, HeaderModulation, HeaderInner, HeaderGrid
+var ErrHeader error     // wrapped by every HeaderError
 ```
 
 `DecodeHeader` is `DecodeHeaderReason` with the reason dropped. The reasons are the length, the CRC,
@@ -1851,7 +1854,7 @@ section 13).
 
   | Step | Slowest median (runner) | Max, any runner | 2 x median | 1.3 x max | Limit |
   | --- | --- | --- | --- | --- | --- |
-  | Coverage, other packages | 8.53 or less (macos-26-intel) | 16.68 | 17.06 or less | 21.68 | 22 |
+  | Coverage, other packages | 8.53 (macos-26-intel, unchanged) | 16.68 | 17.06 | 21.68 | 22 |
   | Coverage gate, `internal/video` | 3.49 (macos-26-intel) | 4.25 | 6.98 | 5.52 | 7 |
   | Tests without the release tags | 8.13 (ubuntu-24.04, its only runner) | 8.43 | 16.27 | 10.96 | 17 |
   | HEVC fast path | 3.62 (macos-26-intel) | 4.48 | 7.25 | 5.83 | 8 |
@@ -1868,8 +1871,8 @@ section 13).
   and main's run 44676072194 at fe7731c. On macos-26-intel they took 16.68 and 7.17 minutes
   (16.7 minutes, 03:53:23 to 04:10:04, in the first: a new largest passing time, against 13.23),
   so 1.3 times the largest gives 21.68 and the limit rose from 18 to 22, on Unix and Windows. With
-  one added time below the six runs' median and one above, the eight runs' median is at most the
-  six runs' 8.53. **When a new largest passing time would raise a step's limit a second time, the
+  one added time below the six runs' median and one above, the eight runs' median is the six
+  runs' 8.53, unchanged. **When a new largest passing time would raise a step's limit a second time, the
   step is trimmed or split instead, and the matter goes to the designer** (designer's ruling,
   2026-11-20); this step's limit has now been raised once.
   The lint and static-build figures come from runs whose build and module caches setup-go
@@ -1947,9 +1950,6 @@ section 13).
     (20,000 frames per rate) and `TestShortenedErrorRate` (20,000 frames per check).
   - `internal/fec/conv`: `TestCorrectsThreeErrors`, exhaustive over three errors.
   - `spikes/pattern`: `TestAnalyseSimulated` at 96 captures.
-  - `tools/dev`, long only and Unix only: `TestSetupShBoundedEarlyInterrupt`, 600 Ctrl-Cs per
-    shell (sh, dash, bash) swept over `bounded`'s first 8 ms (section 19); the deterministic
-    `bounded` tests stay always on.
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
@@ -2003,8 +2003,7 @@ section 13).
   could not run is reported as NOT RUN with its reason, never as a pass. **The long tests**, which
   no CI job runs (see the coverage-step paragraph above): at the same point, once per pull request,
   the developer runs them for the packages the pull request changes, and also for the root package
-  and `internal/pipeline` whenever the non-test code of any internal package changes, and for
-  `tools/dev` whenever `scripts/setup.sh` changes (`TestSetupShBoundedEarlyInterrupt`); a docs-only
+  and `internal/pipeline` whenever the non-test code of any internal package changes; a docs-only
   pull request runs none; a pull request changing only tests runs the long tests of those packages
   only. `go run ./tools/dev test -long -pkg ./internal/vision,./internal/fec/ldpc` runs the listed
   packages through the test task's isolation split, as `./...` is run: the other packages in one
@@ -2681,29 +2680,21 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   SIGKILL cannot reach the command, so one that also ignores SIGTERM runs on, and the CI step's own
   limit (35 minutes for the setup scripts) is the backstop. **Not exercised:** a real mirror stall,
   and stopping a command under `sudo`, which the tests cannot reach without a password.
-  **Two LOWs of PR #55's review, fixed in M4's second pull request.** A failed `mktemp` left the
-  marker path empty when `bounded` was called on the left of `||`; the marker is now named by
-  `mktemp -u` before anything is made and created by `mkdir -m 700`, which refuses a path that
-  exists, and `bounded` returns 1 if either fails (`TestSetupShBoundedMktempFails`). A Ctrl-C in
-  the millisecond or so between making the marker and setting the trap left the marker, the
-  command and the watchdog behind (the marker in 4 to 19 of 300 interrupts swept over the first
-  8 ms, under sh, dash and bash, with the command and the watchdog's sleep left running); an
-  INT-only flag trap now covers that window and the cleanup after the trap, and the interrupt is
-  acted on once the trap is set or the cleanup done. Making the flag trap reliable took four
-  further changes, each found by `TestSetupShBoundedEarlyInterrupt` (long only, section 17; 600
-  interrupts per shell, sent to the shell's process group as a terminal's Ctrl-C is): mkdir runs
-  in the background, since under bash a Ctrl-C a foreground command survives is ignored and
-  bash once hung in such a wait; a wait the trap interrupts is repeated only while the process
-  lives (bash hung in a second wait for one already reaped); the watchdog is forked with SIGINT
-  ignored and ignores it itself (forked with the handler, dash could end it with its sleep left
-  running); and its sleeps are stopped with SIGKILL (a sleep forked a moment before could catch
-  the TERM with the inherited handler and run on). **Accepted residual:** a Ctrl-C in the few
-  hundred microseconds of the watchdog's fork, when SIGINT is ignored, is lost; nothing is left
-  behind and the next Ctrl-C is acted on. Measured over 20 runs of the test under sh (dash), dash
-  and bash: 0 to 6 of 600 first interrupts ignored per shell and run, 166 of 36,000 in all (0.46%;
-  the test allows 3%), and none left anything behind. A SIGTERM to the
-  script before the trap is set still ends it with the default action, as before; Ctrl-C is the
-  case the trap is for.
+  **Two LOWs of PR #55's review, M4's second pull request.** A failed `mktemp` left the marker
+  path empty when `bounded` was called on the left of `||`: fixed, `b_mark=$(mktemp -d) || return
+  1` (`TestSetupShBoundedMktempFails`). **Accepted residual (designer's ruling, 2026-11-20):** a
+  Ctrl-C in the millisecond or so between `mktemp` and the setting of the INT/TERM trap, while the
+  command and the watchdog are forked, ends the script with the default action and leaves the
+  marker folder, the command and the watchdog behind: in a sweep of interrupts over `bounded`'s
+  first 8 ms, 19 of 300 timed interrupts left something behind (reviewer's figure). The time limit
+  is still enforced: the watchdog survives, stops a command it left behind at its limit, and its
+  sleep then ends. **A redesign was tried and withdrawn:** an INT-only flag trap before the fork,
+  with the marker named by `mktemp -u` and made by `mkdir -m 700`, passed 36,000 interrupts under
+  sh, dash and bash 5 on Linux with nothing left behind, but it rested on `mktemp -u` making
+  nothing, and BSD and macOS `mktemp -u` create the file and then unlink it (Apple shell_cmds and
+  FreeBSD `mktemp.c`), so a Ctrl-C there would leave an empty file; and macOS `/bin/sh`, bash
+  3.2, on whose signal behaviour the design depended in four places, could not be tested. It is
+  not to be rebuilt without a test on macOS.
 - **A cache-restore error in the check job on macos-26-intel (2026-11-19).** In each of the
   eight job logs read, the "Vulnerability scan" step logged about 17,000 lines of
   `##[error]/usr/local/bin/gtar: ...: Cannot open: File exists` (for example
