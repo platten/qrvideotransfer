@@ -209,20 +209,21 @@ func TestSelectRuns(t *testing.T) {
 }
 
 // splitSteps are the check job's steps that run a part of the test split, by their run line, with
-// their limits in minutes: about twice each step's normal time on macos-26-intel, the slowest
-// runner (designer's ruling on the CI budget, 2026-11-19; DESIGN.md section 17).
+// their limits in minutes: the larger of twice the median on the slowest runner and 1.3 times the
+// largest passing time on any runner, rounded up, at least 5 (designer's ruling on the CI budget,
+// 2026-11-19; the figures are in DESIGN.md section 17).
 var splitSteps = []struct {
 	run   string
 	limit int
 }{
 	{"run: scripts/test.sh cover -part rest\n", 18},
-	{"run: scripts/test.sh cover -part video\n", 8},
+	{"run: scripts/test.sh cover -part video\n", 7},
 	{"run: scripts/test.ps1 cover -part rest\n", 18},
-	{"run: scripts/test.ps1 cover -part video\n", 8},
+	{"run: scripts/test.ps1 cover -part video\n", 7},
 	{"run: scripts/test.sh -race -part others\n", 15},
-	{"run: scripts/test.sh -race -part isolated\n", 20},
+	{"run: scripts/test.sh -race -part isolated\n", 21},
 	{"run: scripts/test.ps1 -race -part others\n", 15},
-	{"run: scripts/test.ps1 -race -part isolated\n", 20},
+	{"run: scripts/test.ps1 -race -part isolated\n", 21},
 }
 
 // TestSplitSteps checks that ci.yml runs the coverage and race tests in parts, each in a step with
@@ -252,10 +253,10 @@ func TestSplitSteps(t *testing.T) {
 	}
 	// A failure in the first part must not skip the second part's result.
 	for _, want := range []string{
-		"if: ${{ !cancelled() && runner.os != 'Windows' && steps.cover-rest.outcome != 'skipped' }}\n        timeout-minutes: 8\n        shell: bash\n        run: scripts/test.sh cover -part video\n",
-		"if: ${{ !cancelled() && runner.os == 'Windows' && steps.cover-rest-windows.outcome != 'skipped' }}\n        timeout-minutes: 8\n        shell: pwsh\n        run: scripts/test.ps1 cover -part video\n",
-		"&& steps.race-others.outcome != 'skipped' }}\n        timeout-minutes: 20\n        shell: bash\n        run: scripts/test.sh -race -part isolated\n",
-		"&& steps.race-others-windows.outcome != 'skipped' }}\n        timeout-minutes: 20\n        shell: pwsh\n        run: scripts/test.ps1 -race -part isolated\n",
+		"if: ${{ !cancelled() && runner.os != 'Windows' && steps.cover-rest.outcome != 'skipped' }}\n        timeout-minutes: 7\n        shell: bash\n        run: scripts/test.sh cover -part video\n",
+		"if: ${{ !cancelled() && runner.os == 'Windows' && steps.cover-rest-windows.outcome != 'skipped' }}\n        timeout-minutes: 7\n        shell: pwsh\n        run: scripts/test.ps1 cover -part video\n",
+		"&& steps.race-others.outcome != 'skipped' }}\n        timeout-minutes: 21\n        shell: bash\n        run: scripts/test.sh -race -part isolated\n",
+		"&& steps.race-others-windows.outcome != 'skipped' }}\n        timeout-minutes: 21\n        shell: pwsh\n        run: scripts/test.ps1 -race -part isolated\n",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("a second-part step lacks the !cancelled() condition: want %q", want)
@@ -281,13 +282,18 @@ func TestCheckJobLimit(t *testing.T) {
 	}
 	job, race := checkJobLimits(b)
 	// Four race steps: others and isolated on Unix, then the same on windows-2025.
-	if !slices.Equal(race, []int{15, 20, 15, 20}) {
-		t.Fatalf("race-step limits %v, want [15 20 15 20]", race)
+	if !slices.Equal(race, []int{15, 21, 15, 21}) {
+		t.Fatalf("race-step limits %v, want [15 21 15 21]", race)
 	}
 	for i := 0; i < len(race); i += 2 {
 		if job < race[i]+race[i+1]+fixedStepsBudget {
 			t.Errorf("the check job's limit is %d minutes, want at least %d + %d (race steps) + %d (other steps)", job, race[i], race[i+1], fixedStepsBudget)
 		}
+	}
+	// The designer's ruling: the budget about twice the non-race steps' median (21.2 minutes on
+	// macos-26-intel), and the job's limit the race pair plus it, rounded up to 5 minutes.
+	if fixedStepsBudget != 45 || job != 85 {
+		t.Errorf("fixedStepsBudget %d and job limit %d, want 45 and 85", fixedStepsBudget, job)
 	}
 	wf := "jobs:\n  check:\n    timeout-minutes: 50\n    steps:\n      - name: Race tests, other packages (Unix)\n        timeout-minutes: 20\n" +
 		"      - name: Race tests, isolated packages (Windows)\n        timeout-minutes: 15\n      - name: Lint\n        timeout-minutes: 9\n  other:\n    timeout-minutes: 5\n"
