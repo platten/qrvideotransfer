@@ -17,7 +17,7 @@ import (
 )
 
 // geomLong reports whether the long tests run (QRVT_LONG_TESTS=1).
-func geomLong() bool { return os.Getenv("QRVT_LONG_TESTS") != "" }
+func geomLong() bool { return os.Getenv("QRVT_LONG_TESTS") == "1" }
 
 // geomLongSize returns long when the long tests run (geomLong) and short otherwise: the always-on
 // size of a test whose full size runs with QRVT_LONG_TESTS=1 (the CI-size trim of DESIGN.md

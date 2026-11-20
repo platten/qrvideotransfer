@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -101,30 +102,75 @@ func TestVulncheckRuns(t *testing.T) {
 	}
 }
 
-// TestIsolatedRuns: the packages run in two go test invocations, every package but internal/video
-// first and internal/video on its own after them, with the same arguments.
+// TestIsolatedRuns: the packages run in separate go test invocations with the same arguments:
+// every package but the end-to-end ones and internal/video first, then each end-to-end package on
+// its own, then internal/video on its own.
 func TestIsolatedRuns(t *testing.T) {
 	pkgs := []string{module, module + "/internal/fec", module + "/internal/pipeline", module + "/internal/video", module + "/internal/payload"}
-	got := isolatedRuns([]string{"test", "-race", "./..."}, pkgs)
+	got := isolatedRuns([]string{"test", "-race"}, pkgs)
 	// Every other package, then the end-to-end packages each on its own (the root package and
 	// internal/pipeline, designer's ruling on PR #47), then internal/video alone.
 	want := [][]string{
 		{"test", "-race", module + "/internal/fec", module + "/internal/payload"},
 		{"test", "-race", module},
 		{"test", "-race", module + "/internal/pipeline"},
-		{"test", "-race", "./internal/video/..."},
+		{"test", "-race", module + "/internal/video"},
 	}
+	sameRuns(t, "isolatedRuns", got, want)
+	// A package list without some of the groups gives no empty run.
+	sameRuns(t, "isolatedRuns of one package", isolatedRuns([]string{"test"}, []string{module + "/internal/fec"}),
+		[][]string{{"test", module + "/internal/fec"}})
+	sameRuns(t, "isolatedRuns of internal/video", isolatedRuns([]string{"test"}, []string{module + "/internal/video"}),
+		[][]string{{"test", module + "/internal/video"}})
+}
+
+// TestTestRunsPkg: -pkg goes through the same split as ./..., so the long tests of the root
+// package, internal/pipeline and internal/video each run in a go test invocation of their own
+// (DESIGN.md section 17), and -part, which names a half of the whole module's split, is refused
+// with -pkg.
+func TestTestRunsPkg(t *testing.T) {
+	_, args, part, patterns := testCommand([]string{"-long", "-pkg", "./internal/vision,.,./internal/pipeline,./internal/video"}, "noasm,nounsafe")
+	pkgs := []string{module + "/internal/vision", module, module + "/internal/pipeline", module + "/internal/video"}
+	got, err := testRuns(args, patterns, pkgs, part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := []string{"test", "-tags=noasm,nounsafe", "-timeout=120m"}
+	run := func(p string) []string { return append(slices.Clone(head), p) }
+	sameRuns(t, "testRuns", got, [][]string{run(module + "/internal/vision"), run(module), run(module + "/internal/pipeline"), run(module + "/internal/video")})
+	// Two ordinary packages stay in one run.
+	_, args, part, patterns = testCommand([]string{"-pkg", "./internal/vision,./internal/fec/ldpc"}, "")
+	got, err = testRuns(args, patterns, []string{module + "/internal/vision", module + "/internal/fec/ldpc"}, part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameRuns(t, "testRuns of two packages", got, [][]string{{"test", module + "/internal/vision", module + "/internal/fec/ldpc"}})
+	// The whole module with -part, as CI's race steps run it.
+	_, args, part, patterns = testCommand([]string{"-race", "-part", "isolated"}, "")
+	got, err = testRuns(args, patterns, pkgs, part)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0][len(got[0])-1] != module {
+		t.Errorf("testRuns -part isolated = %q", got)
+	}
+	_, args, part, patterns = testCommand([]string{"-race", "-part", "isolated", "-pkg", "./internal/video"}, "")
+	if _, err := testRuns(args, patterns, pkgs[3:], part); err == nil {
+		t.Error("-part with -pkg gave no error")
+	}
+}
+
+// sameRuns reports a difference between two lists of go test runs.
+func sameRuns(t *testing.T, what string, got, want [][]string) {
+	t.Helper()
 	if len(got) != len(want) {
-		t.Fatalf("isolatedRuns = %q, want %q", got, want)
+		t.Errorf("%s = %q, want %q", what, got, want)
+		return
 	}
 	for i := range want {
 		if !slices.Equal(got[i], want[i]) {
-			t.Errorf("isolatedRuns run %d = %q, want %q", i, got[i], want[i])
+			t.Errorf("%s run %d = %q, want %q", what, i, got[i], want[i])
 		}
-	}
-	// Arguments that do not end in ./... are run as they are.
-	if got := isolatedRuns([]string{"test", "./internal/fec"}, pkgs); len(got) != 1 || got[0][1] != "./internal/fec" {
-		t.Errorf("isolatedRuns of one package = %q", got)
 	}
 }
 
@@ -162,65 +208,92 @@ func TestSelectRuns(t *testing.T) {
 	}
 }
 
-// TestRaceStepsSplit checks that ci.yml runs the race tests in two steps, internal/video alone and
-// every other package, each with the 20-minute limit.
-func TestRaceStepsSplit(t *testing.T) {
+// splitSteps are the check job's steps that run a part of the test split, by their run line, with
+// their limits in minutes: the larger of twice the median on the slowest runner and 1.3 times the
+// largest passing time on any runner, rounded up, at least 5 (designer's ruling on the CI budget,
+// 2026-11-19; the figures are in DESIGN.md section 17).
+var splitSteps = []struct {
+	run   string
+	limit int
+}{
+	{"run: scripts/test.sh cover -part rest\n", 18},
+	{"run: scripts/test.sh cover -part video\n", 7},
+	{"run: scripts/test.ps1 cover -part rest\n", 18},
+	{"run: scripts/test.ps1 cover -part video\n", 7},
+	{"run: scripts/test.sh -race -part others\n", 15},
+	{"run: scripts/test.sh -race -part isolated\n", 21},
+	{"run: scripts/test.ps1 -race -part others\n", 15},
+	{"run: scripts/test.ps1 -race -part isolated\n", 21},
+}
+
+// TestSplitSteps checks that ci.yml runs the coverage and race tests in parts, each in a step with
+// its own limit: the coverage run of internal/video after every other package's, and the race runs
+// of every package but the isolated ones before those.
+func TestSplitSteps(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, want := range []string{
-		"run: scripts/test.sh -race -part others\n",
-		"run: scripts/test.sh -race -part isolated\n",
-		"run: scripts/test.ps1 -race -part others\n",
-		"run: scripts/test.ps1 -race -part isolated\n",
-	} {
-		i := strings.Index(s, want)
+	for _, c := range splitSteps {
+		i := strings.Index(s, c.run)
 		if i < 0 {
-			t.Errorf("ci.yml lacks %q", strings.TrimSpace(want))
+			t.Errorf("ci.yml lacks %q", strings.TrimSpace(c.run))
 			continue
 		}
 		step := s[strings.LastIndex(s[:i], "      - name:"):i]
-		if !strings.Contains(step, "timeout-minutes: 20\n") {
-			t.Errorf("the step running %q has no 20-minute limit", strings.TrimSpace(want))
+		if want := fmt.Sprintf("timeout-minutes: %d\n", c.limit); !strings.Contains(step, want) {
+			t.Errorf("the step running %q has no %d-minute limit", strings.TrimSpace(c.run), c.limit)
 		}
 	}
-	if strings.Contains(s, "run: scripts/test.sh -race\n") || strings.Contains(s, "run: scripts/test.ps1 -race\n") {
-		t.Error("ci.yml still runs the race tests in one step")
+	for _, old := range []string{"run: scripts/test.sh -race\n", "run: scripts/test.ps1 -race\n", "run: scripts/test.sh cover\n", "run: scripts/test.ps1 cover\n"} {
+		if strings.Contains(s, old) {
+			t.Errorf("ci.yml still runs %q in one step", strings.TrimSpace(old))
+		}
 	}
-	// A failure among the other packages must not skip internal/video's race result.
+	// A failure in the first part must not skip the second part's result.
 	for _, want := range []string{
-		"&& steps.race-others.outcome != 'skipped' }}\n        timeout-minutes: 20\n        shell: bash\n        run: scripts/test.sh -race -part isolated\n",
-		"&& steps.race-others-windows.outcome != 'skipped' }}\n        timeout-minutes: 20\n        shell: pwsh\n        run: scripts/test.ps1 -race -part isolated\n",
+		"if: ${{ !cancelled() && runner.os != 'Windows' && steps.cover-rest.outcome != 'skipped' }}\n        timeout-minutes: 7\n        shell: bash\n        run: scripts/test.sh cover -part video\n",
+		"if: ${{ !cancelled() && runner.os == 'Windows' && steps.cover-rest-windows.outcome != 'skipped' }}\n        timeout-minutes: 7\n        shell: pwsh\n        run: scripts/test.ps1 cover -part video\n",
+		"&& steps.race-others.outcome != 'skipped' }}\n        timeout-minutes: 21\n        shell: bash\n        run: scripts/test.sh -race -part isolated\n",
+		"&& steps.race-others-windows.outcome != 'skipped' }}\n        timeout-minutes: 21\n        shell: pwsh\n        run: scripts/test.ps1 -race -part isolated\n",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("an isolated race step lacks the !cancelled() condition: want %q", want)
+			t.Errorf("a second-part step lacks the !cancelled() condition: want %q", want)
+		}
+	}
+	for _, want := range []string{
+		"        id: cover-rest\n        if: runner.os != 'Windows'\n",
+		"        id: cover-rest-windows\n        if: runner.os == 'Windows'\n",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("ci.yml lacks %q", want)
 		}
 	}
 }
 
-// TestCheckJobLimit: the check job's limit covers the two race steps at their limits plus the
-// budget for every other step, so the split is not undone by the job limit (DESIGN.md section 17).
+// TestCheckJobLimit: the check job's limit covers the two race steps a runner runs, at their
+// limits, plus the budget for every other step, so the split is not undone by the job limit
+// (DESIGN.md section 17).
 func TestCheckJobLimit(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	job, race := checkJobLimits(b)
-	// Four race steps (two on Unix, two on windows-2025), all with the same limit; a runner runs
-	// two of them.
-	if len(race) != 4 {
-		t.Fatalf("found race-step limits %v, want four", race)
+	// Four race steps: others and isolated on Unix, then the same on windows-2025.
+	if !slices.Equal(race, []int{15, 21, 15, 21}) {
+		t.Fatalf("race-step limits %v, want [15 21 15 21]", race)
 	}
-	for _, r := range race {
-		if r != 20 {
-			t.Errorf("race-step limits %v, want 20 minutes each", race)
-			break
+	for i := 0; i < len(race); i += 2 {
+		if job < race[i]+race[i+1]+fixedStepsBudget {
+			t.Errorf("the check job's limit is %d minutes, want at least %d + %d (race steps) + %d (other steps)", job, race[i], race[i+1], fixedStepsBudget)
 		}
 	}
-	if job < 2*race[0]+fixedStepsBudget {
-		t.Errorf("the check job's limit is %d minutes, want at least 2 x %d (race steps) + %d (other steps)", job, race[0], fixedStepsBudget)
+	// The designer's ruling: the budget twice the largest non-race median of any runner, rounded up
+	// (2 x 23.6 minutes on ubuntu-24.04 = 47.2), and the job's limit the race pair plus it, 84, rounded up to 5.
+	if fixedStepsBudget != 48 || job != 85 {
+		t.Errorf("fixedStepsBudget %d and job limit %d, want 48 and 85", fixedStepsBudget, job)
 	}
 	wf := "jobs:\n  check:\n    timeout-minutes: 50\n    steps:\n      - name: Race tests, other packages (Unix)\n        timeout-minutes: 20\n" +
 		"      - name: Race tests, isolated packages (Windows)\n        timeout-minutes: 15\n      - name: Lint\n        timeout-minutes: 9\n  other:\n    timeout-minutes: 5\n"
@@ -282,9 +355,34 @@ func TestTestCommand(t *testing.T) {
 		{[]string{"-long", "-pkg", "./internal/vision,.,./internal/pipeline"}, "CGO_ENABLED=0 QRVT_LONG_TESTS=1", "test -tags=noasm,nounsafe -timeout=120m ./internal/vision . ./internal/pipeline"},
 	}
 	for _, c := range cases {
-		env, args, _ := testCommand(c.args, "noasm,nounsafe")
+		env, args, _, patterns := testCommand(c.args, "noasm,nounsafe")
 		if strings.Join(env, " ") != c.wantEnv || strings.Join(args, " ") != c.want {
 			t.Errorf("testCommand(%v) = %v, %v; want %s, %s", c.args, env, args, c.wantEnv, c.want)
 		}
+		// The package patterns are the arguments' tail.
+		if !slices.Equal(args[len(args)-len(patterns):], patterns) {
+			t.Errorf("testCommand(%v) patterns %q are not the tail of %q", c.args, patterns, args)
+		}
+	}
+}
+
+// TestPackagesWholeModule: packages without a pattern lists the whole module, as pkgDirs (the
+// platforms task) relies on; go list without one would list only the current directory's package.
+func TestPackagesWholeModule(t *testing.T) {
+	got, err := packages("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(got, module+"/internal/video") || !slices.Contains(got, module+"/internal/vision") {
+		t.Errorf("packages() = %q, want the whole module", got)
+	}
+}
+
+// TestPackagesNoMatch: a pattern that names no package is an error that says so, not go list's
+// warning read as package names (review of 3ba96bf).
+func TestPackagesNoMatch(t *testing.T) {
+	got, err := packages("", module+"/docs/...")
+	if err == nil || !strings.Contains(err.Error(), "matched no packages") {
+		t.Errorf("packages(docs/...) = %q, %v; want an error naming the pattern", got, err)
 	}
 }

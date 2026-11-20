@@ -14,6 +14,9 @@
 # Go, wasmtime and zig come from their vendors' release archives, checked against the SHA-256
 # sums pinned below, and go under $QRVT_PREFIX (default ~/.local). git, curl, xz, ffmpeg and
 # qemu-user-static come from the system package manager: Homebrew, apt, dnf or pacman.
+# Each package-manager command is stopped after 15 minutes (apt-get update after 5), so that a
+# stalled mirror fails with a message instead of hanging; QRVT_PM_TIMEOUT sets that limit in
+# seconds for every such command (0: none).
 set -eu
 # Never let an older go on PATH download a toolchain before the plan is printed.
 GOTOOLCHAIN=local
@@ -63,7 +66,7 @@ for a in "$@"; do
 	--yes | -y) yes=1 ;;
 	--dry-run) dry=1 ;;
 	-h | --help)
-		sed -n '2,17p' "$0"
+		sed -n '2,19p' "$0"
 		exit 0
 		;;
 	*)
@@ -80,6 +83,75 @@ die() {
 	exit 1
 }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# Limits of the package-manager commands, in seconds: a stalled mirror otherwise hangs the setup
+# without a word (PR #52's CI run waited 35 minutes in apt-get update). apt also gives up on a
+# connection silent for 30 s and retries a failed download 3 times.
+pm_timeout=${QRVT_PM_TIMEOUT:-900}
+update_timeout=${QRVT_PM_TIMEOUT:-300}
+case $pm_timeout in '' | *[!0-9]*) die "QRVT_PM_TIMEOUT must be a number of seconds, not '$pm_timeout'" ;; esac
+apt_opts="-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3"
+
+# bounded SECONDS COMMAND...: runs COMMAND, limited to SECONDS (0: no limit). Past it the command
+# gets SIGTERM, and 10 s later SIGKILL, with its child processes (where pkill exists); bounded
+# then says so and returns 124. Otherwise it returns the command's status. Under sudo, SIGTERM
+# reaches sudo, which relays it to the command, but SIGKILL cannot reach the command, which runs as
+# root: a command that also ignores SIGTERM is then left to the CI step's own limit.
+bounded() {
+	# Every command here that can fail before the cleanup is guarded (|| ..., or set +e in the
+	# watchdog and the trap), so that set -e cannot end the script half-way.
+	b_limit=$1
+	shift
+	b_status=0
+	if [ "$b_limit" -eq 0 ]; then
+		"$@" || b_status=$?
+		return "$b_status"
+	fi
+	b_mark=$(mktemp -d)
+	"$@" &
+	b_pid=$!
+	# The watchdog, without set -e (a pkill that finds no child must not end it). Its sleeps run in
+	# the background so that the TERM it gets when the command ends interrupts its wait at once; a
+	# TERM that arrives before a sleep's process ID is known sets b_stop, checked right after.
+	(
+		set +e
+		b_sleep='' b_stop=''
+		trap 'if [ -n "$b_sleep" ]; then kill "$b_sleep" 2>/dev/null; exit 0; fi; b_stop=1' TERM
+		sleep "$b_limit" &
+		b_sleep=$!
+		if [ -n "$b_stop" ]; then kill "$b_sleep" 2>/dev/null; exit 0; fi
+		wait "$b_sleep" || exit 0
+		: >"$b_mark/expired"
+		kill -TERM "$b_pid" 2>/dev/null || exit 0
+		b_sleep=''
+		sleep 10 &
+		b_sleep=$!
+		if [ -n "$b_stop" ]; then kill "$b_sleep" 2>/dev/null; exit 0; fi
+		wait "$b_sleep" || exit 0
+		command -v pkill >/dev/null 2>&1 && pkill -KILL -P "$b_pid"
+		kill -KILL "$b_pid"
+	) </dev/null >/dev/null 2>&1 &
+	b_dog=$!
+	# Ctrl-C reaches the shell, not the command, which as a background job ignores SIGINT: stop
+	# it, and the watchdog, rather than leave them running detached (holding dpkg's lock, say).
+	# The trap is set only now: a watchdog forked with it in place could lose its TERM (under dash,
+	# once in 60 runs, it then waited on its sleep for good). It runs without set -e, as any of its
+	# kills may find nothing left to signal.
+	trap 'set +e; command -v pkill >/dev/null 2>&1 && pkill -P "$b_dog"; kill -TERM "$b_pid" "$b_dog" 2>/dev/null; rm -rf "$b_mark"; exit 130' INT TERM
+	wait "$b_pid" || b_status=$?
+	trap - INT TERM
+	# The watchdog's sleep first, by its parent, then the watchdog, whose trap also covers a sleep
+	# not yet forked.
+	if command -v pkill >/dev/null 2>&1; then pkill -P "$b_dog" 2>/dev/null || true; fi
+	kill "$b_dog" 2>/dev/null || true
+	wait "$b_dog" 2>/dev/null || true
+	if [ -e "$b_mark/expired" ]; then
+		printf 'setup: %s did not finish within %s s (a package mirror may be stalled); run setup again, or set QRVT_PM_TIMEOUT to a longer limit in seconds (0: none)\n' "$*" "$b_limit" >&2 || true
+		b_status=124
+	fi
+	rm -rf "$b_mark" || true
+	return "$b_status"
+}
 
 case $(uname -s) in
 Linux) os=linux wos=linux ;;
@@ -224,19 +296,20 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fetch() { # url sha256 file
 	say "downloading $1"
-	curl -fsSL --proto '=https' --tlsv1.2 -o "$3" "$1"
+	# A stalled transfer (under 1 KiB/s for a minute) fails and is retried, like any timeout.
+	curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 30 --speed-limit 1024 --speed-time 60 --retry 3 -o "$3" "$1"
 	got=$(sha256 "$3")
 	[ "$got" = "$2" ] || die "checksum mismatch for $1: got $got, want $2"
 }
 
 if [ -n "$pkgs" ]; then
-	# shellcheck disable=SC2086 # $pkgs is a word list
+	# shellcheck disable=SC2086 # $sudo, $apt_opts and $pkgs are word lists
 	case $pm in
-	brew) brew install $pkgs ;;
-	apt) $sudo apt-get update && $sudo apt-get install -y $pkgs ;;
-	dnf) $sudo dnf install -y $pkgs ;;
-	pacman) $sudo pacman -Syu --needed --noconfirm $pkgs ;;
-	esac
+	brew) bounded "$pm_timeout" brew install $pkgs ;;
+	apt) bounded "$update_timeout" $sudo apt-get $apt_opts update && bounded "$pm_timeout" $sudo apt-get $apt_opts install -y $pkgs ;;
+	dnf) bounded "$pm_timeout" $sudo dnf install -y $pkgs ;;
+	pacman) bounded "$pm_timeout" $sudo pacman -Syu --needed --noconfirm $pkgs ;;
+	esac || die "installing$pkgs with $pm failed"
 fi
 
 if [ $go_install = 1 ]; then
@@ -269,10 +342,11 @@ if [ $zig_install = 1 ]; then
 fi
 
 if [ -n "$qemu_install" ]; then
+	# shellcheck disable=SC2086 # $sudo and $apt_opts are word lists
 	case $qemu_install in
-	apt) $sudo apt-get update && $sudo apt-get install -y qemu-user-static ;;
-	dnf) $sudo dnf install -y qemu-user-static ;;
-	pacman) $sudo pacman -Syu --needed --noconfirm qemu-user-static ;;
+	apt) bounded "$update_timeout" $sudo apt-get $apt_opts update && bounded "$pm_timeout" $sudo apt-get $apt_opts install -y qemu-user-static ;;
+	dnf) bounded "$pm_timeout" $sudo dnf install -y qemu-user-static ;;
+	pacman) bounded "$pm_timeout" $sudo pacman -Syu --needed --noconfirm qemu-user-static ;;
 	esac || say "missing: qemu-user-static could not be installed; tools/dev platforms will report linux/arm64 as not run"
 fi
 

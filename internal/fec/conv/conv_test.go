@@ -168,7 +168,7 @@ func TestCorrectsTwoErrorsExhaustive(t *testing.T) {
 // QRVT_LONG_TESTS=1, and 20,000 random patterns on random messages otherwise. By linearity the
 // all-zero message is representative.
 func TestCorrectsThreeErrors(t *testing.T) {
-	if os.Getenv("QRVT_LONG_TESTS") == "" {
+	if os.Getenv("QRVT_LONG_TESTS") != "1" {
 		randomErrors(t, 3, 20000)
 		return
 	}

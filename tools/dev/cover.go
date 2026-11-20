@@ -32,7 +32,7 @@ func excluded(rel string) bool {
 // coverArgs returns the `go test` arguments of the coverage step. The per-package limit is set to
 // 15 minutes: go test's 10-minute default was never a chosen limit, and internal/vision reached
 // it on the slowest runner (macos-26-intel) beside the end-to-end packages (DESIGN.md section 19);
-// the CI job's 70 minutes and the 30 minutes of non-race steps are the real guard.
+// the CI steps' own limits and the job's 70 minutes are the real guard.
 func coverArgs(tags string) []string {
 	return goTest(tags, "-timeout=15m", "-coverprofile=PROFILE", "./...")
 }
@@ -42,6 +42,7 @@ func cover(args []string) error {
 	fs := newFlags("cover")
 	minimum := fs.Float64("min", 95, "minimum statement coverage per package, percent")
 	profile := fs.String("profile", "coverage.out", "coverage profile to write")
+	split := fs.String("part", "", "rest: every package but internal/video, its profile kept for -part video; video: internal/video, then the gate over both (CI's two steps)")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
 	tags, err := releaseTags()
 	if err != nil {
@@ -50,13 +51,18 @@ func cover(args []string) error {
 	// The runs of the test task (isolatedRuns): every other package, then the root package and
 	// internal/pipeline each on its own, then internal/video on its own; their profiles are merged
 	// into one, so the gate covers every package.
-	list, err := packages(tags)
+	list, err := packages(tags, "./...")
+	if err != nil {
+		return err
+	}
+	goArgs := coverArgs(tags)
+	runs, err := coverRuns(isolatedRuns(goArgs[:len(goArgs)-1], list), *split)
 	if err != nil {
 		return err
 	}
 	var parts []string
 	var errs []error
-	for i, a := range isolatedRuns(coverArgs(tags), list) {
+	for i, a := range runs {
 		part := fmt.Sprintf("%s.%d", *profile, i)
 		parts = append(parts, part)
 		a = slices.Clone(a)
@@ -71,7 +77,10 @@ func cover(args []string) error {
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
-	if err := mergeProfiles(*profile, parts...); err != nil {
+	if gate, err := coverMerge(*profile, *split, parts); err != nil || !gate {
+		if err == nil {
+			fmt.Printf("coverage of every package but %s kept in %s.rest; cover -part video gates both\n", isolated, *profile)
+		}
 		return err
 	}
 	pkgs, err := parseProfile(*profile)
@@ -99,6 +108,45 @@ func cover(args []string) error {
 	}
 	fmt.Printf("coverage gate passed: every package at least %.0f%% (packages without statements are skipped)\n", *minimum)
 	return nil
+}
+
+// coverRuns returns the runs of the whole module's isolatedRuns split that cover's -part selects:
+// "" all of them, "rest" every run but internal/video's, "video" internal/video's alone. CI runs
+// the last as a step of its own, with its own limit (DESIGN.md section 17).
+func coverRuns(runs [][]string, part string) ([][]string, error) {
+	n := len(runs)
+	if part != "" && (n == 0 || !slices.Contains(runs[n-1], isolated)) {
+		return nil, fmt.Errorf("-part %s: the split has no run of %s", part, isolated)
+	}
+	switch part {
+	case "":
+		return runs, nil
+	case "rest":
+		return runs[:n-1], nil
+	case "video":
+		return runs[n-1:], nil
+	}
+	return nil, fmt.Errorf("-part %q: want rest or video", part)
+}
+
+// coverMerge merges the profiles of the runs just made, parts, and reports whether the gate is
+// due. Without a part, they become profile. -part rest keeps them as profile.rest and leaves the
+// gate to -part video, which merges that file with its own run's into profile.
+func coverMerge(profile, part string, parts []string) (bool, error) {
+	rest := profile + ".rest"
+	switch part {
+	case "rest":
+		return false, mergeProfiles(rest, parts...)
+	case "video":
+		if _, err := os.Stat(rest); err != nil {
+			return false, fmt.Errorf("no profile of the other packages (%w); run cover -part rest first", err)
+		}
+		if err := mergeProfiles(profile, append([]string{rest}, parts...)...); err != nil {
+			return false, err
+		}
+		return true, os.Remove(rest)
+	}
+	return true, mergeProfiles(profile, parts...)
 }
 
 // parseProfile returns, per package directory (per file at the module's root), the total and

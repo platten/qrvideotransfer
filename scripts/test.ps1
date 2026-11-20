@@ -2,8 +2,11 @@
 # licenses or check-workflows.
 #   scripts/test.ps1                unit tests, CGO_ENABLED=0
 #   scripts/test.ps1 -race          race detector (enables cgo)
-#   scripts/test.ps1 -race -part isolated   only internal/video (-part others: every other package)
-#   scripts/test.ps1 cover          tests with the 95% per-package coverage gate
+#   scripts/test.ps1 -race -part isolated   the root package, internal/pipeline and internal/video,
+#                                           each alone (-part others: every other package)
+#   scripts/test.ps1 -pkg ./internal/vision,.   only the listed packages, split as ./... is
+#   scripts/test.ps1 cover          tests with the 95% per-package coverage gate (-part rest, then
+#                                   -part video: internal/video in a run of its own, then the gate)
 #   scripts/test.ps1 fuzz -time 30s every fuzz target for 30 s
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')

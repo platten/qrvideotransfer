@@ -1734,7 +1734,12 @@ With `--spike` they also install the two tools only spike S1 needs: a native ffm
 archive, SHA-256 pinned). With `--cross` (`-Cross` on Windows) they install what `tools/dev platforms`
 needs: zig 0.17.1 from its release archive (SHA-256 pinned) and, on Linux, `qemu-user-static` from the
 package manager; without root or sudo the script says that qemu is missing and goes on. They print
-what they are about to install, and ask, before installing anything. The build and test scripts are thin wrappers around
+what they are about to install, and ask, before installing anything. Every package-manager
+command (apt-get, dnf, pacman, brew, winget) has a limit, 15 minutes and 5 for `apt-get update`
+(`QRVT_PM_TIMEOUT` sets it in seconds, 0 for none), after which it is stopped and the script
+fails, saying so; apt-get also gives up on a connection silent for 30 s and retries a download 3
+times, and the release archives' downloads stop on a stall (curl: under 1 KiB/s for a minute,
+retried 3 times; PowerShell: a 300 s timeout). The build and test scripts are thin wrappers around
 `go run ./tools/dev <task>`, so that logic exists once. CI calls the same scripts on all three systems.
 
 `install-tools` downloads golangci-lint, GoReleaser, syft (the SBOM generator) and actionlint as
@@ -1806,23 +1811,58 @@ section 13).
   no cache restored) the race step took 15 min 53 s, `internal/video` 528 s and `internal/vision`
   187 s; an earlier 13 min 26 s (run 43769482359) restored cached results for `internal/fec/conv`,
   `internal/fec/rs` and `internal/modem` and is not comparable. The race tests now run as two CI
-  steps, each with its own 20-minute limit: every package but `internal/video`, the root package
-  and `internal/pipeline` ("Race tests, other packages", `tools/dev test -race -part others`), then
+  steps, each with its own limit: every package but `internal/video`, the root package and
+  `internal/pipeline` ("Race tests, other packages", `tools/dev test -race -part others`), then
   those three each alone ("Race tests, isolated packages", `-part isolated`, named so since PR #47
-  moved the two end-to-end packages there), which runs even when the first step failed. Both pass `-count=1`: setup-go restores Go's test cache across runs, for every
+  moved the two end-to-end packages there), which runs even when the first step failed. Both pass
+  `-count=1`: setup-go restores Go's test cache across runs, for every
   package unchanged since the cache was saved, and a cached race pass reuses one old run's luck for
   the nondeterministic tests (`internal/fec/conv`'s parallel test, `internal/fec/rs`'s subprocess
   test). That costs 0-3 minutes per run on macos-26-intel, nothing when nothing would have been
-  cached. The `check` job's limit is 70 minutes, two race steps at 20 each plus 30 for every other
-  step (`tools/dev` `fixedStepsBudget`, checked by a test against all four race steps): the split's
-  own arithmetic, not an allowance for slow hosts. The 30 comes from macos-26-intel, the slowest
-  runner: its non-race steps took 21 min 55 s in run 43811766030 and 20 min 13 s in run 43958754789
-  (three packages restored from the cache). The earlier budget of 20 was exceeded in both runs, and
-  trimming vision's always-on statistics alone did not bring the steps back under it; 30 leaves
-  roughly 8 to 10 minutes of margin. Earlier, run 43797784643, with no cache restored, took 16 min
-  54 s; the slow host of run 43774194055 took 23 min 09 s, and a host that slow is a runner fault
-  (spike S1, section 14), for which the limits are not sized. The isolated packages' race step does not run alone after an
-  earlier failure skipped the other packages' step.
+  cached. The coverage tests run as two steps in the same way, so that `internal/video` has a limit
+  of its own (designer's ruling, 2026-11-19): every package but `internal/video` ("Tests with
+  coverage, other packages", `tools/dev cover -part rest`, which keeps its merged profile as
+  `coverage.out.rest`), then `internal/video` ("Tests with coverage gate, internal/video", `-part
+  video`, which merges that profile with its own and applies the gate, so the gate and CI's
+  go-test-coverage step see every package); the second runs even when the first failed. The isolated
+  packages' race step and `internal/video`'s coverage step do not run alone after an earlier failure
+  skipped the step before them.
+  **Step limits** (designer's ruling, 2026-11-19). Each step of the `check` job has a limit of
+  the larger of twice its median on the runner where that median is largest and 1.3 times the
+  largest passing time on any runner, rounded up to a whole minute, and never below 5 minutes.
+  The sample is the six passing runs of 2026-11-19 (UTC, 06:48 to 22:50): 44474815418,
+  44479932125, 44581210423 (attempt 2), 44595183829, 44619325521 and 44627182924, each on all
+  six runners; the two coverage parts are timed from the job logs of the step they were then
+  together in. Minutes:
+
+  | Step | Slowest median (runner) | Max, any runner | 2 x median | 1.3 x max | Limit |
+  | --- | --- | --- | --- | --- | --- |
+  | Coverage, other packages | 8.53 (macos-26-intel) | 13.23 | 17.06 | 17.20 | 18 |
+  | Coverage gate, `internal/video` | 3.49 (macos-26-intel) | 4.25 | 6.98 | 5.52 | 7 |
+  | Tests without the release tags | 8.13 (ubuntu-24.04, its only runner) | 8.43 | 16.27 | 10.96 | 17 |
+  | HEVC fast path | 3.62 (macos-26-intel) | 4.48 | 7.25 | 5.83 | 8 |
+  | Race, other packages | 7.47 (macos-26-intel) | 8.95 | 14.95 | 11.63 | 15 |
+  | Race, isolated packages | 10.20 (macos-26-intel) | 14.58 | 20.40 | 18.96 | 21 |
+  | Static build | 1.76 (ubuntu-24.04) | 2.53 (windows-2025) | 3.52 | 3.29 | 5 |
+  | Lint | 1.05 (macos-26-intel) | 1.35 | 2.10 | 1.75 | 5 |
+  | Vulnerability scan | 1.08 (windows-2025) | 1.20 | 2.17 | 1.56 | 5 |
+  | Hostile-cost ratios | 0.63 (macos-26-intel) | 0.78 | 1.27 | 1.02 | 5 |
+  | Install the linter, import rule | under 0.1 | 0.63 | | | 5 |
+
+  The lint and static-build figures come from runs whose build and module caches setup-go
+  restored warm; a cold cache, as after a `go.sum` change such as a Dependabot update, is
+  unmeasured on the runners (locally, pinned to 4 cores, a cold `build -all` took 61 s and a cold
+  lint 39 s). The coverage step's 20 minutes, which one slow host passed in attempt 1 of run
+  44581210423 (every package about twice its usual time, section 19), became 18 + 7; that host's
+  other packages took 16.3 minutes. **The job's limit** is 85 minutes: the two race steps a runner
+  runs, 15 + 21, plus 48 for every other step (`tools/dev` `fixedStepsBudget`, checked by a test
+  against all four race steps) make 84, rounded up to a multiple of 5. The 48 follows the same
+  rule as the steps: twice the largest median of the non-race steps on any runner, ubuntu-24.04's
+  23.6 minutes (47.2, rounded up); macos-26-intel's is 21.2 (17.8 to 28.0). The whole job on
+  macos-26-intel took 38.9 minutes (median; 32.8 to 51.5), and 85 is above twice that, so it is
+  about 2.2 times the median job. **Not covered, by design:** a host more than about 2.2 times as
+  slow as the median job, on every step at once, can stay inside each step's limit and still fail
+  at the job's 85 minutes (twice the slowest run, 51.5, would be 103).
   The detector's hostile-cost tests (`TestDetectThreeHostile` 16 times, `TestDetectThreeHostile4K`
   and `TestDetectHostileGrid4K` 6, `TestDetectHostileGrid` 2; SECURITY.md section 9.1) bound a
   ratio to a real code's Detect in the same process and run serially. The ratio is the median, over
@@ -1888,10 +1928,10 @@ section 13).
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
   keeping the grown corpus in the Actions cache between nights and uploading any failing input; the full
-  simulator matrix (M3), a 1 GB loopback with memory assertions (M6) and benchmarks with regression
-  alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice until then. The
-  full simulator matrix's step stays a placeholder until M6, under the deferral of the nightly
-  long-test job (section 19).
+  simulator matrix (deferred to M6), a 1 GB loopback with memory assertions (M6) and benchmarks
+  with regression alerts (M6) run as soon as their `tools/dev` tasks exist and skip with a notice
+  until then. The full simulator matrix's step stays a placeholder until M6, under the deferral of
+  the nightly long-test job (section 19).
 - **Security**: CodeQL (`codeql.yml`, security-extended queries, on pull requests, on main and weekly);
   Dependabot for Go modules and actions, except wazero and go-ffmpreg: every engine speed, memory and
   sandbox figure of spike S1 was measured on their pinned versions, so they are updated by hand, with
@@ -1940,9 +1980,11 @@ section 13).
   and `internal/pipeline` whenever the non-test code of any internal package changes; a docs-only
   pull request runs none; a pull request changing only tests runs the long tests of those packages
   only. `go run ./tools/dev test -long -pkg ./internal/vision,./internal/fec/ldpc` runs the listed
-  packages in one `go test` run, without the test task's isolation split, so the root package,
-  `internal/pipeline` and `internal/video` each run in a `-pkg` invocation of their own (for
-  example `-pkg .`, then `-pkg ./internal/pipeline`). The result goes in the pull request's text:
+  packages through the test task's isolation split, as `./...` is run: the other packages in one
+  `go test` run, side by side, then the root package, `internal/pipeline` and `internal/video`, those
+  listed, each in a run of its own (`-pkg ./internal/vision,.,./internal/pipeline,./internal/video`
+  makes four runs); `-part` needs the whole module and is refused with `-pkg`. The result goes in
+  the pull request's text:
   wall time, pass or fail per package, and what was skipped. The full long run, every package
   (`go run ./tools/dev test -long`), runs once at each milestone exit, locally, and its result goes in the exit check.
   The task gives each package 120 minutes (`-timeout=120m`; given with `-race` too, it comes after
@@ -2201,8 +2243,9 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   repair, the shard store and the hash check were never covered, and two cancellation returns
   only sometimes). Deterministic tests of those paths bring it to 96.5% (measured over three runs,
   with the defensive guard in `attemptDue` kept uncovered). `internal/video` stood at 95.8%
-  (windows-2025) and 95.6% (windows-11-arm) in that run: a margin item for the next pull request that changes `internal/video`, not fixed
-  in this one. **Assigned to M5** (designer's ruling, 2026-11-19).
+  (windows-2025) and 95.6% (windows-11-arm) in that run: a margin item for the next pull request
+  that changes `internal/video`, not fixed in this one. **Assigned to M5** (designer's ruling,
+  2026-11-19).
 - **Round-trip matrix with x264 (M3 part 2).** `TestRoundTripMatrixX264` with `QRVT_LONG_TESTS=1`
   runs the 13 rows that have a recorder bitrate (not `ideal`, whose recorder is lossless) with
   x264 at the preset's bitrate and camera, three sessions each, 855 s on the development machine:
@@ -2373,17 +2416,12 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   before it can be a CI job; the decision is due at M6, the scale work, which owns the nightly 1 GB
   loopback anyway. The deferral also covers the nightly workflow's "full simulator matrix (M3)"
   step, still a placeholder (section 17): it is decided at M6 with the long-test job, not built
-  in M3 (designer's ruling, 2026-11-19). **Recorded, not fixed (reviewer's LOW, 2026-11-19):** most guards turn the long
-  tests on only for `QRVT_LONG_TESTS=1` (`== "1"`), but three treat any non-empty value as on:
-  `internal/vision`'s `geomLong`, `internal/fec/ldpc`'s `long` and `internal/fec/conv`'s
-  `TestCorrectsThreeErrors`; so `QRVT_LONG_TESTS=0` runs the long sizes in those packages only.
-  Making them all `== "1"` touches three places, more than the designer's two-helper limit for this
-  pull request, so it waits for a later one: **assigned to M4's tooling work** (designer's ruling,
-  2026-11-19). **Also for later (reviewer's LOW, 2026-11-19):**
-  `tools/dev test -pkg` runs its packages in one `go test` run, without the isolation split that
-  `./...` gets (`isolatedRuns`); until it goes through the same split, section 17 asks for the root
-  package, `internal/pipeline` and `internal/video` in `-pkg` invocations of their own. **Assigned
-  to M4's tooling work** (designer's ruling, 2026-11-19). The
+  in M3 (designer's ruling, 2026-11-19). **Fixed in M4's tooling pull request (reviewer's LOW,
+  2026-11-19):** three guards had treated any non-empty `QRVT_LONG_TESTS` as on
+  (`internal/vision`'s `geomLong`, `internal/fec/ldpc`'s `long` and `internal/fec/conv`'s
+  `TestCorrectsThreeErrors`), so `QRVT_LONG_TESTS=0` ran the long sizes in those packages; they
+  now read `== "1"` like the others, and `tools/dev`'s `TestLongTestGuards` refuses any other
+  reading of the variable in a test file. The
   designer accepted -31% (2026-11-18), with the honesty statistics and the concurrency tests kept
   in full; the macos-26-intel figure above stays a projection until this pull request's CI run
   measures it. Half, the target, was not reached. What remains is
@@ -2515,12 +2553,27 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   short `TestRoundTripMatrix` gave clean fractions of 0.888 to 0.904 on one row (reviewer's
   survey). Both helpers now set every input's modification time to a fixed instant (`fixTimes`,
   one per package), and the always-on matrix rows and the x264 row then gave identical captures
-  and clean fractions over 5 runs. M4's first pull request checks that no test builds inputs
-  another way. One place to check in that sweep: the `internal/cli` tests write their inputs
-  directly with `os.WriteFile` (`cli_test.go` line 193, and `commands_test.go`), without fixed
-  modification times. They film nothing, so no outcome can flip, but the sweep must look at them. The
-  frame vectors and the reference video (FORMAT.md section 13) fix their input's mode as well as its
-  time: a read-only file, which every system reports as 0444, since the manifest records the mode.
+  and clean fractions over 5 runs. **Sweep (M4's tooling pull request):** no test builds a
+  transfer's inputs another way. Every `Encode`, `pipeline.Encode` and `payload.Pack` of temporary
+  files in a test takes them from `payloadDir` or `writeInputs`, except the frame vectors and the
+  reference video, which fix their input's time and mode themselves, and `internal/payload`'s own
+  tests, which film nothing (their `tree` helper fixes times too). The `internal/cli` tests write
+  files directly with `os.WriteFile` (`cli_test.go` line 193, `commands_test.go`), but run every
+  command against the fake API, never the real one (the one call of `Root.Encode` passes no
+  inputs and must fail), so they encode, film and decode nothing, and nothing needs fixing there.
+  One test changes a fixed input afterwards: `TestFileFaults` adds a symbolic link to
+  `writeInputs`' folder, which changes the folder's modification time, and encodes it through the
+  lossless raw backend, asserting only the skipped-link warning; its bytes vary, its outcome cannot.
+  No shared helper was added: the two packages that need one each have `fixTimes`, and sharing it
+  would take a non-test package. **Not fixed, recorded:** the helpers fix times, not modes. Their
+  files and folders are created as 0600 and 0750 less the process's umask (on Windows the system
+  reports its own modes), and the manifest records the mode, so a transfer repeats from run to run
+  on one machine but its bytes can differ between machines (the development machine and a CI
+  runner, say). A filmed outcome near a margin could therefore differ between a local run and CI;
+  fixing it means setting the modes in both `fixTimes`, **deferred to M4's second pull request**,
+  knowingly (designer's ruling, 2026-11-19). The frame vectors and the reference video (FORMAT.md
+  section 13) fix their input's mode as well as its time: a read-only file, which every system
+  reports as 0444, since the manifest records the mode.
   The tests affected, by the reviewer's survey:
   - **Near a margin, asserting only "decodes", could flip in CI:**
     `TestRoundTripMatrix/iphone-hdr-1080p30-gray4-normal` (always on, below section 11's condition
@@ -2565,18 +2618,41 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   | root | 131 s | 239 s |
   | `internal/pipeline` | 94 s | 168 s |
 
-  One rerun of the failed job was made, by the designer's ruling. **M4's first pull request** gives
-  `internal/video` a coverage step of its own and sets each step's limit to about twice its normal
-  time. PR B of the M3 exit adds about 1.4 s pinned (4 CPUs, `taskset -c 0-3`, GOMAXPROCS 4):
-  `TestReferenceVideo` 1.2 s, almost all of it the embedded engine's probe and decode of the
-  reference video (0.32 and 0.64 s), `TestFrameVectors` 0.14 s and the descriptor's allocation
-  checks 0.02 s.
+  One rerun of the failed job was made, by the designer's ruling. **Done in M4's first pull
+  request:** `internal/video` has a coverage step of its own and each step's limit is about twice
+  its normal time (section 17, which gives the figures; the job's 70 minutes are below twice its
+  normal time and wait for the designer's decision). PR B of the M3 exit adds about 1.4 s pinned
+  (4 CPUs, `taskset -c 0-3`, GOMAXPROCS 4): `TestReferenceVideo` 1.2 s, almost all of it the
+  embedded engine's probe and decode of the reference video (0.32 and 0.64 s), `TestFrameVectors`
+  0.14 s and the descriptor's allocation checks 0.02 s.
 - **`scripts/setup.sh` hung on apt (2026-11-19).** On PR #52's CI run 44474815418 the setup step
   stalled in apt on a package mirror until the step's 35-minute limit; one infrastructure rerun was
-  allowed by the designer's ruling. **Assigned to M4's first pull request, the tooling one:**
-  `apt-get update` and `install` get Acquire timeouts and retries, and every package-manager command
-  a per-command timeout, so that a mirror stall fails within a few minutes with a clear message;
-  the same for any dnf, pacman, brew or winget step that can hang.
+  allowed by the designer's ruling. In run 44627182924 the same step took 14.8 minutes, 13 of them
+  fetching apt's 105 MB at 132 kB/s, one package stalled for 8.7 minutes. **Done in M4's first pull
+  request, the tooling one** (section 16): every apt-get, dnf, pacman, brew and winget command runs
+  with a limit, 15 minutes and 5 for `apt-get update` (`QRVT_PM_TIMEOUT`), after which it is
+  stopped (SIGTERM, then SIGKILL with its children 10 s later) and the script fails, naming the
+  command; apt-get gets Acquire timeouts of 30 s and 3 retries, and the archive downloads a stall
+  limit and retries. Ctrl-C during such a command stops it too, rather than leaving it running
+  detached with dpkg's lock. The run above, at 13 minutes, would still have passed.
+  `TestSetupShBounded` and `TestSetupPs1Bounded` check that every such command is bounded; the
+  `...Runs`, `...KillsChildless` and `...CleansUp` tests run both scripts' functions (setup.sh's
+  under sh, dash and bash, PowerShell where there is one): a command that ignores SIGTERM, with
+  or without a child, is killed within the limit and the grace, and nothing is left behind. **Under
+  `sudo`** the command runs as root: SIGTERM reaches sudo, which relays it to the command, but
+  SIGKILL cannot reach the command, so one that also ignores SIGTERM runs on, and the CI step's own
+  limit (35 minutes for the setup scripts) is the backstop. **Not exercised:** a real mirror stall,
+  and stopping a command under `sudo`, which the tests cannot reach without a password.
+- **A cache-restore error in the check job on macos-26-intel (2026-11-19).** In each of the
+  eight job logs read, the "Vulnerability scan" step logged about 17,000 lines of
+  `##[error]/usr/local/bin/gtar: ...: Cannot open: File exists` (for example
+  `x/tools@v0.52.0/.../preserve_test.go`) and a warning "Failed to restore", while the job passed.
+  The govulncheck action runs its own setup-go, with the Go cache on by default, which restored the
+  same cache again over the module cache that the job's setup-go had restored and the steps since
+  had filled, whose files are read-only; gtar refused each, and the action went on without the
+  cache, which it did not need. Harmless, but it cost a 563 MB download and 15 s of extraction a
+  run and buried any real error in the log. **Fixed in M4's tooling pull request:** the action's
+  step sets `cache: false`.
 
 ## 20. Sources
 

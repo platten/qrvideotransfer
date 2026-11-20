@@ -4,7 +4,7 @@ recordings/
 dist/
 .claude/
 # Coverage and test output.
-coverage.out
+coverage.out*
 *.coverprofile
 *.test
 # Go fuzzing corpus generated locally (committed seeds live in testdata/fuzz/).

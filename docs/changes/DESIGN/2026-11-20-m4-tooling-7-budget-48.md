@@ -1,0 +1,1 @@
+Section 17 (designer's ruling, 2026-11-19): fixedStepsBudget is 48, twice ubuntu-24.04's non-race median of 23.6 minutes rounded up, so the race pair 15 + 21 plus 48 makes 84 and the job limit stays 85; the sentence on what the limits do not cover now says a host more than about 2.2 times as slow as the median job fails at the job limit.

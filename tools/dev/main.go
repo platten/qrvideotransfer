@@ -27,6 +27,10 @@ import (
 // Pinned Go version (IMPLEMENTATION_PROMPT.md section 3). The other tools are pinned in tools.go.
 const goVersion = "go1.27.4"
 
+// longTestsVar turns the long tests on when it is exactly "1" (test -long sets it; DESIGN.md
+// section 17). Every test reads it as os.Getenv(...) == "1" or != "1" (TestLongTestGuards).
+const longTestsVar = "QRVT_LONG_TESTS"
+
 // targets are the six release targets.
 var targets = [][2]string{
 	{"linux", "amd64"}, {"linux", "arm64"},
@@ -184,13 +188,13 @@ func goTest(tags string, args ...string) []string {
 }
 
 // testCommand returns the environment and `go test` arguments of the test task.
-func testCommand(args []string, tags string) (env, goArgs []string, part string) {
+func testCommand(args []string, tags string) (env, goArgs []string, part string, patterns []string) {
 	fs := newFlags("test")
 	race := fs.Bool("race", false, "run with the race detector (enables cgo)")
 	long := fs.Bool("long", false, "include long tests (QRVT_LONG_TESTS=1)")
 	short := fs.Bool("short", false, "pass -short to go test")
 	untagged := fs.Bool("untagged", false, "test the default build, without the release build tags")
-	only := fs.String("pkg", "", "comma-separated packages to test instead of ./..., in one go test run (for example ./internal/vision,.,./internal/pipeline)")
+	only := fs.String("pkg", "", "comma-separated packages to test instead of ./..., split as ./... is: the root package, internal/pipeline and internal/video each in a go test run of its own (for example ./internal/vision,.,./internal/pipeline)")
 	p := fs.String("part", "", "others: every package but internal/video, the root package and internal/pipeline; isolated: each of those alone")
 	_ = fs.Parse(args) // ExitOnError: never returns an error
 	if *untagged {
@@ -201,7 +205,7 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 	if *race {
 		// internal/video's engine tests take minutes under the race detector on the slowest runner
 		// (macos-26-intel), past go test's default of 10 minutes per package; 18 minutes stays inside
-		// the CI step's 20.
+		// the isolated race step's 21.
 		// -count=1: a cached race pass reuses one old run's luck for the nondeterministic tests
 		// (internal/fec/conv's parallel test, internal/fec/rs's subprocess test), and setup-go
 		// restores the test cache across runs (DESIGN.md section 17).
@@ -212,7 +216,7 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 		// limit the root package, internal/fec/ldpc and internal/vision panicked, the rest of their
 		// tests unrun; the slowest, internal/vision, took 54 minutes on 16 threads (DESIGN.md
 		// section 17). 120 minutes leaves room and still fails a hang.
-		env = append(env, "QRVT_LONG_TESTS=1")
+		env = append(env, longTestsVar+"=1")
 		extra = append(extra, "-timeout=120m")
 	}
 	if *short {
@@ -223,16 +227,39 @@ func testCommand(args []string, tags string) (env, goArgs []string, part string)
 		target = strings.Split(*only, ",")
 	}
 	extra = append(append(extra, fs.Args()...), target...)
-	return env, goTest(tags, extra...), *p
+	return env, goTest(tags, extra...), *p, target
 }
 
+// testRuns returns the go test invocations of the test task: goArgs, whose tail is the package
+// patterns, split by isolatedRuns over pkgs, the packages the patterns name (go list), and then the
+// part that -part selects. -part names a half of the whole module's split, so it needs ./...
+func testRuns(goArgs, patterns, pkgs []string, part string) ([][]string, error) {
+	if part != "" && !slices.Equal(patterns, []string{"./..."}) {
+		return nil, fmt.Errorf("-part %s needs the whole module (./...), not -pkg", part)
+	}
+	return selectRuns(isolatedRuns(goArgs[:len(goArgs)-len(patterns)], pkgs), part)
+}
+
+// test runs every run of testRuns, even after one fails.
 func test(args []string) error {
 	tags, err := releaseTags()
 	if err != nil {
 		return err
 	}
-	env, goArgs, part := testCommand(args, tags)
-	return runTests(env, tags, goArgs, part)
+	env, goArgs, part, patterns := testCommand(args, tags)
+	pkgs, err := packages(tags, patterns...)
+	if err != nil {
+		return err
+	}
+	runs, err := testRuns(goArgs, patterns, pkgs, part)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, a := range runs {
+		errs = append(errs, run(env, "go", a...))
+	}
+	return errors.Join(errs...)
 }
 
 // lintRuns returns the golangci-lint invocations: the default build, then, when the release build
@@ -430,19 +457,17 @@ const isolated = module + "/internal/video"
 // section 19).
 var endToEnd = []string{module, module + "/internal/pipeline"}
 
-// isolatedRuns splits a go test command whose last argument is ./... into runs: every package but
-// the isolated and end-to-end ones (pkgs lists them all, from go list), then each end-to-end
-// package present on its own, then the isolated one alone. Any other command is run as it is.
-func isolatedRuns(args, pkgs []string) [][]string {
-	if len(args) == 0 || args[len(args)-1] != "./..." {
-		return [][]string{args}
-	}
-	head := args[:len(args)-1]
-	others := slices.Clone(head)
+// isolatedRuns splits a go test command (head, without its packages) over pkgs, import paths from
+// go list, into runs: every package but the isolated and end-to-end ones, then each end-to-end
+// package present on its own, then the isolated one alone. A group without a package gives no
+// run, so the whole module (./...) gives all four runs and a -pkg list only those it needs.
+func isolatedRuns(head, pkgs []string) [][]string {
+	others, last := slices.Clone(head), slices.Clone(head)
 	var alone [][]string
 	for _, p := range pkgs {
 		switch {
 		case p == isolated || strings.HasPrefix(p, isolated+"/"):
+			last = append(last, p)
 		case slices.Contains(endToEnd, p):
 			alone = append(alone, append(slices.Clone(head), p))
 		default:
@@ -452,8 +477,15 @@ func isolatedRuns(args, pkgs []string) [][]string {
 	slices.SortFunc(alone, func(a, b []string) int {
 		return slices.Index(endToEnd, a[len(a)-1]) - slices.Index(endToEnd, b[len(b)-1])
 	})
-	runs := append([][]string{others}, alone...)
-	return append(runs, append(slices.Clone(head), "./internal/video/..."))
+	var runs [][]string
+	if len(others) > len(head) {
+		runs = append(runs, others)
+	}
+	runs = append(runs, alone...)
+	if len(last) > len(head) {
+		runs = append(runs, last)
+	}
+	return runs
 }
 
 // selectRuns returns the part of an isolatedRuns split that -part names: "" for all, "others"
@@ -476,15 +508,12 @@ func selectRuns(runs [][]string, part string) ([][]string, error) {
 }
 
 // fixedStepsBudget is the time, in minutes, that the check job's limit allows for every step but
-// the two race steps a runner runs. With those at their limits (2 x 20) it gives the job's 70
-// minutes: the split's own arithmetic, not an allowance for slow hosts (DESIGN.md section 17).
-// Source: on macos-26-intel, the slowest runner, the non-race steps took 21 min 55 s in run
-// 43811766030 and 20 min 13 s in run 43958754789 (three packages restored from the cache). The
-// earlier budget of 20 was exceeded in both runs, and trimming vision's always-on statistics did
-// not bring the steps back under it, so the budget is 30, which leaves roughly 8 to 10 minutes of
-// margin. (Earlier, run 43797784643 took 16 min 54 s with no cache restored, and the slow host of
-// run 43774194055 23 min 09 s; such a host is a runner fault, and the limits are not sized for it.)
-const fixedStepsBudget = 30
+// the two race steps a runner runs (designer's ruling, 2026-11-19; DESIGN.md section 17): twice
+// the largest median of those steps on any runner, rounded up. In the six passing runs
+// 44474815418 to 44627182924 that was ubuntu-24.04's 23.6 minutes (macos-26-intel 21.2, 17.8 to
+// 28.0): 47.2, so 48. With the race steps at their limits (15 + 21) it makes 84, and the job's
+// limit is 85.
+const fixedStepsBudget = 48
 
 // checkJobLimits returns, from ci.yml, the check job's timeout-minutes and the timeout-minutes of
 // each of its race steps, in order.
@@ -510,35 +539,29 @@ func checkJobLimits(b []byte) (job int, race []int) {
 	return job, race
 }
 
-// packages lists the module's packages, with the given build tags.
-func packages(tags string) ([]string, error) {
+// packages lists the packages that patterns name, with the given build tags; without a pattern,
+// the whole module (module/..., from any directory), not go list's default of the current directory.
+func packages(tags string, patterns ...string) ([]string, error) {
+	if len(patterns) == 0 {
+		patterns = []string{module + "/..."}
+	}
 	args := []string{"list"}
 	if tags != "" {
 		args = append(args, "-tags="+tags)
 	}
-	out, err := output("go", append(args, "./...")...)
+	// Package names from stdout only: go list's warnings and downloads go to stderr.
+	var stderr strings.Builder
+	cmd := exec.Command("go", append(args, patterns...)...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("go list: %w: %s", err, out)
+		return nil, fmt.Errorf("go list: %w: %s", err, stderr.String())
 	}
-	return strings.Fields(out), nil
-}
-
-// runTests runs go test with goArgs as isolatedRuns splits it, all runs of the selected part (""
-// for both) even if one fails.
-func runTests(env []string, tags string, goArgs []string, part string) error {
-	pkgs, err := packages(tags)
-	if err != nil {
-		return err
+	pkgs := strings.Fields(string(out))
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("go list %s: no packages: %s", strings.Join(patterns, " "), strings.TrimSpace(stderr.String()))
 	}
-	runs, err := selectRuns(isolatedRuns(goArgs, pkgs), part)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for _, a := range runs {
-		errs = append(errs, run(env, "go", a...))
-	}
-	return errors.Join(errs...)
+	return pkgs, nil
 }
 
 // mergeProfiles writes the coverage profiles srcs, in order, to dst as one profile with the first's

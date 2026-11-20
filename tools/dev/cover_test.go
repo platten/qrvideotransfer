@@ -45,3 +45,75 @@ func TestCoverTimeout(t *testing.T) {
 		t.Errorf("coverage arguments %v", a)
 	}
 }
+
+// TestCoverRuns: cover -part runs internal/video's coverage in a CI step of its own, after every
+// other package's (designer's ruling on the CI budget, 2026-11-19).
+func TestCoverRuns(t *testing.T) {
+	pkgs := []string{module, module + "/internal/fec", module + "/internal/pipeline", module + "/internal/video"}
+	runs := isolatedRuns([]string{"test"}, pkgs)
+	for _, c := range []struct {
+		part string
+		want [][]string
+	}{
+		{"", runs},
+		{"rest", runs[:3]},
+		{"video", runs[3:]},
+	} {
+		got, err := coverRuns(runs, c.part)
+		if err != nil {
+			t.Errorf("coverRuns(%q): %v", c.part, err)
+			continue
+		}
+		sameRuns(t, "coverRuns "+c.part, got, c.want)
+	}
+	if _, err := coverRuns(runs, "others"); err == nil {
+		t.Error("an unknown part gave no error")
+	}
+	if _, err := coverRuns(runs[:3], "video"); err == nil {
+		t.Error("a split without internal/video gave a video part")
+	}
+}
+
+// TestCoverMerge: -part rest keeps its merged profile beside the final one, and -part video merges
+// it with its own, so that the gate, here and in CI's go-test-coverage step, sees every package.
+func TestCoverMerge(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, text string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	read := func(p string) string {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	profile := filepath.Join(dir, "coverage.out")
+	a, b := write("a", "mode: set\na.go:1.1,2.2 1 1\n"), write("b", "mode: set\nb.go:1.1,2.2 1 0\n")
+	if gate, err := coverMerge(profile, "video", []string{b}); err == nil || gate {
+		t.Errorf("-part video before -part rest: gate %v, err %v", gate, err)
+	}
+	if gate, err := coverMerge(profile, "rest", []string{a}); err != nil || gate {
+		t.Fatalf("-part rest: gate %v, err %v", gate, err)
+	}
+	if _, err := os.Stat(profile); err == nil {
+		t.Error("-part rest wrote the final profile")
+	}
+	v := write("v", "mode: set\nv.go:1.1,2.2 1 1\n")
+	if gate, err := coverMerge(profile, "video", []string{v}); err != nil || !gate {
+		t.Fatalf("-part video: gate %v, err %v", gate, err)
+	}
+	if got := read(profile); got != "mode: set\na.go:1.1,2.2 1 1\nv.go:1.1,2.2 1 1\n" {
+		t.Errorf("merged profile %q", got)
+	}
+	if gate, err := coverMerge(profile, "", []string{a, b}); err != nil || !gate {
+		t.Fatalf("whole run: gate %v, err %v", gate, err)
+	}
+	if got := read(profile); got != "mode: set\na.go:1.1,2.2 1 1\nb.go:1.1,2.2 1 0\n" {
+		t.Errorf("whole profile %q", got)
+	}
+}

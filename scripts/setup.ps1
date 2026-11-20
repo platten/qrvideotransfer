@@ -50,6 +50,27 @@ $WasmtimeSha256 = @{
 
 function Have($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
 
+# The limit of each winget install, in seconds: a stalled download otherwise hangs the setup without
+# a word. QRVT_PM_TIMEOUT sets it (0: none).
+$PkgTimeout = 900
+if ($env:QRVT_PM_TIMEOUT) {
+    if ($env:QRVT_PM_TIMEOUT -notmatch '^[0-9]+$') { throw "setup: QRVT_PM_TIMEOUT must be a number of seconds, not '$env:QRVT_PM_TIMEOUT'" }
+    $PkgTimeout = [int]$env:QRVT_PM_TIMEOUT
+}
+
+# Runs a program and returns its exit code. Past $Seconds (0: no limit) it stops the program and its
+# child processes and throws, saying so.
+function Invoke-Bounded([int]$Seconds, [string]$What, [string]$FilePath, [string[]]$Arguments) {
+    $p = Start-Process -FilePath $FilePath -ArgumentList $Arguments -NoNewWindow -PassThru
+    $null = $p.Handle # keeps the handle, without which ExitCode stays empty
+    if ($Seconds -gt 0 -and -not $p.WaitForExit($Seconds * 1000)) {
+        try { $p.Kill($true) } catch { $p.Kill() } # the process tree where .NET can (PowerShell 7)
+        throw "setup: $What did not finish within $Seconds s (a download may be stalled); run setup again, or set QRVT_PM_TIMEOUT to a longer limit in seconds (0: none)"
+    }
+    $p.WaitForExit()
+    return $p.ExitCode
+}
+
 $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
 switch ($osArch) {
     'X64' { $arch = 'amd64'; $warch = 'x86_64' }
@@ -136,15 +157,15 @@ $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomF
 New-Item -ItemType Directory -Path $tmp | Out-Null
 function Fetch($url, $sha, $file) {
     Write-Host "downloading $url"
-    Invoke-WebRequest -Uri $url -OutFile $file -UseBasicParsing
+    Invoke-WebRequest -Uri $url -OutFile $file -UseBasicParsing -TimeoutSec 300
     $got = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
     if ($got -ne $sha) { throw "setup: checksum mismatch for ${url}: got $got, want $sha" }
 }
 
 try {
     foreach ($id in $winget) {
-        & winget install --id $id --exact --silent --accept-package-agreements --accept-source-agreements
-        if ($LASTEXITCODE -ne 0) { throw "setup: winget install $id failed" }
+        $code = Invoke-Bounded $PkgTimeout "winget install $id" (Get-Command winget).Source @('install', '--id', $id, '--exact', '--silent', '--accept-package-agreements', '--accept-source-agreements')
+        if ($code -ne 0) { throw "setup: winget install $id failed (exit code $code)" }
     }
     if ($goInstall) {
         $zip = Join-Path $tmp 'go.zip'
