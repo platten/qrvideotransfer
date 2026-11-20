@@ -39,10 +39,14 @@ type Layout struct {
 // most 2047, GridY at least 30, and 15 GridX > GridY so that the finder centres are distinct
 // (Dx > 0).
 func CheckGrid(gridX, gridY int) error {
-	if gridX < 1 || gridX > MaxGrid || gridY < MinGridY || gridY > MaxGrid || 15*gridX <= gridY {
+	if !gridOK(gridX, gridY) {
 		return fmt.Errorf("frame: grid %d x %d outside the limits", gridX, gridY)
 	}
 	return nil
+}
+
+func gridOK(gridX, gridY int) bool {
+	return gridX >= 1 && gridX <= MaxGrid && gridY >= MinGridY && gridY <= MaxGrid && 15*gridX > gridY
 }
 
 // NewLayout computes the layout of a gridX x gridY grid. It rejects grids outside the limits of

@@ -35,7 +35,7 @@ var innerShapes = [...][2]int{{1620, 192}, {1458, 128}, {1296, 128}, {972, 64}}
 
 // LookupModulation returns the registry row of a modulation id, or an error naming an unknown id.
 func LookupModulation(id uint8) (ModulationInfo, error) {
-	if id < 1 || int(id) > len(modulations) {
+	if !knownModulation(id) {
 		return ModulationInfo{}, fmt.Errorf("frame: unknown modulation %d", id)
 	}
 	return modulations[id-1], nil
@@ -43,10 +43,14 @@ func LookupModulation(id uint8) (ModulationInfo, error) {
 
 // LookupInner returns the registry row of an inner-code id, or an error naming an unknown id.
 func LookupInner(id uint8) (InnerInfo, error) {
-	if id < 1 || int(id) > len(innerShapes) {
+	if !knownInner(id) {
 		return InnerInfo{}, fmt.Errorf("frame: unknown inner code %d", id)
 	}
 	k, s := innerShapes[id-1][0], innerShapes[id-1][1]
 	info := 8*s + 32
 	return InnerInfo{ID: id, MotherK: k, ShardSize: s, InfoBits: info, Shortened: k - info, Sent: LDPCN - (k - info)}, nil
 }
+
+func knownModulation(id uint8) bool { return id >= 1 && int(id) <= len(modulations) }
+
+func knownInner(id uint8) bool { return id >= 1 && int(id) <= len(innerShapes) }
