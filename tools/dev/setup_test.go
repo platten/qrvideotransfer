@@ -113,14 +113,33 @@ func alive(pid int, wait time.Duration) bool {
 	}
 }
 
+// markIn returns a PATH= entry that puts first a wrapper mktemp making bounded's marker folder in
+// marks: the real mktemp with an explicit template there. Without a template, macOS mktemp -d
+// ignores TMPDIR (it takes the folder from confstr(_CS_DARWIN_USER_TEMP_DIR)), so only a template
+// places the marker where a test can see it on every system.
+func markIn(t *testing.T, marks string) string {
+	t.Helper()
+	real, err := exec.LookPath("mktemp")
+	if err != nil {
+		t.Skipf("no mktemp: %v", err)
+	}
+	wrap := t.TempDir()
+	script := "#!/bin/sh\nexec '" + real + "' -d \"$MARKS/qrvt.XXXXXXXXXX\"\n"
+	if err := os.WriteFile(filepath.Join(wrap, "mktemp"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return "PATH=" + wrap + string(os.PathListSeparator) + os.Getenv("PATH")
+}
+
 // startBounded starts a shell running bounded over a command that writes its process ID to a file,
-// and returns the running shell, the command's process ID and the shell's TMPDIR.
+// and returns the running shell, the command's process ID and the folder that holds bounded's
+// marker (markIn), also the shell's TMPDIR.
 func startBounded(t *testing.T, shell, fn, call string) (*exec.Cmd, *bytes.Buffer, int, string) {
 	t.Helper()
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	marks := t.TempDir()
 	cmd := exec.Command(shell, "-c", "set -eu\n"+fn+call)
-	cmd.Env = append(os.Environ(), "PIDFILE="+pidFile, "TMPDIR="+marks)
+	cmd.Env = append(os.Environ(), "PIDFILE="+pidFile, "TMPDIR="+marks, "MARKS="+marks, markIn(t, marks))
 	var errOut bytes.Buffer
 	cmd.Stderr = &errOut
 	if err := cmd.Start(); err != nil {
@@ -227,6 +246,12 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 			// set -e (review of 193dbb8: a pkill or kill with nothing to signal).
 			for i := 0; i < 10; i++ {
 				cmd, _, pid, marks := startBounded(t, shell, fn, "bounded "+limit+` sh -c 'echo $$ > "$PIDFILE"; exec sleep 60'`)
+				// A positive control: the marker folder is in marks (markIn's wrapper) while the
+				// command runs, so that the count of entries left below means something on every
+				// system; before the wrapper, macOS put it elsewhere and the count passed vacuously.
+				if made, _ := os.ReadDir(marks); len(made) != 1 || !made[0].IsDir() || !strings.HasPrefix(made[0].Name(), "qrvt.") {
+					t.Errorf("%s: interrupt %d: %v in the marker folder's place while the command runs, want one qrvt.* folder", shell, i, made)
+				}
 				_ = cmd.Process.Signal(os.Interrupt)
 				err := cmd.Wait()
 				var exit *exec.ExitError
@@ -239,7 +264,7 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 					_ = p.Kill()
 				}
 				if left, _ := os.ReadDir(marks); len(left) > 0 {
-					t.Errorf("%s: interrupt %d: %d entries left in TMPDIR", shell, i, len(left))
+					t.Errorf("%s: interrupt %d: %d entries left in the marker folder's place", shell, i, len(left))
 				}
 			}
 			time.Sleep(300 * time.Millisecond)
@@ -251,12 +276,20 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 	}
 }
 
-// TestSetupShBoundedMktempFails: when mktemp cannot make the marker folder (TMPDIR missing),
-// bounded fails with status 1 without running the command, also where set -e is off because it was
-// called on the left of || (review of PR #55).
+// TestSetupShBoundedMktempFails: when mktemp cannot make the marker folder, bounded fails with
+// status 1 without running the command, also where set -e is off because it was called on the
+// left of || (review of PR #55). The failure comes from a stub mktemp, first on PATH, that exits 1:
+// macOS mktemp -d without a template does not use TMPDIR (it takes confstr's per-user folder), so a
+// missing TMPDIR made only GNU's fail (PR #56's first CI run).
 func TestSetupShBoundedMktempFails(t *testing.T) {
 	fn := scriptFunc(t, readScript(t, "setup.sh"), "bounded() {")
-	for _, shell := range boundedShells(t) {
+	shells := boundedShells(t)
+	stub := t.TempDir() // removed once every subtest is done
+	if err := os.WriteFile(filepath.Join(stub, "mktemp"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := "PATH=" + stub + string(os.PathListSeparator) + os.Getenv("PATH")
+	for _, shell := range shells {
 		t.Run(shell, func(t *testing.T) {
 			t.Parallel()
 			for _, c := range []struct {
@@ -269,7 +302,7 @@ func TestSetupShBoundedMktempFails(t *testing.T) {
 				dir := t.TempDir()
 				out := filepath.Join(dir, "out")
 				cmd := exec.Command(shell, "-c", "set -eu\n"+fn+c.call)
-				cmd.Env = append(os.Environ(), "OUT="+out, "TMPDIR="+filepath.Join(dir, "missing"))
+				cmd.Env = append(os.Environ(), "OUT="+out, path)
 				stdout, err := cmd.Output()
 				if string(stdout) != c.wantOut || (err != nil) != c.wantExit {
 					t.Errorf("%s: %s: %v, stdout %q; want %q, failure %v", shell, c.call, err, stdout, c.wantOut, c.wantExit)
@@ -280,6 +313,28 @@ func TestSetupShBoundedMktempFails(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMktempHonoursTMPDIR only logs, and never fails: whether plain mktemp -d, without a template,
+// as setup.sh's bounded runs it, makes its folder in TMPDIR on this system (macOS is expected not
+// to; DESIGN.md section 19). CI's macOS logs answer it.
+func TestMktempHonoursTMPDIR(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("setup.sh is for Linux and macOS")
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("mktemp", "-d")
+	cmd.Env = append(os.Environ(), "TMPDIR="+dir)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Logf("%s: mktemp -d failed: %v", runtime.GOOS, err)
+		return
+	}
+	made := strings.TrimSpace(string(out))
+	defer func() { _ = os.Remove(made) }()
+	parent, _ := filepath.EvalSymlinks(filepath.Dir(made)) // /var is /private/var on macOS
+	want, _ := filepath.EvalSymlinks(dir)
+	t.Logf("%s: mktemp -d with TMPDIR=%s made %s: TMPDIR honoured: %v", runtime.GOOS, dir, made, parent == want)
 }
 
 // TestSetupPs1Bounded: setup.ps1 installs through winget only by way of Invoke-Bounded, and gives

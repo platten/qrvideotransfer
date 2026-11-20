@@ -2694,7 +2694,20 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   nothing, and BSD and macOS `mktemp -u` create the file and then unlink it (Apple shell_cmds and
   FreeBSD `mktemp.c`), so a Ctrl-C there would leave an empty file; and macOS `/bin/sh`, bash
   3.2, on whose signal behaviour the design depended in four places, could not be tested. It is
-  not to be rebuilt without a test on macOS.
+  not to be rebuilt without a test on macOS. **setup.sh on macOS is verified only by CI** (PR #56's
+  first run): macOS `mktemp -d` without a template does not use TMPDIR, taking the per-user folder
+  of `confstr(_CS_DARWIN_USER_TEMP_DIR)` and reading TMPDIR only if that fails (Apple shell_cmds
+  `mktemp.c`), so `TestSetupShBoundedMktempFails`, which failed it through a missing TMPDIR, failed
+  on both macOS runners, and `TestSetupShBoundedCleansUp`'s count of markers left behind had passed
+  there vacuously since PR #55. The tests now put a wrapper `mktemp` first on PATH that runs the
+  real one with a template in the test's folder (and, for the failure, a stub that exits 1),
+  `TestSetupShBoundedCleansUp` asserts that the marker is there while the command runs, and
+  `TestMktempHonoursTMPDIR` logs, without failing, whether plain `mktemp -d` honours TMPDIR on
+  each runner. This is the second BSD/GNU `mktemp` difference this pull request found (the first,
+  `mktemp -u`, above), so a change to the shell scripts gets a macOS CI run before it is called
+  done. Checked for other GNU-only reliance in the setup tests: `pkill -f`/`-P`/`-KILL`, `ps -eo
+  args`, `sleep` with whole seconds, `sh -n`, `trap`, `kill -0` and `$$` are all POSIX or
+  BSD-compatible.
 - **A cache-restore error in the check job on macos-26-intel (2026-11-19).** In each of the
   eight job logs read, the "Vulnerability scan" step logged about 17,000 lines of
   `##[error]/usr/local/bin/gtar: ...: Cannot open: File exists` (for example
