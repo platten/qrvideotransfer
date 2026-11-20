@@ -127,8 +127,8 @@ func TestShortDiagnostics(t *testing.T) {
 }
 
 // TestLockedRateRule: the decoder reports a camera locked to the display rate when, for the frames
-// seen in more than one pass, the best clean fraction of a pass stays within lockTolerance of the
-// first pass's in at least three quarters of the comparisons, of which there are at least
+// seen in more than one pass, the best clean fraction of a later pass differs from the first
+// pass's by at most lockTolerance on average over the comparisons, of which there are at least
 // lockMinPairs, and the first passes' mean is under lockMixed: the same part of every capture is
 // mixed pass after pass. Captures are stubbed (processCapture); the filmed case is
 // TestLockedRateGuidance.
@@ -156,6 +156,9 @@ func TestLockedRateRule(t *testing.T) {
 	}{
 		{"locked", passes(3, 1, func(p, fr, _ int) int { return 350 + 10*fr + 7*(p%2) }), true},
 		{"locked, two passes", passes(2, 1, func(_, fr, _ int) int { return 600 + 10*fr }), true},
+		// Each capture's clean fraction is noisy, by up to 0.1 from pass to pass on a 212 x 120
+		// grid (TestLockedRateSafety), but the noise averages out over the frames compared.
+		{"locked, noisy", passes(3, 1, func(p, fr, _ int) int { return 300 + 80*((p+fr)%2) }), true},
 		{"one pass", passes(1, 1, func(int, int, int) int { return 350 }), false},
 		{"clean fraction moves", passes(3, 1, func(p, _, _ int) int { return 300 + 150*p }), false},
 		{"clean", passes(3, 1, func(int, int, int) int { return 960 }), false},
