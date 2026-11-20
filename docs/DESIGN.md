@@ -1345,8 +1345,43 @@ qrvt profiles | version | completion | man
   limit, an unsupported version); 130 stopped by the user.
 - **Help.** Each flag has a long description, default, range and example. `--help`, the man page and the
   website are generated from one definition (cobra with fang), so they cannot drift.
-- **Failure guidance.** A decode that falls short says what is missing and what to do, for example
-  "2.1% short: record one more loop and pass both files".
+- **Failure guidance.** A decode that falls short says what is missing, with its numbers, in one
+  sentence and what to do in another, for example "2.1% short: 21 shards missing in 1 of 1 blocks
+  (96 of 96 code frames seen). Record one more loop and pass both files to qrvt decode." The
+  decoder counts what the captures showed (`NotEnoughDataError`: captures, captures whose finders
+  were found and header read (`Located`), headers read, captures of another transfer, code frames
+  seen and total, whether the stream descriptor was read) and the guidance follows the first class
+  that fits (M4, `internal/cli`): no code found in any capture (film the whole code, in focus and
+  filling most of the picture); finders but no header read (film closer and steadier, and check
+  that the video was made by qrvt); at least 3 captures of another transfer (decode each
+  transfer's recordings separately); headers but no stream descriptor, and blocks short (record
+  one more loop). The guidance is the JSON error line's `guidance`; the events schema is unchanged.
+  **Agreed refusal.** When no header was read, each capture reports the strongest refusal among the
+  headers its detector tried (`vision.SlotReader.ReadReason`: a `Validate` failure, which passed
+  the CRC and names a value, over a CRC failure, over no soft bits or no contrast). A refusal
+  counts only when at least 3 captures, and at least half of those whose finders were found, give
+  the same reason with the same value: noise can pass the CRC-16 by chance, then fail `Validate`
+  with a random value, but not with the same value in most captures. An agreed unsupported format
+  version, modulation or inner code is an `UnsupportedVersionError` naming the value (exit 5,
+  FORMAT.md section 14), another agreed refusal is named in the guidance. A crafted video can
+  therefore turn a decode's "not enough data" (exit 3) into a refusal (exit 5), which writes
+  nothing either. **Locked rate.** When the camera is locked to the display rate, every pass
+  repeats the same frame mixing (section 15), so the shortfall's action becomes a camera at least
+  twice the display rate (section 11, condition 1) instead of one more loop. The decoder tells it
+  from the captures of the transfer decoded: a pass over a code frame is a run of consecutive
+  captures whose first header names that frame, and its value is the best clean fraction of the
+  run. For each frame seen in more than one pass (every frame of a loop up to 4,096 frames, else
+  every ceil(F / 4,096)th), each later pass is compared with the first; the camera is locked when
+  there are at least 4 comparisons, the later passes' values differ from the first's by at most
+  0.05 on average (signed, so that the noise of single captures cancels), and the first passes'
+  mean is under 0.9 (part of every capture is mixed; above it, more passes still add clean data).
+  In locked simulated recordings one capture's clean fraction varied from pass to pass by up to
+  0.03 on a 120 x 120 grid and 0.1 on a 212 x 120 grid (2026-11-20); a rule per frame missed 3 of
+  the long sweep's first 15 short cases. One pass cannot tell, and gets the generic action. A camera that drifts
+  slowly against the display (29.97 against 30 fps on a short loop) moves the mixing too little
+  over a few passes and reads as locked: the advice, condition 1, holds for it too. A camera at
+  twice the display rate or more shows each frame clean in one capture of its pass, so its best is
+  near 1.
 - **calibrate.** `make` writes a test video stepping through modes, densities and display rates. `read`
   measures each step in a recording and prints a table with the recommended `encode` command, plus
   warnings for clipping, dropped frames, moire and exposure.
@@ -1530,6 +1565,20 @@ inner code, grid); `HeaderError`'s text names the refused value (FORMAT.md secti
 `DecodeHeaderReason` builds no error value, so it allocates no more than `DecodeHeader` in the
 detector's lens loop.
 
+```go
+// internal/vision (M4, failure diagnostics)
+// Read, with the strongest refusal met when no header was read
+func (SlotReader) ReadReason(f *video.Frame, q Quad) ([]frame.Header, frame.HeaderError)
+// what the last Detect saw: a quad's header read, and its strongest refusal
+func (d *FinderDetector) Refusal() (finders bool, reject frame.HeaderError)
+```
+
+`Read` is `ReadReason` with the refusal dropped. The strongest refusal is a `Validate` failure,
+then a CRC failure, then `HeaderLength` for no soft bits (no contrast, or a quad that cannot be
+sampled); the detector keeps the strongest among the quads whose header it read, and reports it
+only when it located nothing. Recording it allocates nothing (`TestRefusalAllocs`); `Read`, the
+lens loop and `Detect` allocated 20, 576 and 6,308 times on the test frames before and after.
+
 What the named types carry:
 
 | Type | Package | Carries |
@@ -1692,7 +1741,7 @@ How the parameters are read, and the values every preset shares:
 | Moire fringes, flicker bands | Decoding succeeds with stripe cancellation on at an amplitude where it fails with it off. Met in M2: on `handheld`, Gray4 with `normal`, at fringe amplitude 24 every codeword decodes with it on and none with it off, for three fringe periods and directions |
 | Frame mixing, any boundary direction | No soft bit is ever credited to the wrong code frame; every credited cell's true weight is at least 0.80; per preset, the share of truly clean cells (true weight at least 0.92) that are credited is at least its measured value less 0.02 and never under 0.96 (M2, CI and long version: `tripod` 0.9843 and 0.9863, floors 0.964 and 0.966; `handheld` 0.9930 and 0.9904, floors 0.973 and 0.970); as a regression check, the phase weight error is at most 0.09 at cells interpolated between four observed anchors and 0.16 beyond the outermost anchors and beside the finders. CI runs `handheld` with the panel scanning left to right at roll 60, which reaches 0.082 inner error; the smallest credited true weight, 0.802, and the pocket error closest to its bound, 0.149 against 0.16 (the tightest margin), occur only in the long run. The cost of this accepted phase accuracy is the clean-cell yield: of the cells that truly show one frame (weight at least 0.92), 0.99 are credited on `handheld` (0.9930 CI, 0.9904 long) and 0.986 on `tripod` (0.9843 CI, 0.9863 long); the designer accepted it on 2026-11-15. These replace "phase weight error at most 0.05" by the owner's decision of 2026-11-15, after five estimators were measured on `tripod` and `handheld` (largest error, inner / pockets): weights divided by the anchor's white with bilinear interpolation and nearest-neighbour fill, 0.13 / 0.44 on a 212 x 120 grid; the same with linear prediction of missing anchors, 0.07 / 0.15 on the 480 x 270 grid with 4K cameras; bicubic Catmull-Rom interpolation, no gain and worse at a sharp ramp's kinks; weights divided by the quadrants' own total, as built, 0.082 / 0.149; a boundary model fitted to all anchors at once (a quadratic surface of display time and the blur of exposure and panel response), 0.01-0.04 where the anchors see the blend but 0.067 / 0.15 where it lies beyond them, not adopted. None credited a cell to the wrong frame. The residual error comes from blends the anchors cannot locate (opposite scan directions, blends beyond the outermost anchors); per-cell estimation from the cells' own observations is not built, and the question is revisited in M5 only if the S2 or G1 recordings show that the cells it discards matter. Through the geometry pipeline (Gray4, 480 x 270 grid, 4K cameras; the long version all directions at rolls 0, 30 and 60, 191 captures, every one found and fitted): no wrong credit; the smallest credited true weight 0.8668 (CI) and 0.8018 (long); yield 0.9730 and 0.9864 on `tripod`, 0.9975 and 0.9894 on `handheld`, the CI `tripod` figure 0.009 above its floor of 0.964 (0.013 above 0.96); the phase weight error up to 0.058 inner and 0.139 in the pockets in CI, and 0.1105 and 0.1724 in the long version, set by `handheld` scanning left to right at roll 60, where the rectifier's anchors are less exact than the true positions. The pipeline's regression bounds are therefore 0.12 inner and 0.19 in the pockets, beside the 0.09 and 0.16 at true positions; the owner's floors (no wrong credit, credited weight at least 0.80, yield at least 0.96) are unchanged. The weight floor is met with almost no margin: 0.8018 against 0.80 in the long version, on one pose, both at true positions and through the pipeline. It passes, but not comfortably, and S2 checks it on real captures |
 | Camera at twice the display rate, any phase offset | One pass succeeds for every offset. Met (2026-11-19): 96 of 96 cases decode from one pass (2F captures): black and white, four greys and colour, `normal` and `robust`, on `tripod` (4 ms exposure, 8 ms readout) and `handheld` (8 and 8), at 8 offsets spread over one display period; a 480p code at 30 fps filmed at 60 by a 1600 x 900 camera. **Long only:** the 96 cases (`TestCameraTwiceDisplay`). **Always on:** four greys `normal` on `tripod` at offset 1/8 on the smallest setting, a 480 x 480 code (120 x 120 grid, 500 bytes, F = 4) filmed at 908 x 908 (6.8 camera pixels per cell), where every offset decoded when measured |
-| Camera equal to the display rate | Locked equal rates are not a supported or recommended setting: section 11's condition 1 asks for a camera at least twice the display rate, and `calibrate` (M4) recommends one. With the camera locked to the display (30 against 30 fps, 4 or 8 ms exposure, 8 ms readout), some phase offsets never decode, because every pass repeats the same frame mixing. **Always on:** a locked recording that does not decode (four greys `normal`, 500 bytes, offset 1/8, one pass) ends, through the public `Decode`, in the typed `NotEnoughDataError` and writes nothing (`TestLockedRateNotEnoughData`); the guidance sentence the command line adds to that error is asserted in `internal/cli` (`TestGuidance`, `TestDecodeFailureGuidance`). **Long only:** every locked case below must give the files or the not-enough-data error, never a wrong result (`internal/pipeline`'s `TestLockedRateSafety`: 69 of 96 decoded and 27 did not, as measured), and the drift assertion below. Measured (2026-11-19, simulated: a 480p code at 30 fps, `tripod` timing, a 1600 x 900 camera, 8 offsets over one display period, up to 4 passes; black and white, four greys and colour alike): `normal` decodes at 5 of 8 offsets at both exposures, `robust` at 7 of 8 at 4 ms and 6 of 8 at 8 ms, each in one pass except `normal` at 8 ms and offset 7/8 in black and white and four greys (two); at the failing offsets the clean fraction stays at 0.23 to 0.73 pass after pass and the codewords decoded reach at most 0.88 of those needed after 4 passes (0.73 of all codewords: colour `normal`, 8 ms, offset 2/8, 227 of 311). A camera that drifts against the display, 29.97 against 30 fps, carries the mixed band across the code: `robust` then decodes at every offset within 8 passes (the slowest 7, colour at 8 ms; 4 in black and white, 6 in four greys, with F = 24, so a longer loop drifts further per pass), asserted as best effort, long only (`TestDriftBestEffort`: every modulation, both exposures and offsets; where the locked rate fails, the drift needs 30 to 40 captures, too many for an always-on case). `normal` decodes within 4 passes at 5 or 6 of 8 offsets, totals equal to or better than locked: the drift gains offset 2/8 except colour at 4 ms, but at 8 ms black and white and four greys `normal` lose offset 7/8, which the locked rate decoded in 2 passes (measured). With 1 ms RMS capture jitter at locked rates instead, `normal` decodes within 4 passes at 5 of 8 offsets at 4 ms and 6 of 8 at 8 ms, and `robust` within 8 passes at every offset at 4 ms but at 7 of 8 (black and white, colour) and 6 of 8 (four greys) at 8 ms; recorded, not asserted. |
+| Camera equal to the display rate | Locked equal rates are not a supported or recommended setting: section 11's condition 1 asks for a camera at least twice the display rate, and `calibrate` (M4) recommends one. With the camera locked to the display (30 against 30 fps, 4 or 8 ms exposure, 8 ms readout), some phase offsets never decode, because every pass repeats the same frame mixing. **Always on:** a locked recording that does not decode (four greys `normal`, 500 bytes, offset 1/8, one pass) ends, through the public `Decode`, in the typed `NotEnoughDataError` and writes nothing (`TestLockedRateNotEnoughData`); the guidance sentence the command line adds to that error is asserted in `internal/cli` (`TestGuidance`, `TestDecodeFailureGuidance`, `TestFailureClasses`). The locked rate is recognised (section 13, failure guidance), so that the guidance asks for a faster camera: a 480 x 480 four greys `normal` code filmed locked at 908 x 908, offset 1/8, for 2 passes ends short with `ShortError.LockedRate` set (`internal/pipeline`'s `TestLockedRateGuidance`; the rule's cases, one pass, a moving clean fraction, a clean one and a camera at twice the rate, with stubbed captures in `TestLockedRateRule`). **Long only:** every locked case below must give the files or the not-enough-data error, never a wrong result, and every one that falls short must report the locked rate (`internal/pipeline`'s `TestLockedRateSafety`: 69 of 96 decoded and 27 did not, as measured; all 27 reported the locked rate, 2026-11-20), and the drift assertion below. Measured (2026-11-19, simulated: a 480p code at 30 fps, `tripod` timing, a 1600 x 900 camera, 8 offsets over one display period, up to 4 passes; black and white, four greys and colour alike): `normal` decodes at 5 of 8 offsets at both exposures, `robust` at 7 of 8 at 4 ms and 6 of 8 at 8 ms, each in one pass except `normal` at 8 ms and offset 7/8 in black and white and four greys (two); at the failing offsets the clean fraction stays at 0.23 to 0.73 pass after pass and the codewords decoded reach at most 0.88 of those needed after 4 passes (0.73 of all codewords: colour `normal`, 8 ms, offset 2/8, 227 of 311). A camera that drifts against the display, 29.97 against 30 fps, carries the mixed band across the code: `robust` then decodes at every offset within 8 passes (the slowest 7, colour at 8 ms; 4 in black and white, 6 in four greys, with F = 24, so a longer loop drifts further per pass), asserted as best effort, long only (`TestDriftBestEffort`: every modulation, both exposures and offsets; where the locked rate fails, the drift needs 30 to 40 captures, too many for an always-on case). `normal` decodes within 4 passes at 5 or 6 of 8 offsets, totals equal to or better than locked: the drift gains offset 2/8 except colour at 4 ms, but at 8 ms black and white and four greys `normal` lose offset 7/8, which the locked rate decoded in 2 passes (measured). With 1 ms RMS capture jitter at locked rates instead, `normal` decodes within 4 passes at 5 of 8 offsets at 4 ms and 6 of 8 at 8 ms, and `robust` within 8 passes at every offset at 4 ms but at 7 of 8 (black and white, colour) and 6 of 8 (four greys) at 8 ms; recorded, not asserted. |
 | Dropped frames, bursts, mid-loop start | With parity 20, whose budget is 16.7% of frames: succeeds at 14.7% random loss; at 18.7% reports which blocks are short and writes nothing |
 | Glare patches, overlays | `robust` succeeds with a patch over 20% of the code; `normal` with a patch over 5% at settings with a margin over section 11's condition 2. Measured (2026-11-19; 480p at 30 fps filmed at 60 for one pass, 4 patch positions): `robust` at 20% decodes at every position in black and white, four greys and colour on `tripod` and `handheld` at 1600 x 900; `normal` at 5% decodes at every position for every modulation on `tripod` (6.8 camera pixels per cell) and for black and white and colour on `handheld` (6.0), but four greys `normal` on `handheld` at 6.0, condition 2's minimum, where it decodes without the patch, is short, where it fails, by 4 to 54 of the 259 shards needed (0.79 to 0.98 of them) over six transfers; at 6.0 it decoded at 0 of 4 patch positions in four of them and at 1 of 4 in two, since the transfer's bytes then varied from run to run with the files' modification times, which the manifest records (the tests now fix them: that transfer decodes at position 2 and is short by 16, 24 and 28 at the others); at 6.4 it decodes at all four, so it is asserted there. **Always on:** four greys `normal` at 6.4 on `handheld` with a 5% patch, one patch position, 500 bytes, on the measured 212 x 120 grid (`TestGlareDecode`). **Long only:** every case above at 4 positions, `robust` at 20% included. These margins were measured on the 212 x 120 grid and do not carry over to the smallest grids: on a 120 x 120 grid (a 480 x 480 code, 500 bytes) four greys `normal` with a 5% patch at 6.4 (960 x 960) and `robust` with 20% (900 x 900) each decoded at 3 of 4 patch positions (measured, not asserted). The patch is the same share of the code there, but the cells the glare rule gives up around it are a fixed number of cells (section 10, step 5), a larger share of a small code: a likely cause, not traced (section 19). M2 measured the cells under a patch over 5% of the code that keep soft bits (section 10, step 5): at true positions 0% to 4.6%, bounded at 0.05; through the geometry pipeline, where the sampler's clipping flag and the equaliser's rule act together, 0.037 to 0.038 on `tripod` and 0.012 to 0.013 on `handheld`, bounded at 0.06 |
 | Two partial recordings | Each alone fails; together they succeed |
@@ -1900,6 +1949,10 @@ section 13).
   the rise came from #38's three-candidate path (the hostile Detect from 260 to 295 ms, the real
   one unchanged at 23 ms). **Residual for the security pass (M7):** the 16-times bound has about 24%
   of quiet headroom (16 against 12.9); any detector change that adds hostile cost re-measures it.
+  Re-measured for M4's failure diagnostics, which read the refusal reason in the detector
+  (2026-11-20, pinned to 4 CPUs, before and after): the noise case 8.89 and 8.92 times (bound
+  16), `TestDetectHostileGrid4K` 3.46 and 3.36 (6), `TestDetectThreeHostile4K` 3.20 and 3.16 (6),
+  `TestDetectHostileGrid` 0.38 and 0.37 (2).
   A step of the `check` job ("Hostile-cost ratios") runs the four tests verbosely and keeps
   their ratio lines, so that every runner's figures, a near miss included, can be read from the job
   log on a pass too. Since the vision test trim (2026-11-18) that step, without coverage, is where
@@ -2089,7 +2142,7 @@ writing each package format by hand.
 | M1 | Building blocks in parallel, including keys and signing |
 | M2 | Vision, including header reading and stripe cancellation |
 | M3 | Pipeline, public API, merging of recordings, hostile-input suite; check that the digital loopback still passes with margin when the glare rule discards 1.46-2.80% of black-and-white cells of a perfect frame, mean about 2.1% (section 10, step 4). `tools/dev testvideos` and the committed "as filmed" clips moved to M5, and the fuzz corpora to M7 (designer's ruling, 2026-11-19) |
-| M4 | `calibrate`, `inspect`, profiles |
+| M4 | `calibrate`, `inspect`, profiles, failure guidance; seven sequential pull requests, listed in IMPLEMENTATION_PROMPT.md (M4) |
 | G1 | The owner films the calibration video and sample transfers, including one tripod take |
 | M5 | Real-device tuning of every mode, of merging and of stripe cancellation; 10-bit recordings; inferring the frame index of a capture whose header copies all fail, from the last index and the phase markers with the quad carried by tracking (deferred from M2, section 7 rule 1); mirrored recordings (FORMAT.md section 4.1); `tools/dev testvideos` and the committed synthetic "as filmed" clips (section 15, test videos), moved from M3 because M5 is where they are used, their size budget (the 2 MB class) ruled then |
 | M6 | 1 GB scale, resuming with `--state-dir`; experimental `--hdr` |
@@ -2536,7 +2589,11 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   headers:** `frame.DecodeHeader` refuses a header without saying why (a CRC or a `Validate`
   failure); the reason is a candidate for M4's `inspect`, its first consumer (designer's ruling).
   **Done in M4's second pull request:** `frame.DecodeHeaderReason` returns the reason (section 14);
-  its consumers come in M4's later pull requests.
+  its consumers come in M4's later pull requests. **The decoder's consumer, done in M4's third
+  pull request:** a capture whose header is refused reports the strongest reason
+  (`vision.SlotReader.ReadReason`, `FinderDetector.Refusal`), and a refusal agreed by the captures
+  reaches the failure guidance, an unsupported version as `UnsupportedVersionError` (section 13);
+  `inspect` (M4's fourth) remains.
   The real-device check took 210-500 s per recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
   1, 255 s); a round-trip matrix row takes 3-14 s alone.
 - **Main red at df8e9b5: `TestWatchdogUnderLoad` (2026-11-18).** Main's push run 44400775718 failed
@@ -2703,7 +2760,9 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   real one with a template in the test's folder (and, for the failure, a stub that exits 1),
   `TestSetupShBoundedCleansUp` asserts that the marker is there while the command runs, and
   `TestMktempHonoursTMPDIR` logs, without failing, whether plain `mktemp -d` honours TMPDIR on
-  each runner. This is the second BSD/GNU `mktemp` difference this pull request found (the first,
+  each runner. Its answer is not in CI's log: CI runs `go test` without `-v`, and a passing
+  test's `t.Log` output is not printed, so macOS's behaviour stays as read in Apple's source, not
+  observed (no `-v` was added to CI for it). This is the second BSD/GNU `mktemp` difference this pull request found (the first,
   `mktemp -u`, above), so a change to the shell scripts gets a macOS CI run before it is called
   done. Checked for other GNU-only reliance in the setup tests: `pkill -f`/`-P`/`-KILL`, `ps -eo
   args`, `sleep` with whole seconds, `sh -n`, `trap`, `kill -0` and `$$` are all POSIX or
