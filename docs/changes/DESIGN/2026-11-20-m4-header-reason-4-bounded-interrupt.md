@@ -1,0 +1,1 @@
+Section 19, setup.sh (M4's second pull request): bounded names its marker with mktemp -u and makes it with mkdir -m 700, returning 1 if either fails; an INT-only flag trap covers the start and the cleanup, so an early Ctrl-C leaves nothing behind; the residual, a Ctrl-C lost during the watchdog's fork, is recorded with figures.

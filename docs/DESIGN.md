@@ -1851,7 +1851,7 @@ section 13).
 
   | Step | Slowest median (runner) | Max, any runner | 2 x median | 1.3 x max | Limit |
   | --- | --- | --- | --- | --- | --- |
-  | Coverage, other packages | 8.53 (macos-26-intel) | 13.23 | 17.06 | 17.20 | 18 |
+  | Coverage, other packages | 8.53 or less (macos-26-intel) | 16.68 | 17.06 or less | 21.68 | 22 |
   | Coverage gate, `internal/video` | 3.49 (macos-26-intel) | 4.25 | 6.98 | 5.52 | 7 |
   | Tests without the release tags | 8.13 (ubuntu-24.04, its only runner) | 8.43 | 16.27 | 10.96 | 17 |
   | HEVC fast path | 3.62 (macos-26-intel) | 4.48 | 7.25 | 5.83 | 8 |
@@ -1863,6 +1863,15 @@ section 13).
   | Hostile-cost ratios | 0.63 (macos-26-intel) | 0.78 | 1.27 | 1.02 | 5 |
   | Install the linter, import rule | under 0.1 | 0.63 | | | 5 |
 
+  The coverage step of the other packages has a sample of eight runs (M4's second pull request):
+  the six above and two that ran it as a step of its own, PR #55's run 44665974408 (attempt 2)
+  and main's run 44676072194 at fe7731c. On macos-26-intel they took 16.68 and 7.17 minutes
+  (16.7 minutes, 03:53:23 to 04:10:04, in the first: a new largest passing time, against 13.23),
+  so 1.3 times the largest gives 21.68 and the limit rose from 18 to 22, on Unix and Windows. With
+  one added time below the six runs' median and one above, the eight runs' median is at most the
+  six runs' 8.53. **When a new largest passing time would raise a step's limit a second time, the
+  step is trimmed or split instead, and the matter goes to the designer** (designer's ruling,
+  2026-11-20); this step's limit has now been raised once.
   The lint and static-build figures come from runs whose build and module caches setup-go
   restored warm; a cold cache, as after a `go.sum` change such as a Dependabot update, is
   unmeasured on the runners (locally, pinned to 4 cores, a cold `build -all` took 61 s and a cold
@@ -2645,6 +2654,11 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   (4 CPUs, `taskset -c 0-3`, GOMAXPROCS 4): `TestReferenceVideo` 1.2 s, almost all of it the
   embedded engine's probe and decode of the reference video (0.32 and 0.64 s), `TestFrameVectors`
   0.14 s and the descriptor's allocation checks 0.02 s.
+- **macos-26-intel's draws vary by more than 2 times (2026-11-20).** The step "Tests with
+  coverage, other packages" took 16.7 minutes on macos-26-intel in PR #55's run 44665974408
+  (attempt 2) and 7.2 minutes in main's run 44676072194 at fe7731c, the merge of that pull
+  request, on the same code; the other five runners took 3.3 to 6.8 minutes in both. Its limit
+  rose from 18 to 22 minutes (section 17); a second rise would instead trim or split the step.
 - **`scripts/setup.sh` hung on apt (2026-11-19).** On PR #52's CI run 44474815418 the setup step
   stalled in apt on a package mirror until the step's 35-minute limit; one infrastructure rerun was
   allowed by the designer's ruling. In run 44627182924 the same step took 14.8 minutes, 13 of them
@@ -2663,6 +2677,28 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   SIGKILL cannot reach the command, so one that also ignores SIGTERM runs on, and the CI step's own
   limit (35 minutes for the setup scripts) is the backstop. **Not exercised:** a real mirror stall,
   and stopping a command under `sudo`, which the tests cannot reach without a password.
+  **Two LOWs of PR #55's review, fixed in M4's second pull request.** A failed `mktemp` left the
+  marker path empty when `bounded` was called on the left of `||`; the marker is now named by
+  `mktemp -u` before anything is made and created by `mkdir -m 700`, which refuses a path that
+  exists, and `bounded` returns 1 if either fails (`TestSetupShBoundedMktempFails`). A Ctrl-C in
+  the millisecond or so between making the marker and setting the trap left the marker, the
+  command and the watchdog behind (the marker in 4 to 19 of 300 interrupts swept over the first
+  8 ms, under sh, dash and bash, with the command and the watchdog's sleep left running); an INT-only flag trap now covers that window and the cleanup after the
+  trap, and the interrupt is acted on once the trap is set or the cleanup done. Making the flag
+  trap reliable took four further changes, each found by `TestSetupShBoundedEarlyInterrupt`
+  (600 interrupts per shell, sent to the shell's process group as a terminal's Ctrl-C is): mkdir
+  runs in the background, since under bash a Ctrl-C a foreground command survives is ignored and
+  bash once hung in such a wait; a wait the trap interrupts is repeated only while the process
+  lives (bash hung in a second wait for one already reaped); the watchdog is forked with SIGINT
+  ignored and ignores it itself (forked with the handler, dash could end it with its sleep left
+  running); and its sleeps are stopped with SIGKILL (a sleep forked a moment before could catch
+  the TERM with the inherited handler and run on). **Accepted residual:** a Ctrl-C in the few
+  hundred microseconds of the watchdog's fork, when SIGINT is ignored, is lost; nothing is left
+  behind and the next Ctrl-C is acted on. Measured over 20 runs of the test under sh (dash), dash
+  and bash: 0 to 6 of 600 first interrupts ignored per shell and run, 166 of 36,000 in all (0.46%;
+  the test allows 3%), and none left anything behind. A SIGTERM to the
+  script before the trap is set still ends it with the default action, as before; Ctrl-C is the
+  case the trap is for.
 - **A cache-restore error in the check job on macos-26-intel (2026-11-19).** In each of the
   eight job logs read, the "Vulnerability scan" step logged about 17,000 lines of
   `##[error]/usr/local/bin/gtar: ...: Cannot open: File exists` (for example
