@@ -216,9 +216,9 @@ var splitSteps = []struct {
 	run   string
 	limit int
 }{
-	{"run: scripts/test.sh cover -part rest\n", 18},
+	{"run: scripts/test.sh cover -part rest\n", 22},
 	{"run: scripts/test.sh cover -part video\n", 7},
-	{"run: scripts/test.ps1 cover -part rest\n", 18},
+	{"run: scripts/test.ps1 cover -part rest\n", 22},
 	{"run: scripts/test.ps1 cover -part video\n", 7},
 	{"run: scripts/test.sh -race -part others\n", 15},
 	{"run: scripts/test.sh -race -part isolated\n", 21},

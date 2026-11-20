@@ -221,8 +221,9 @@ Fixtures under `testdata/hostile/`, each with the exact error it must produce, r
 Windows (M3: `paths.json`, `manifests.json`, `archives.json` and `stream-headers.json` run by
 `internal/payload`'s `TestHostile*`, with the exact `UnsafeArchiveError` reason or named error;
 `descriptors.json` and `frame-headers.json` by `internal/frame`'s, with `ErrDescriptor`'s and
-`Validate`'s reasons, a frame header refused by `DecodeHeader` without a reason; video files by
-`internal/video`'s `TestHostileFiles`; two sessions interleaved frame by frame by
+`Validate`'s reasons; a frame header, encoded with its CRC recomputed, is refused by `DecodeHeader`,
+and by `DecodeHeaderReason` with that reason (`HeaderError`'s text is `Validate`'s); video files
+by `internal/video`'s `TestHostileFiles`; two sessions interleaved frame by frame by
 `internal/pipeline`'s `TestInterleavedSessions`; a stream beyond free disk space by
 `TestDiskSpaceLimit`):
 

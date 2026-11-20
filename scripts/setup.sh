@@ -107,7 +107,7 @@ bounded() {
 		"$@" || b_status=$?
 		return "$b_status"
 	fi
-	b_mark=$(mktemp -d)
+	b_mark=$(mktemp -d) || return 1
 	"$@" &
 	b_pid=$!
 	# The watchdog, without set -e (a pkill that finds no child must not end it). Its sleeps run in

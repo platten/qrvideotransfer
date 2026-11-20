@@ -29,6 +29,122 @@ type Header struct {
 	Reserved     uint8  // 4 bits; zero
 }
 
+// HeaderReason says why a header was refused, or HeaderOK; Validate's checks in their order, after
+// the length and the CRC.
+type HeaderReason uint8
+
+// The reasons a header is refused.
+const (
+	HeaderOK         HeaderReason = iota
+	HeaderLength                  // not HeaderSlots soft bits
+	HeaderCRC                     // the CRC-16 does not match
+	HeaderReserved                // reserved bits not zero
+	HeaderVersion                 // unsupported format version
+	HeaderFrameCount              // frame count not a multiple of 4 in 4..MaxFrames
+	HeaderFrameIndex              // frame index not below the frame count
+	HeaderModulation              // unknown modulation id
+	HeaderInner                   // unknown inner-code id
+	HeaderGrid                    // grid outside the limits
+)
+
+// ErrHeader is wrapped by every HeaderError.
+var ErrHeader = errors.New("frame: invalid header")
+
+// HeaderError is the error of Validate: the reason and the header refused.
+type HeaderError struct {
+	Reason HeaderReason
+	Header Header
+}
+
+// Error names the refused value, in the words of LookupModulation, LookupInner and CheckGrid for
+// their reasons (FORMAT.md section 14).
+func (e *HeaderError) Error() string {
+	h := e.Header
+	switch e.Reason {
+	case HeaderLength:
+		return fmt.Sprintf("frame: header is not %d soft bits", HeaderSlots)
+	case HeaderCRC:
+		return "frame: header CRC mismatch"
+	case HeaderReserved:
+		return "frame: header reserved bits are not zero"
+	case HeaderVersion:
+		return fmt.Sprintf("frame: unsupported format version %d", h.Version)
+	case HeaderFrameCount:
+		return fmt.Sprintf("frame: invalid frame count %d", h.TotalFrames)
+	case HeaderFrameIndex:
+		return fmt.Sprintf("frame: frame index %d not below frame count %d", h.FrameIndex, h.TotalFrames)
+	case HeaderModulation:
+		return fmt.Sprintf("frame: unknown modulation %d", h.Modulation)
+	case HeaderInner:
+		return fmt.Sprintf("frame: unknown inner code %d", h.InnerCode)
+	case HeaderGrid:
+		return fmt.Sprintf("frame: grid %d x %d outside the limits", h.GridX, h.GridY)
+	}
+	return fmt.Sprintf("frame: header refused for reason %d", e.Reason)
+}
+
+// Unwrap returns ErrHeader.
+func (e *HeaderError) Unwrap() error { return ErrHeader }
+
+// reason applies Validate's checks; it allocates nothing.
+func (h Header) reason() HeaderReason {
+	switch {
+	case h.Reserved != 0:
+		return HeaderReserved
+	case h.Version != Version:
+		return HeaderVersion
+	case h.TotalFrames < 4 || h.TotalFrames%4 != 0 || h.TotalFrames > MaxFrames:
+		return HeaderFrameCount
+	case h.FrameIndex >= h.TotalFrames:
+		return HeaderFrameIndex
+	case !knownModulation(h.Modulation):
+		return HeaderModulation
+	case !knownInner(h.InnerCode):
+		return HeaderInner
+	case !gridOK(int(h.GridX), int(h.GridY)):
+		return HeaderGrid
+	}
+	return HeaderOK
+}
+
+// DecodeHeaderReason is DecodeHeader with the reason for a refusal. It returns the decoded header
+// with a reason of Validate, so that the refused value can be named, and a zero header with
+// HeaderLength or HeaderCRC. It builds no error value and allocates no more than DecodeHeader.
+func DecodeHeaderReason(soft []int8) (Header, HeaderReason) {
+	if len(soft) != HeaderSlots {
+		return Header{}, HeaderLength
+	}
+	coded := make([]int8, HeaderSlots)
+	for n := range coded {
+		v := soft[slotOf(n)]
+		if maskBit(n) == 1 {
+			v = -max(v, -127) // unmask without overflowing -128
+		}
+		coded[n] = v
+	}
+	msg := conv.Decode(coded)
+	var b [14]byte
+	for i := range HeaderBits {
+		b[i/8] |= msg[i] << (7 - i%8)
+	}
+	r := bitReader{b: b[:]}
+	h := Header{
+		Version:     get[uint8](&r, 4),
+		Session:     get[uint16](&r, 16),
+		FrameIndex:  get[uint32](&r, 22),
+		TotalFrames: get[uint32](&r, 22),
+		GridX:       get[uint16](&r, 11),
+		GridY:       get[uint16](&r, 11),
+		Modulation:  get[uint8](&r, 3),
+		InnerCode:   get[uint8](&r, 3),
+		Reserved:    get[uint8](&r, 4),
+	}
+	if get[uint16](&r, 16) != CRC16(b[:12]) {
+		return Header{}, HeaderCRC
+	}
+	return h, h.reason()
+}
+
 // headerMask is SHA-256("qrvt/header-mask/v1"), XORed onto the coded bits.
 var headerMask = sha256.Sum256([]byte("qrvt/header-mask/v1"))
 
@@ -86,25 +202,13 @@ func (h Header) Bytes() [14]byte {
 	return b
 }
 
-// Validate checks the rules a decoder applies to a header (FORMAT.md sections 3 and 6).
+// Validate checks the rules a decoder applies to a header (FORMAT.md sections 3 and 6). Its error
+// is a *HeaderError.
 func (h Header) Validate() error {
-	switch {
-	case h.Reserved != 0:
-		return errors.New("frame: header reserved bits are not zero")
-	case h.Version != Version:
-		return fmt.Errorf("frame: unsupported format version %d", h.Version)
-	case h.TotalFrames < 4 || h.TotalFrames%4 != 0 || h.TotalFrames > MaxFrames:
-		return fmt.Errorf("frame: invalid frame count %d", h.TotalFrames)
-	case h.FrameIndex >= h.TotalFrames:
-		return fmt.Errorf("frame: frame index %d not below frame count %d", h.FrameIndex, h.TotalFrames)
+	if r := h.reason(); r != HeaderOK {
+		return &HeaderError{Reason: r, Header: h}
 	}
-	if _, err := LookupModulation(h.Modulation); err != nil {
-		return err
-	}
-	if _, err := LookupInner(h.InnerCode); err != nil {
-		return err
-	}
-	return CheckGrid(int(h.GridX), int(h.GridY))
+	return nil
 }
 
 // Encode returns the bit shown in each of the 236 slots, indexed by slot number s = 4i + r; true is
@@ -125,36 +229,10 @@ func (h Header) Encode() [HeaderSlots]bool {
 // DecodeHeader decodes the soft bits of the 236 slots, indexed by slot number. A soft bit is a
 // log-likelihood ratio: positive means bit 0 (dark), negative bit 1 (light), zero unknown. It reports
 // false unless the CRC matches and the header passes Validate.
+// DecodeHeaderReason gives the reason for a refusal.
 func DecodeHeader(soft []int8) (Header, bool) {
-	if len(soft) != HeaderSlots {
-		return Header{}, false
-	}
-	coded := make([]int8, HeaderSlots)
-	for n := range coded {
-		v := soft[slotOf(n)]
-		if maskBit(n) == 1 {
-			v = -max(v, -127) // unmask without overflowing -128
-		}
-		coded[n] = v
-	}
-	msg := conv.Decode(coded)
-	var b [14]byte
-	for i := range HeaderBits {
-		b[i/8] |= msg[i] << (7 - i%8)
-	}
-	r := bitReader{b: b[:]}
-	h := Header{
-		Version:     get[uint8](&r, 4),
-		Session:     get[uint16](&r, 16),
-		FrameIndex:  get[uint32](&r, 22),
-		TotalFrames: get[uint32](&r, 22),
-		GridX:       get[uint16](&r, 11),
-		GridY:       get[uint16](&r, 11),
-		Modulation:  get[uint8](&r, 3),
-		InnerCode:   get[uint8](&r, 3),
-		Reserved:    get[uint8](&r, 4),
-	}
-	if get[uint16](&r, 16) != CRC16(b[:12]) || h.Validate() != nil {
+	h, r := DecodeHeaderReason(soft)
+	if r != HeaderOK {
 		return Header{}, false
 	}
 	return h, true

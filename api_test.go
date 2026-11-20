@@ -50,9 +50,12 @@ func payloadDir(t testing.TB, seed uint64, sizes ...int) (string, map[string][32
 	return root, want
 }
 
-// fixTimes sets the modification time of everything under dir to a fixed instant. The manifest
-// records modification times, so without it the transfer's bytes, and with them a filmed or noisy
-// recording's outcome, would change from run to run.
+// fixTimes sets the modification time of everything under dir to a fixed instant, and its mode to
+// 0666 for a file and 0777 for a folder. The manifest records both, so without it the transfer's
+// bytes, and with them a filmed or noisy recording's outcome, would change from run to run with the
+// time and from machine to machine with the umask. Those modes are the ones Windows reports for a
+// file or folder that is not read-only, so every system gives the same bytes; a read-only file
+// would match too, but a read-only folder cannot be emptied on Unix.
 func fixTimes(t testing.TB, dir string) {
 	t.Helper()
 	at := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
@@ -61,14 +64,48 @@ func fixTimes(t testing.TB, dir string) {
 		t.Fatal(err)
 	}
 	defer func() { _ = r.Close() }()
-	err = fs.WalkDir(r.FS(), ".", func(p string, _ fs.DirEntry, err error) error {
+	err = fs.WalkDir(r.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		return r.Chtimes(p, at, at)
+		mode := fs.FileMode(0o666)
+		if d.IsDir() {
+			mode = 0o777
+		}
+		return errors.Join(r.Chmod(p, mode), r.Chtimes(p, at, at))
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestFixedInputs: payloadDir's files and folder carry the fixed modification time and the fixed
+// modes 0666 and 0777, which the manifest records and every system reports alike, so a transfer's
+// bytes do not depend on the machine or its umask.
+func TestFixedInputs(t *testing.T) {
+	dir, _ := payloadDir(t, 1, 10, 20)
+	at := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	n := 0
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		want := fs.FileMode(0o666)
+		if d.IsDir() {
+			want = 0o777
+		}
+		if info.Mode().Perm() != want || !info.ModTime().Equal(at) {
+			t.Errorf("%s: mode %v, time %v; want %v, %v", p, info.Mode().Perm(), info.ModTime(), want, at)
+		}
+		n++
+		return nil
+	})
+	if err != nil || n < 2 {
+		t.Fatalf("walked %d entries: %v", n, err)
 	}
 }
 

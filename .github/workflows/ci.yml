@@ -110,7 +110,7 @@ jobs:
       - name: Tests with coverage, other packages (Unix)
         id: cover-rest
         if: runner.os != 'Windows'
-        timeout-minutes: 18
+        timeout-minutes: 22
         shell: bash
         run: scripts/test.sh cover -part rest
       - name: Tests with coverage gate, internal/video (Unix)
@@ -121,7 +121,7 @@ jobs:
       - name: Tests with coverage, other packages (Windows)
         id: cover-rest-windows
         if: runner.os == 'Windows'
-        timeout-minutes: 18
+        timeout-minutes: 22
         shell: pwsh
         run: scripts/test.ps1 cover -part rest
       - name: Tests with coverage gate, internal/video (Windows)

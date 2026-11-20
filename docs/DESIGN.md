@@ -1513,6 +1513,23 @@ type Backend interface {
 }
 ```
 
+Added beside the frozen list, which it leaves unchanged (M4):
+
+```go
+// internal/frame
+func DecodeHeaderReason(soft []int8) (Header, HeaderReason) // DecodeHeader with the reason for a refusal
+type HeaderError struct{ Reason HeaderReason; Header Header } // Validate's error; wraps ErrHeader
+type HeaderReason uint8 // HeaderOK, HeaderLength, HeaderCRC, HeaderReserved, HeaderVersion,
+                        // HeaderFrameCount, HeaderFrameIndex, HeaderModulation, HeaderInner, HeaderGrid
+var ErrHeader error     // wrapped by every HeaderError
+```
+
+`DecodeHeader` is `DecodeHeaderReason` with the reason dropped. The reasons are the length, the CRC,
+and Validate's checks in their order (reserved bits, version, frame count, frame index, modulation,
+inner code, grid); `HeaderError`'s text names the refused value (FORMAT.md section 14).
+`DecodeHeaderReason` builds no error value, so it allocates no more than `DecodeHeader` in the
+detector's lens loop.
+
 What the named types carry:
 
 | Type | Package | Carries |
@@ -1837,7 +1854,7 @@ section 13).
 
   | Step | Slowest median (runner) | Max, any runner | 2 x median | 1.3 x max | Limit |
   | --- | --- | --- | --- | --- | --- |
-  | Coverage, other packages | 8.53 (macos-26-intel) | 13.23 | 17.06 | 17.20 | 18 |
+  | Coverage, other packages | 8.53 (macos-26-intel, unchanged) | 16.68 | 17.06 | 21.68 | 22 |
   | Coverage gate, `internal/video` | 3.49 (macos-26-intel) | 4.25 | 6.98 | 5.52 | 7 |
   | Tests without the release tags | 8.13 (ubuntu-24.04, its only runner) | 8.43 | 16.27 | 10.96 | 17 |
   | HEVC fast path | 3.62 (macos-26-intel) | 4.48 | 7.25 | 5.83 | 8 |
@@ -1849,6 +1866,15 @@ section 13).
   | Hostile-cost ratios | 0.63 (macos-26-intel) | 0.78 | 1.27 | 1.02 | 5 |
   | Install the linter, import rule | under 0.1 | 0.63 | | | 5 |
 
+  The coverage step of the other packages has a sample of eight runs (M4's second pull request):
+  the six above and two that ran it as a step of its own, PR #55's run 44665974408 (attempt 2)
+  and main's run 44676072194 at fe7731c. On macos-26-intel they took 16.68 and 7.17 minutes
+  (16.7 minutes, 03:53:23 to 04:10:04, in the first: a new largest passing time, against 13.23),
+  so 1.3 times the largest gives 21.68 and the limit rose from 18 to 22, on Unix and Windows. With
+  one added time below the six runs' median and one above, the eight runs' median is the six
+  runs' 8.53, unchanged. **When a new largest passing time would raise a step's limit a second time, the
+  step is trimmed or split instead, and the matter goes to the designer** (designer's ruling,
+  2026-11-20); this step's limit has now been raised once.
   The lint and static-build figures come from runs whose build and module caches setup-go
   restored warm; a cold cache, as after a `go.sum` change such as a Dependabot update, is
   unmeasured on the runners (locally, pinned to 4 cores, a cold `build -all` took 61 s and a cold
@@ -2509,6 +2535,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   brightness plane; it has no committed corpus beyond its seeds. **Frame
   headers:** `frame.DecodeHeader` refuses a header without saying why (a CRC or a `Validate`
   failure); the reason is a candidate for M4's `inspect`, its first consumer (designer's ruling).
+  **Done in M4's second pull request:** `frame.DecodeHeaderReason` returns the reason (section 14);
+  its consumers come in M4's later pull requests.
   The real-device check took 210-500 s per recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
   1, 255 s); a round-trip matrix row takes 3-14 s alone.
 - **Main red at df8e9b5: `TestWatchdogUnderLoad` (2026-11-18).** Main's push run 44400775718 failed
@@ -2565,15 +2593,19 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   `writeInputs`' folder, which changes the folder's modification time, and encodes it through the
   lossless raw backend, asserting only the skipped-link warning; its bytes vary, its outcome cannot.
   No shared helper was added: the two packages that need one each have `fixTimes`, and sharing it
-  would take a non-test package. **Not fixed, recorded:** the helpers fix times, not modes. Their
-  files and folders are created as 0600 and 0750 less the process's umask (on Windows the system
-  reports its own modes), and the manifest records the mode, so a transfer repeats from run to run
-  on one machine but its bytes can differ between machines (the development machine and a CI
-  runner, say). A filmed outcome near a margin could therefore differ between a local run and CI;
-  fixing it means setting the modes in both `fixTimes`, **deferred to M4's second pull request**,
-  knowingly (designer's ruling, 2026-11-19). The frame vectors and the reference video (FORMAT.md
-  section 13) fix their input's mode as well as its time: a read-only file, which every system
-  reports as 0444, since the manifest records the mode.
+  would take a non-test package. **Modes, fixed in M4's second pull request:** the helpers fixed
+  times, not modes, until then. Their files and folders were created as 0600 and 0750 less the
+  process's umask (on Windows the system reports its own modes), and the manifest records the mode,
+  so a transfer repeated from run to run on one machine but its bytes could differ between machines
+  (the development machine and a CI runner, say), and a filmed outcome near a margin with them.
+  Both `fixTimes` now also set every file to 0666 and every folder to 0777 (`TestFixedInputs` in
+  each package): chmod sets those exactly on Unix whatever the umask, and they are what Windows
+  reports for a file or folder that is not read-only, so every target encodes the same bytes. A
+  read-only file (0444) would match everywhere too, but a read-only folder (0555) cannot be emptied
+  on Unix, and a decode recreates the folder's mode in the test's output. The frame vectors and the
+  reference video (FORMAT.md section 13) fix their input's mode as well as its time, a read-only
+  file, which every system reports as 0444; they do not use the helpers, so their golden data is
+  unchanged.
   The tests affected, by the reviewer's survey:
   - **Near a margin, asserting only "decodes", could flip in CI:**
     `TestRoundTripMatrix/iphone-hdr-1080p30-gray4-normal` (always on, below section 11's condition
@@ -2625,6 +2657,11 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   (4 CPUs, `taskset -c 0-3`, GOMAXPROCS 4): `TestReferenceVideo` 1.2 s, almost all of it the
   embedded engine's probe and decode of the reference video (0.32 and 0.64 s), `TestFrameVectors`
   0.14 s and the descriptor's allocation checks 0.02 s.
+- **macos-26-intel's draws vary by more than 2 times (2026-11-20).** The step "Tests with
+  coverage, other packages" took 16.7 minutes on macos-26-intel in PR #55's run 44665974408
+  (attempt 2) and 7.2 minutes in main's run 44676072194 at fe7731c, the merge of that pull
+  request, on the same code; the other five runners took 3.3 to 6.8 minutes in both. Its limit
+  rose from 18 to 22 minutes (section 17); a second rise would instead trim or split the step.
 - **`scripts/setup.sh` hung on apt (2026-11-19).** On PR #52's CI run 44474815418 the setup step
   stalled in apt on a package mirror until the step's 35-minute limit; one infrastructure rerun was
   allowed by the designer's ruling. In run 44627182924 the same step took 14.8 minutes, 13 of them
@@ -2643,6 +2680,34 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   SIGKILL cannot reach the command, so one that also ignores SIGTERM runs on, and the CI step's own
   limit (35 minutes for the setup scripts) is the backstop. **Not exercised:** a real mirror stall,
   and stopping a command under `sudo`, which the tests cannot reach without a password.
+  **Two LOWs of PR #55's review, M4's second pull request.** A failed `mktemp` left the marker
+  path empty when `bounded` was called on the left of `||`: fixed, `b_mark=$(mktemp -d) || return
+  1` (`TestSetupShBoundedMktempFails`). **Accepted residual (designer's ruling, 2026-11-20):** a
+  Ctrl-C in the millisecond or so between `mktemp` and the setting of the INT/TERM trap, while the
+  command and the watchdog are forked, ends the script with the default action and leaves the
+  marker folder, the command and the watchdog behind: in a sweep of interrupts over `bounded`'s
+  first 8 ms, 19 of 300 timed interrupts left something behind (reviewer's figure). The time limit
+  is still enforced: the watchdog survives, stops a command it left behind at its limit, and its
+  sleep then ends. **A redesign was tried and withdrawn:** an INT-only flag trap before the fork,
+  with the marker named by `mktemp -u` and made by `mkdir -m 700`, passed 36,000 interrupts under
+  sh, dash and bash 5 on Linux with nothing left behind, but it rested on `mktemp -u` making
+  nothing, and BSD and macOS `mktemp -u` create the file and then unlink it (Apple shell_cmds and
+  FreeBSD `mktemp.c`), so a Ctrl-C there would leave an empty file; and macOS `/bin/sh`, bash
+  3.2, on whose signal behaviour the design depended in four places, could not be tested. It is
+  not to be rebuilt without a test on macOS. **setup.sh on macOS is verified only by CI** (PR #56's
+  first run): macOS `mktemp -d` without a template does not use TMPDIR, taking the per-user folder
+  of `confstr(_CS_DARWIN_USER_TEMP_DIR)` and reading TMPDIR only if that fails (Apple shell_cmds
+  `mktemp.c`), so `TestSetupShBoundedMktempFails`, which failed it through a missing TMPDIR, failed
+  on both macOS runners, and `TestSetupShBoundedCleansUp`'s count of markers left behind had passed
+  there vacuously since PR #55. The tests now put a wrapper `mktemp` first on PATH that runs the
+  real one with a template in the test's folder (and, for the failure, a stub that exits 1),
+  `TestSetupShBoundedCleansUp` asserts that the marker is there while the command runs, and
+  `TestMktempHonoursTMPDIR` logs, without failing, whether plain `mktemp -d` honours TMPDIR on
+  each runner. This is the second BSD/GNU `mktemp` difference this pull request found (the first,
+  `mktemp -u`, above), so a change to the shell scripts gets a macOS CI run before it is called
+  done. Checked for other GNU-only reliance in the setup tests: `pkill -f`/`-P`/`-KILL`, `ps -eo
+  args`, `sleep` with whole seconds, `sh -n`, `trap`, `kill -0` and `$$` are all POSIX or
+  BSD-compatible.
 - **A cache-restore error in the check job on macos-26-intel (2026-11-19).** In each of the
   eight job logs read, the "Vulnerability scan" step logged about 17,000 lines of
   `##[error]/usr/local/bin/gtar: ...: Cannot open: File exists` (for example
