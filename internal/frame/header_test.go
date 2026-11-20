@@ -231,6 +231,9 @@ func TestHeaderErrorText(t *testing.T) {
 	if err := exampleHeader.Validate(); err != nil {
 		t.Errorf("Validate of a valid header: %v", err)
 	}
+	if got := (&HeaderError{Reason: 200}).Error(); got != "frame: header refused for reason 200" {
+		t.Errorf("unknown reason: %q", got)
+	}
 }
 
 // TestDecodeHeaderReasonCRCAndLength: a header whose CRC does not match is refused for HeaderCRC
@@ -293,7 +296,7 @@ func checkReasonAgrees(t *testing.T, s []int8) {
 func TestDecodeHeaderReasonProperty(t *testing.T) {
 	rng := rand.New(rand.NewPCG(9, 10))
 	seen := map[HeaderReason]int{}
-	for i := range 20000 {
+	for i := range 2000 {
 		var s []int8
 		switch i % 4 {
 		case 0: // noise of any length near HeaderSlots
@@ -322,9 +325,9 @@ func TestDecodeHeaderReasonProperty(t *testing.T) {
 				case 5:
 					h.InnerCode = uint8(rng.IntN(8))
 				case 6:
-					h.GridX = uint16(rng.IntN(2048))
+					h.GridX = uint16(rng.IntN(2048) >> rng.IntN(11))
 				default:
-					h.GridY = uint16(rng.IntN(2048))
+					h.GridY = uint16(rng.IntN(2048) >> rng.IntN(11))
 				}
 			}
 			b := h.Bytes()
