@@ -69,14 +69,28 @@ func TestReadReason(t *testing.T) {
 		{"modulation 5", func(f *video.Frame) { geomPaintHeader(c, f, mod5, 0, 1, 2, 3) }, frame.HeaderModulation, mod5},
 		{"inner code 7", func(f *video.Frame) { geomPaintHeader(c, f, inner7, 0, 1, 2, 3) }, frame.HeaderInner, inner7},
 		{"version 2 beats CRC", func(f *video.Frame) {
-			geomPaintHeader(c, f, v2, 3)
-			geomGreyHeader(c, f, 0, 1, 2)
+			// Copies 0 to 2, tried first, each with a different quarter of their slots inverted,
+			// fail the CRC alone; copy 3 is refused for its version.
+			geomPaintHeader(c, f, v2, 0, 1, 2, 3)
+			for cp := range 3 {
+				for s := cp; s < frame.HeaderSlots; s += 4 {
+					geomFlip(c, f, v2, cp, s)
+				}
+			}
 		}, frame.HeaderVersion, v2},
 		{"grey", func(f *video.Frame) { geomGreyHeader(c, f, 0, 1, 2, 3) }, frame.HeaderCRC, frame.Header{}},
 	}
 	for _, tc := range cases {
 		f := geomPlain(c, 0)
 		tc.paint(f)
+		if tc.name == "version 2 beats CRC" {
+			soft, _ := copySoft(f, q)
+			for cp := range 3 {
+				if _, r := frame.DecodeHeaderReason(soft[cp][:]); r != frame.HeaderCRC {
+					t.Fatalf("copy %d alone: %v; the test needs a CRC failure", cp, r)
+				}
+			}
+		}
 		hs, rej := SlotReader{}.ReadReason(f, q)
 		if len(hs) != 0 || rej.Reason != tc.want || rej.Header != tc.value {
 			t.Errorf("%s: got %v, reason %v with %+v; want reason %v with %+v", tc.name, hs, rej.Reason, rej.Header, tc.want, tc.value)

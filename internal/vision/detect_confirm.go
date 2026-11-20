@@ -53,10 +53,13 @@ type confirmation struct {
 // locate reads quad q's headers and, for each distinct grid they give (those decoded by more
 // single copies first), locates the anchors as Fit does, walking out from the finders listed in
 // from. A header with a conflicting grid (a false CRC pass, or crafted content) therefore cannot
-// hide the true one. It returns one confirmation per grid that could be tried.
+// hide the true one. It returns one confirmation per grid that could be tried. A header refused is
+// recorded for Refusal.
 func (d *FinderDetector) locate(f *video.Frame, v *geomLuma, q Quad, from []int) []*confirmation {
-	hs, ok := SlotReader{}.Read(f, q)
-	if !ok {
+	hs, rej := SlotReader{}.ReadReason(f, q)
+	d.finders = true
+	if len(hs) == 0 {
+		noteRefusal(&d.reject, rej)
 		return nil
 	}
 	type grid struct{ x, y, support int }
