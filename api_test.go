@@ -72,6 +72,36 @@ func fixTimes(t testing.TB, dir string) {
 	}
 }
 
+// TestFixedInputs: payloadDir's files and folder carry the fixed modification time and the fixed
+// modes 0666 and 0777, which the manifest records and every system reports alike, so a transfer's
+// bytes do not depend on the machine or its umask.
+func TestFixedInputs(t *testing.T) {
+	dir, _ := payloadDir(t, 1, 10, 20)
+	at := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	n := 0
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		want := fs.FileMode(0o666)
+		if d.IsDir() {
+			want = 0o777
+		}
+		if info.Mode().Perm() != want || !info.ModTime().Equal(at) {
+			t.Errorf("%s: mode %v, time %v; want %v, %v", p, info.Mode().Perm(), info.ModTime(), want, at)
+		}
+		n++
+		return nil
+	})
+	if err != nil || n < 2 {
+		t.Fatalf("walked %d entries: %v", n, err)
+	}
+}
+
 // sameFiles compares the regular files under dir with want.
 func sameFiles(t testing.TB, dir string, want map[string][32]byte) {
 	t.Helper()
