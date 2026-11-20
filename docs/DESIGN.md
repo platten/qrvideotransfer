@@ -1513,6 +1513,20 @@ type Backend interface {
 }
 ```
 
+Added beside the frozen list, which it leaves unchanged (M4):
+
+```go
+// internal/frame
+func DecodeHeaderReason(soft []int8) (Header, HeaderReason) // DecodeHeader with the reason for a refusal
+type HeaderError struct{ Reason HeaderReason; Header Header } // Validate's error; wraps ErrHeader
+```
+
+`DecodeHeader` is `DecodeHeaderReason` with the reason dropped. The reasons are the length, the CRC,
+and Validate's checks in their order (reserved bits, version, frame count, frame index, modulation,
+inner code, grid); `HeaderError`'s text names the refused value (FORMAT.md section 14).
+`DecodeHeaderReason` builds no error value, so it allocates no more than `DecodeHeader` in the
+detector's lens loop.
+
 What the named types carry:
 
 | Type | Package | Carries |
@@ -2509,6 +2523,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   brightness plane; it has no committed corpus beyond its seeds. **Frame
   headers:** `frame.DecodeHeader` refuses a header without saying why (a CRC or a `Validate`
   failure); the reason is a candidate for M4's `inspect`, its first consumer (designer's ruling).
+  **Done in M4's second pull request:** `frame.DecodeHeaderReason` returns the reason (section 14);
+  its consumers come in M4's later pull requests.
   The real-device check took 210-500 s per recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
   1, 255 s); a round-trip matrix row takes 3-14 s alone.
 - **Main red at df8e9b5: `TestWatchdogUnderLoad` (2026-11-18).** Main's push run 44400775718 failed

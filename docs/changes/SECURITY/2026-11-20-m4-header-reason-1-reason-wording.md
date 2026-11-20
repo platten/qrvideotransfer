@@ -1,0 +1,1 @@
+Section 9.2 (M4's second pull request): a frame header of frame-headers.json is refused by DecodeHeader, and by the new DecodeHeaderReason with its reason and Validate's exact text; the words that DecodeHeader gives no reason are replaced.

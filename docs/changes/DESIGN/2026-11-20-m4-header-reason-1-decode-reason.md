@@ -1,0 +1,1 @@
+Sections 14 and 19 (M4's second pull request): frame.DecodeHeaderReason, HeaderReason and HeaderError, wrapping ErrHeader, are added beside the frozen internal interfaces, which are unchanged; DecodeHeader is DecodeHeaderReason with the reason dropped, and Validate's error is a HeaderError with the same texts. Section 19's frame-headers item records it as done.
