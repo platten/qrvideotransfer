@@ -38,12 +38,12 @@ type FinderDetector struct {
 	dark       []bool // small below its local midrange
 	sw, sh     int
 	clusters   []detectCluster
-	layouts    []*frame.Layout // of the grids decoded lately, at most confirmMaxLayouts
-	grids      [][2]int        // distinct grids used during this Detect
-	gateFailed bool            // the last confirmed quad decoded a grid that failed the 1.5-pixel gate
-	hidden     int             // the corner the last located quad predicted, or -1 with four in view
-	finders    bool            // a quad's header was read during this Detect (Refusal)
-	reject     frame.HeaderError
+	layouts    []*frame.Layout   // of the grids decoded lately, at most confirmMaxLayouts
+	grids      [][2]int          // distinct grids used during this Detect
+	gateFailed bool              // the last confirmed quad decoded a grid that failed the 1.5-pixel gate
+	hidden     int               // the corner the last located quad predicted, or -1 with four in view
+	finders    bool              // a quad's header was read during this Detect (Refusal)
+	reject     frame.HeaderError // the strongest header refusal of this Detect (Refusal)
 }
 
 var _ Detector = (*FinderDetector)(nil)
