@@ -1947,6 +1947,9 @@ section 13).
     (20,000 frames per rate) and `TestShortenedErrorRate` (20,000 frames per check).
   - `internal/fec/conv`: `TestCorrectsThreeErrors`, exhaustive over three errors.
   - `spikes/pattern`: `TestAnalyseSimulated` at 96 captures.
+  - `tools/dev`, long only and Unix only: `TestSetupShBoundedEarlyInterrupt`, 600 Ctrl-Cs per
+    shell (sh, dash, bash) swept over `bounded`'s first 8 ms (section 19); the deterministic
+    `bounded` tests stay always on.
   Race-step timings are quoted only from runs that retested the packages, never from output that
   shows them as `(cached)`.
 - **Nightly** (`nightly.yml`, also startable by hand): long fuzzing (5 minutes per target by default),
@@ -2000,7 +2003,8 @@ section 13).
   could not run is reported as NOT RUN with its reason, never as a pass. **The long tests**, which
   no CI job runs (see the coverage-step paragraph above): at the same point, once per pull request,
   the developer runs them for the packages the pull request changes, and also for the root package
-  and `internal/pipeline` whenever the non-test code of any internal package changes; a docs-only
+  and `internal/pipeline` whenever the non-test code of any internal package changes, and for
+  `tools/dev` whenever `scripts/setup.sh` changes (`TestSetupShBoundedEarlyInterrupt`); a docs-only
   pull request runs none; a pull request changing only tests runs the long tests of those packages
   only. `go run ./tools/dev test -long -pkg ./internal/vision,./internal/fec/ldpc` runs the listed
   packages through the test task's isolation split, as `./...` is run: the other packages in one
@@ -2683,11 +2687,12 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   exists, and `bounded` returns 1 if either fails (`TestSetupShBoundedMktempFails`). A Ctrl-C in
   the millisecond or so between making the marker and setting the trap left the marker, the
   command and the watchdog behind (the marker in 4 to 19 of 300 interrupts swept over the first
-  8 ms, under sh, dash and bash, with the command and the watchdog's sleep left running); an INT-only flag trap now covers that window and the cleanup after the
-  trap, and the interrupt is acted on once the trap is set or the cleanup done. Making the flag
-  trap reliable took four further changes, each found by `TestSetupShBoundedEarlyInterrupt`
-  (600 interrupts per shell, sent to the shell's process group as a terminal's Ctrl-C is): mkdir
-  runs in the background, since under bash a Ctrl-C a foreground command survives is ignored and
+  8 ms, under sh, dash and bash, with the command and the watchdog's sleep left running); an
+  INT-only flag trap now covers that window and the cleanup after the trap, and the interrupt is
+  acted on once the trap is set or the cleanup done. Making the flag trap reliable took four
+  further changes, each found by `TestSetupShBoundedEarlyInterrupt` (long only, section 17; 600
+  interrupts per shell, sent to the shell's process group as a terminal's Ctrl-C is): mkdir runs
+  in the background, since under bash a Ctrl-C a foreground command survives is ignored and
   bash once hung in such a wait; a wait the trap interrupts is repeated only while the process
   lives (bash hung in a second wait for one already reaped); the watchdog is forked with SIGINT
   ignored and ignores it itself (forked with the handler, dash could end it with its sleep left

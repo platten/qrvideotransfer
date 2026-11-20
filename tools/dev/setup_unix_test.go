@@ -31,7 +31,13 @@ import (
 // and leaves nothing. At most 3% of the first interrupts may be ignored (measured: up to 4 of 600).
 // The group matters: under bash, an interrupt sent to the shell alone while mktemp runs is ignored,
 // as everywhere else in the script, since mktemp does not get it.
+//
+// Long only (about 5 to 17 s per shell, the shells in parallel): it runs with the long tests of
+// any pull request that changes setup.sh (DESIGN.md section 17).
 func TestSetupShBoundedEarlyInterrupt(t *testing.T) {
+	if os.Getenv(longTestsVar) != "1" {
+		t.Skip("long only: set " + longTestsVar + "=1 (go run ./tools/dev test -long -pkg ./tools/dev)")
+	}
 	fn := scriptFunc(t, readScript(t, "setup.sh"), "bounded() {")
 	for _, shell := range boundedShells(t) {
 		t.Run(shell, func(t *testing.T) {
