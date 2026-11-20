@@ -107,27 +107,66 @@ bounded() {
 		"$@" || b_status=$?
 		return "$b_status"
 	fi
-	b_mark=$(mktemp -d)
+	# The marker folder's name first, then the folder: mktemp -d, stopped by Ctrl-C between making
+	# the folder and printing its name, would leave it unnamed. mkdir refuses a path that exists.
+	# The name makes nothing, so it comes before the flag trap below (bash, given a trap, can run it
+	# while still parsing a command substitution, then fail with a syntax error). Return if mktemp
+	# fails, also where set -e is off (on the left of ||).
+	b_mark=$(mktemp -u "${TMPDIR:-/tmp}/qrvt-bounded.XXXXXXXXXX") || return 1
+	# From here until the real trap is set, and again in the cleanup after it, Ctrl-C only raises
+	# b_int, acted on once the real trap is set or the cleanup done, so that it cannot leave the
+	# marker, the command or the watchdog behind (review of PR #55). INT only: a TERM trap in place
+	# when the watchdog is forked could make it lose its TERM (below). mkdir runs as a background
+	# job, which ignores Ctrl-C and always finishes: in the foreground, under bash, a Ctrl-C it
+	# survived would be ignored, and bash was seen to hang in such a wait. The wait builtin returns
+	# at once when a trapped signal comes, so after one, mkdir is waited for again while it lives
+	# (kill -0: bash was seen to hang in a second wait for a process already reaped).
+	b_int=''
+	trap 'b_int=1' INT
+	mkdir -m 700 "$b_mark" &
+	b_mk=$!
+	b_mk_status=0
+	wait "$b_mk" || b_mk_status=$?
+	if [ -n "$b_int" ]; then
+		if kill -0 "$b_mk" 2>/dev/null; then wait "$b_mk" 2>/dev/null || true; fi
+		rmdir "$b_mark" 2>/dev/null || true
+		trap - INT
+		exit 130
+	fi
+	if [ "$b_mk_status" -ne 0 ]; then
+		trap - INT
+		return 1
+	fi
 	"$@" &
 	b_pid=$!
 	# The watchdog, without set -e (a pkill that finds no child must not end it). Its sleeps run in
 	# the background so that the TERM it gets when the command ends interrupts its wait at once; a
-	# TERM that arrives before a sleep's process ID is known sets b_stop, checked right after.
+	# TERM that arrives before a sleep's process ID is known sets b_stop, checked right after. It
+	# ignores Ctrl-C, which a terminal sends it too, and it is forked with Ctrl-C ignored rather
+	# than caught: a child forked with a handler in place can catch one before it resets its
+	# signals, and then dash ends it at its next wait, leaving its sleep behind. A Ctrl-C in those
+	# few hundred microseconds is lost, not acted on; the next one is. Its sleeps are stopped with
+	# SIGKILL, here and by the parent's pkill: a sleep forked a moment before can still hold the
+	# watchdog's TERM handler, catch a TERM with it, and then run on.
+	trap '' INT
 	(
+		trap '' INT
 		set +e
 		b_sleep='' b_stop=''
-		trap 'if [ -n "$b_sleep" ]; then kill "$b_sleep" 2>/dev/null; exit 0; fi; b_stop=1' TERM
+		trap 'if [ -n "$b_sleep" ]; then kill -KILL "$b_sleep" 2>/dev/null; exit 0; fi; b_stop=1' TERM
 		sleep "$b_limit" &
 		b_sleep=$!
-		if [ -n "$b_stop" ]; then kill "$b_sleep" 2>/dev/null; exit 0; fi
-		wait "$b_sleep" || exit 0
+		if [ -n "$b_stop" ]; then kill -KILL "$b_sleep" 2>/dev/null; exit 0; fi
+		# Bash can end the wait on the TERM and take the exit without running the trap: kill the
+		# sleep here too.
+		wait "$b_sleep" || { kill -KILL "$b_sleep" 2>/dev/null; exit 0; }
 		: >"$b_mark/expired"
 		kill -TERM "$b_pid" 2>/dev/null || exit 0
 		b_sleep=''
 		sleep 10 &
 		b_sleep=$!
-		if [ -n "$b_stop" ]; then kill "$b_sleep" 2>/dev/null; exit 0; fi
-		wait "$b_sleep" || exit 0
+		if [ -n "$b_stop" ]; then kill -KILL "$b_sleep" 2>/dev/null; exit 0; fi
+		wait "$b_sleep" || { kill -KILL "$b_sleep" 2>/dev/null; exit 0; }
 		command -v pkill >/dev/null 2>&1 && pkill -KILL -P "$b_pid"
 		kill -KILL "$b_pid"
 	) </dev/null >/dev/null 2>&1 &
@@ -136,20 +175,33 @@ bounded() {
 	# it, and the watchdog, rather than leave them running detached (holding dpkg's lock, say).
 	# The trap is set only now: a watchdog forked with it in place could lose its TERM (under dash,
 	# once in 60 runs, it then waited on its sleep for good). It runs without set -e, as any of its
-	# kills may find nothing left to signal.
-	trap 'set +e; command -v pkill >/dev/null 2>&1 && pkill -P "$b_dog"; kill -TERM "$b_pid" "$b_dog" 2>/dev/null; rm -rf "$b_mark"; exit 130' INT TERM
+	# kills may find nothing left to signal. An interrupt that came before it is acted on now.
+	b_trap='set +e; command -v pkill >/dev/null 2>&1 && pkill -KILL -P "$b_dog"; kill -TERM "$b_pid" "$b_dog" 2>/dev/null; rm -rf "$b_mark"; exit 130'
+	trap "$b_trap" INT TERM
+	if [ -n "$b_int" ]; then eval "$b_trap"; fi
 	wait "$b_pid" || b_status=$?
-	trap - INT TERM
+	# The flag trap again for the cleanup. A wait it interrupts is repeated while the process lives,
+	# and a Ctrl-C that stops rm is followed by a second rm once the trap is cleared. pkill and rm
+	# run in the foreground: the order below needs pkill done first, and a Ctrl-C they survive
+	# (bash) is only ignored.
+	trap 'b_int=1' INT
+	trap - TERM
 	# The watchdog's sleep first, by its parent, then the watchdog, whose trap also covers a sleep
 	# not yet forked.
-	if command -v pkill >/dev/null 2>&1; then pkill -P "$b_dog" 2>/dev/null || true; fi
+	if command -v pkill >/dev/null 2>&1; then pkill -KILL -P "$b_dog" 2>/dev/null || true; fi
 	kill "$b_dog" 2>/dev/null || true
 	wait "$b_dog" 2>/dev/null || true
+	if [ -n "$b_int" ] && kill -0 "$b_dog" 2>/dev/null; then wait "$b_dog" 2>/dev/null || true; fi
 	if [ -e "$b_mark/expired" ]; then
 		printf 'setup: %s did not finish within %s s (a package mirror may be stalled); run setup again, or set QRVT_PM_TIMEOUT to a longer limit in seconds (0: none)\n' "$*" "$b_limit" >&2 || true
 		b_status=124
 	fi
 	rm -rf "$b_mark" || true
+	trap - INT
+	if [ -n "$b_int" ]; then
+		rm -rf "$b_mark" || true
+		exit 130
+	fi
 	return "$b_status"
 }
 
