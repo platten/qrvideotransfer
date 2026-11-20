@@ -2581,15 +2581,19 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   `writeInputs`' folder, which changes the folder's modification time, and encodes it through the
   lossless raw backend, asserting only the skipped-link warning; its bytes vary, its outcome cannot.
   No shared helper was added: the two packages that need one each have `fixTimes`, and sharing it
-  would take a non-test package. **Not fixed, recorded:** the helpers fix times, not modes. Their
-  files and folders are created as 0600 and 0750 less the process's umask (on Windows the system
-  reports its own modes), and the manifest records the mode, so a transfer repeats from run to run
-  on one machine but its bytes can differ between machines (the development machine and a CI
-  runner, say). A filmed outcome near a margin could therefore differ between a local run and CI;
-  fixing it means setting the modes in both `fixTimes`, **deferred to M4's second pull request**,
-  knowingly (designer's ruling, 2026-11-19). The frame vectors and the reference video (FORMAT.md
-  section 13) fix their input's mode as well as its time: a read-only file, which every system
-  reports as 0444, since the manifest records the mode.
+  would take a non-test package. **Modes, fixed in M4's second pull request:** the helpers fixed
+  times, not modes, until then. Their files and folders were created as 0600 and 0750 less the
+  process's umask (on Windows the system reports its own modes), and the manifest records the mode,
+  so a transfer repeated from run to run on one machine but its bytes could differ between machines
+  (the development machine and a CI runner, say), and a filmed outcome near a margin with them.
+  Both `fixTimes` now also set every file to 0666 and every folder to 0777 (`TestFixedInputs` in
+  each package): chmod sets those exactly on Unix whatever the umask, and they are what Windows
+  reports for a file or folder that is not read-only, so every target encodes the same bytes. A
+  read-only file (0444) would match everywhere too, but a read-only folder (0555) cannot be emptied
+  on Unix, and a decode recreates the folder's mode in the test's output. The frame vectors and the
+  reference video (FORMAT.md section 13) fix their input's mode as well as its time, a read-only
+  file, which every system reports as 0444; they do not use the helpers, so their golden data is
+  unchanged.
   The tests affected, by the reviewer's survey:
   - **Near a margin, asserting only "decodes", could flip in CI:**
     `TestRoundTripMatrix/iphone-hdr-1080p30-gray4-normal` (always on, below section 11's condition
