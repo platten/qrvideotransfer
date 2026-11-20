@@ -371,3 +371,12 @@ func TestPackagesWholeModule(t *testing.T) {
 		t.Errorf("packages() = %q, want the whole module", got)
 	}
 }
+
+// TestPackagesNoMatch: a pattern that names no package is an error that says so, not go list's
+// warning read as package names (review of 3ba96bf).
+func TestPackagesNoMatch(t *testing.T) {
+	got, err := packages("", module+"/docs/...")
+	if err == nil || !strings.Contains(err.Error(), "matched no packages") {
+		t.Errorf("packages(docs/...) = %q, %v; want an error naming the pattern", got, err)
+	}
+}
