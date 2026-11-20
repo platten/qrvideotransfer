@@ -359,3 +359,15 @@ func TestTestCommand(t *testing.T) {
 		}
 	}
 }
+
+// TestPackagesWholeModule: packages without a pattern lists the whole module, as pkgDirs (the
+// platforms task) relies on; go list without one would list only the current directory's package.
+func TestPackagesWholeModule(t *testing.T) {
+	got, err := packages("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(got, module+"/internal/video") || !slices.Contains(got, module+"/internal/vision") {
+		t.Errorf("packages() = %q, want the whole module", got)
+	}
+}
