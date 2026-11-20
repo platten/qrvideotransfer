@@ -549,11 +549,19 @@ func packages(tags string, patterns ...string) ([]string, error) {
 	if tags != "" {
 		args = append(args, "-tags="+tags)
 	}
-	out, err := output("go", append(args, patterns...)...)
+	// Package names from stdout only: go list's warnings and downloads go to stderr.
+	var stderr strings.Builder
+	cmd := exec.Command("go", append(args, patterns...)...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("go list: %w: %s", err, out)
+		return nil, fmt.Errorf("go list: %w: %s", err, stderr.String())
 	}
-	return strings.Fields(out), nil
+	pkgs := strings.Fields(string(out))
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("go list %s: no packages: %s", strings.Join(patterns, " "), strings.TrimSpace(stderr.String()))
+	}
+	return pkgs, nil
 }
 
 // mergeProfiles writes the coverage profiles srcs, in order, to dst as one profile with the first's
