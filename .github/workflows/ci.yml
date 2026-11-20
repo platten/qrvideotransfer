@@ -66,7 +66,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-2025, windows-11-arm]
     runs-on: ${{ matrix.os }}
-    # The 2 race steps' 15 + 21 minutes + 45 for the rest (tools/dev fixedStepsBudget), rounded up to
+    # The 2 race steps' 15 + 21 minutes + 48 for the rest (tools/dev fixedStepsBudget), rounded up to
     # 85. Each step's limit: the larger of 2x the slowest runner's median and 1.3x the largest
     # passing time on any runner, rounded up, at least 5 minutes (DESIGN.md section 17).
     timeout-minutes: 85

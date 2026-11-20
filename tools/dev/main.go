@@ -508,12 +508,12 @@ func selectRuns(runs [][]string, part string) ([][]string, error) {
 }
 
 // fixedStepsBudget is the time, in minutes, that the check job's limit allows for every step but
-// the two race steps a runner runs (designer's ruling, 2026-11-19; DESIGN.md section 17). On
-// macos-26-intel the non-race steps took 17.8 to 28.0 minutes, median 21.2, in the six passing
-// runs 44474815418 to 44627182924 (ubuntu-24.04, whose steps differ, a median of 23.6); 45 is
-// about twice that. With the race steps at their limits (15 + 21) it makes 81, and the job's
+// the two race steps a runner runs (designer's ruling, 2026-11-19; DESIGN.md section 17): twice
+// the largest median of those steps on any runner, rounded up. In the six passing runs
+// 44474815418 to 44627182924 that was ubuntu-24.04's 23.6 minutes (macos-26-intel 21.2, 17.8 to
+// 28.0): 47.2, so 48. With the race steps at their limits (15 + 21) it makes 84, and the job's
 // limit is 85.
-const fixedStepsBudget = 45
+const fixedStepsBudget = 48
 
 // checkJobLimits returns, from ci.yml, the check job's timeout-minutes and the timeout-minutes of
 // each of its race steps, in order.

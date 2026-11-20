@@ -1855,13 +1855,14 @@ section 13).
   lint 39 s). The coverage step's 20 minutes, which one slow host passed in attempt 1 of run
   44581210423 (every package about twice its usual time, section 19), became 18 + 7; that host's
   other packages took 16.3 minutes. **The job's limit** is 85 minutes: the two race steps a runner
-  runs, 15 + 21, plus 45 for every other step (`tools/dev` `fixedStepsBudget`, checked by a test
-  against all four race steps) make 81, rounded up to a multiple of 5. The 45 is about twice the
-  non-race steps' median on macos-26-intel, 21.2 minutes (17.8 to 28.0; ubuntu-24.04, whose steps
-  differ, 23.6); the whole job there took 38.9 minutes (median; 32.8 to 51.5), and 85 is above
-  twice that. **Not covered, by design:** a host about twice as slow as usual on every step at
-  once can stay inside each step's limit and still reach the job's 85 minutes, and fails there;
-  one more than twice as slow fails at the first step it overruns.
+  runs, 15 + 21, plus 48 for every other step (`tools/dev` `fixedStepsBudget`, checked by a test
+  against all four race steps) make 84, rounded up to a multiple of 5. The 48 follows the same
+  rule as the steps: twice the largest median of the non-race steps on any runner, ubuntu-24.04's
+  23.6 minutes (47.2, rounded up); macos-26-intel's is 21.2 (17.8 to 28.0). The whole job on
+  macos-26-intel took 38.9 minutes (median; 32.8 to 51.5), and 85 is above twice that, so it is
+  about 2.2 times the median job. **Not covered, by design:** a host more than about 2.2 times as
+  slow as the median job, on every step at once, can stay inside each step's limit and still fail
+  at the job's 85 minutes (twice the slowest run, 51.5, would be 103).
   The detector's hostile-cost tests (`TestDetectThreeHostile` 16 times, `TestDetectThreeHostile4K`
   and `TestDetectHostileGrid4K` 6, `TestDetectHostileGrid` 2; SECURITY.md section 9.1) bound a
   ratio to a real code's Detect in the same process and run serially. The ratio is the median, over
