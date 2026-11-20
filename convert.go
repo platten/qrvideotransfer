@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
+	"github.com/platten/qrvideotransfer/internal/frame"
 	"github.com/platten/qrvideotransfer/internal/payload"
 	"github.com/platten/qrvideotransfer/internal/pipeline"
 	"github.com/platten/qrvideotransfer/internal/video"
@@ -67,11 +69,7 @@ func convertError(err error) error {
 	case err == nil:
 		return nil
 	case errors.As(err, &short):
-		e := &NotEnoughDataError{}
-		for _, s := range short.Blocks {
-			e.Blocks = append(e.Blocks, Shortfall(s))
-		}
-		return e
+		return convertShort(short)
 	case errors.As(err, &unsafe):
 		return &UnsafeArchiveError{Path: unsafe.Path, Reason: unsafe.Reason}
 	case errors.As(err, &version):
@@ -86,4 +84,30 @@ func convertError(err error) error {
 		return fmt.Errorf("%w: %w", ErrMissingSignature, err)
 	}
 	return err
+}
+
+// convertShort turns the pipeline's ShortError into a NotEnoughDataError with its diagnostics, or,
+// when the captures agree that the header names an unsupported format version, modulation or inner
+// code, into an UnsupportedVersionError naming the value (FORMAT.md section 14).
+func convertShort(short *pipeline.ShortError) error {
+	if r := short.Reject; r != nil {
+		switch r.Reason {
+		case frame.HeaderVersion:
+			return &UnsupportedVersionError{What: "format version", Value: int(r.Header.Version)}
+		case frame.HeaderModulation:
+			return &UnsupportedVersionError{What: "modulation", Value: int(r.Header.Modulation)}
+		case frame.HeaderInner:
+			return &UnsupportedVersionError{What: "inner code", Value: int(r.Header.InnerCode)}
+		}
+	}
+	e := &NotEnoughDataError{Captures: short.Captures, Located: short.Located, HeadersRead: short.HeadersRead,
+		Other: short.Other, FramesSeen: short.FramesSeen, FramesTotal: short.FramesTotal, Descriptor: short.Descriptor,
+		LockedRate: short.LockedRate}
+	for _, s := range short.Blocks {
+		e.Blocks = append(e.Blocks, Shortfall(s))
+	}
+	if short.Reject != nil {
+		e.Reject = strings.TrimPrefix(short.Reject.Error(), "frame: ")
+	}
+	return e
 }

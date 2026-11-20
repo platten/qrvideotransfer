@@ -91,7 +91,10 @@ func Encode(ctx context.Context, o EncodeOptions) (*EncodeReport, error) {
 // Decode recovers the files carried by one or more recordings of a code video. Recordings add up:
 // soft bits and recovered shards are keyed by session and frame index. A decode that lacks data
 // returns a *NotEnoughDataError naming the short blocks (none when not even the stream descriptor
-// could be read) and writes nothing.
+// could be read), with what the recordings showed, and writes nothing. When no header was read and
+// at least 3 captures, half of those whose finders were found, agree that the header names an
+// unsupported format version, modulation or inner code, it returns an *UnsupportedVersionError
+// naming the value instead.
 func Decode(ctx context.Context, o DecodeOptions) (*DecodeReport, error) {
 	if o.StateDir != "" {
 		return nil, fmt.Errorf("%w: resuming with a state folder (--state-dir)", ErrNotImplemented)
