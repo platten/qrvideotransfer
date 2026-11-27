@@ -1,0 +1,1 @@
+Section 4, T2: a crafted recording can make a decode end in exit 5 (an agreed unsupported version) instead of exit 3; that carries no more than the refusal itself (designer's ruling, M4's third pull request).

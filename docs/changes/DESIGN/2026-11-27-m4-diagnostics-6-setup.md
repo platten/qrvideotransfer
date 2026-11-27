@@ -1,0 +1,1 @@
+Sections 16 and 19 (designer's ruling): a package install gets 30 minutes in both setup scripts, apt-get update 5, the message says slow or stalled, and the CI steps that run the scripts 40 minutes; main's red run 44727272641 at 9e4f53a (the 900 s install limit on a slow mirror), its one infrastructure rerun on 2026-11-27, green. Section 19: the TMPDIR paragraph re-wrapped.
