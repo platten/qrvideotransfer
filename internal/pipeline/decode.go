@@ -548,7 +548,7 @@ func (d *decoder) flush() error {
 
 // shortfall describes what is missing, and what the captures showed.
 func (d *decoder) shortfall() error {
-	e := ShortError{Captures: d.stats.Captures, Located: d.diag.finders, HeadersRead: d.diag.headers, Other: d.diag.other,
+	e := ShortError{Captures: d.stats.Captures, Located: d.diag.finders, HeadersRead: d.diag.headers, Other: d.diag.others(d.key),
 		FramesSeen: d.framesSeen, FramesTotal: d.stats.FramesTotal, Descriptor: d.desc != nil, Reject: d.diag.agreed(),
 		LockedRate: d.lock.locked()}
 	if d.store == nil {

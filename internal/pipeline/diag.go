@@ -12,10 +12,11 @@ const (
 	// and value, for it to be reported. A noise pattern can pass the header's CRC-16 by chance and
 	// then fail Validate with a random value; the same value in three captures does not happen by
 	// chance. The refusal must also be that of at least half of the captures whose finders were
-	// found, and no header may have been read.
+	// found, its headers must name at least two frame indices (a still frame repeating one false
+	// CRC pass does not agree), and no header may have been read.
 	agreeCaptures = 3
-	// agreeKinds is the most distinct refusals counted; later ones are ignored, so that a hostile
-	// recording cannot grow the count.
+	// agreeKinds is the most distinct refusals, and of transfers read before the decode locks onto
+	// one, counted; later ones are ignored, so that a hostile recording cannot grow the counts.
 	agreeKinds = 8
 
 	// lockSample bounds the frames the locked-rate check follows: every frame of a loop of up to
@@ -37,14 +38,22 @@ const (
 // diagnostics counts what the captures showed short of a code.
 type diagnostics struct {
 	finders, headers, other int64
+	early                   []keyCount // headers read before the decode locked onto a transfer
 	refusals                []refusalCount
+}
+
+// keyCount is how many captures showed a transfer's header.
+type keyCount struct {
+	key params
+	n   int64
 }
 
 // refusalCount is a header refusal, the first seen, and how many captures gave it.
 type refusalCount struct {
-	e     frame.HeaderError
-	value uint32
-	n     int64
+	e      frame.HeaderError
+	value  uint32
+	n      int64
+	spread bool // the refused headers named more than one frame index
 }
 
 // note counts capture r; key is the transfer decoded, nil before one is.
@@ -55,21 +64,46 @@ func (g *diagnostics) note(r *captureResult, key *params) {
 	switch {
 	case r.key != params{}:
 		g.headers++
-		if key != nil && r.key != *key {
-			g.other++
+		if key != nil {
+			if r.key != *key {
+				g.other++
+			}
+			return
+		}
+		for i := range g.early {
+			if g.early[i].key == r.key {
+				g.early[i].n++
+				return
+			}
+		}
+		if len(g.early) < agreeKinds {
+			g.early = append(g.early, keyCount{r.key, 1})
 		}
 	case r.reject.Reason >= frame.HeaderReserved: // a Validate failure: the CRC passed
 		v := refusedValue(r.reject)
 		for i := range g.refusals {
 			if c := &g.refusals[i]; c.e.Reason == r.reject.Reason && c.value == v {
 				c.n++
+				c.spread = c.spread || r.reject.Header.FrameIndex != c.e.Header.FrameIndex
 				return
 			}
 		}
 		if len(g.refusals) < agreeKinds {
-			g.refusals = append(g.refusals, refusalCount{r.reject, v, 1})
+			g.refusals = append(g.refusals, refusalCount{r.reject, v, 1, false})
 		}
 	}
+}
+
+// others returns the captures whose header was of a transfer other than key, the one decoded (nil
+// when none was).
+func (g *diagnostics) others(key *params) int64 {
+	n := g.other
+	for _, c := range g.early {
+		if key == nil || c.key != *key {
+			n += c.n
+		}
+	}
+	return n
 }
 
 // refusedValue returns the value a Validate refusal names.
@@ -101,7 +135,7 @@ func (g *diagnostics) agreed() *frame.HeaderError {
 			best = &g.refusals[i]
 		}
 	}
-	if best == nil || best.n < agreeCaptures || 2*best.n < g.finders {
+	if best == nil || best.n < agreeCaptures || 2*best.n < g.finders || !best.spread {
 		return nil
 	}
 	e := best.e
@@ -120,6 +154,7 @@ type lockTrack struct {
 	frames []lockFrame // followed frames, frame k at k / stride
 	pairs  int         // comparisons of finished later passes with the first
 	diff   float64     // their differences from the first pass, summed
+	abs    float64     // the differences' magnitudes, summed
 }
 
 // lockFrame is one followed frame's passes.
@@ -161,10 +196,24 @@ func (t *lockTrack) see(k uint32, index int, clean float32) {
 func (t *lockTrack) compare(e *lockFrame) {
 	t.pairs++
 	t.diff += float64(e.cur - e.first)
+	t.abs += math.Abs(float64(e.cur - e.first))
 }
 
 // locked reports whether the camera is locked to the display rate.
 func (t *lockTrack) locked() bool {
+	s := t.stats()
+	return s.pairs >= lockMinPairs && math.Abs(s.diff) <= lockTolerance && s.first < lockMixed
+}
+
+// lockStats are the comparisons of later passes with the first: their count, their mean signed and
+// absolute differences, and the first passes' mean.
+type lockStats struct {
+	pairs            int
+	diff, abs, first float64
+}
+
+// stats returns the comparisons so far, the latest pass of each frame included.
+func (t *lockTrack) stats() lockStats {
 	u := *t
 	sum, n := 0.0, 0
 	for i := range t.frames {
@@ -174,5 +223,8 @@ func (t *lockTrack) locked() bool {
 			n++
 		}
 	}
-	return u.pairs >= lockMinPairs && math.Abs(u.diff) <= lockTolerance*float64(u.pairs) && sum < lockMixed*float64(n)
+	if u.pairs == 0 {
+		return lockStats{}
+	}
+	return lockStats{u.pairs, u.diff / float64(u.pairs), u.abs / float64(u.pairs), sum / float64(n)}
 }
