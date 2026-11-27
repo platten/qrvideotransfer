@@ -249,7 +249,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-26, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -259,14 +259,14 @@ jobs:
       # Go, wasmtime and zig come from their release archives with pinned SHA-256.
       - name: scripts/setup.sh --yes --spike --cross
         if: runner.os != 'Windows'
-        timeout-minutes: 35
+        timeout-minutes: 40
         shell: bash
         run: scripts/setup.sh --yes --spike --cross
 
       # winget installs ffmpeg (Gyan.FFmpeg); Go, wasmtime and zig come from their release archives.
       - name: scripts/setup.ps1 -Yes -Spike -Cross
         if: runner.os == 'Windows'
-        timeout-minutes: 35
+        timeout-minutes: 40
         shell: pwsh
         run: scripts/setup.ps1 -Yes -Spike -Cross
 
@@ -325,14 +325,14 @@ jobs:
           - distro: archlinux
             image: archlinux:latest@sha256:d4594bb2300cba11f41c2f27923eb56f63d9988909c402f9c95517d1e362c899
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: scripts/setup.sh --yes --cross, then check the installed versions
-        timeout-minutes: 25
+        timeout-minutes: 40
         shell: bash
         run: |
           docker run --rm --security-opt no-new-privileges -v "$PWD:/src:ro" -w /src -e GOFLAGS=-buildvcs=false "$IMAGE" sh -euc '

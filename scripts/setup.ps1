@@ -51,8 +51,9 @@ $WasmtimeSha256 = @{
 function Have($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
 
 # The limit of each winget install, in seconds: a stalled download otherwise hangs the setup without
-# a word. QRVT_PM_TIMEOUT sets it (0: none).
-$PkgTimeout = 900
+# a word. 30 minutes, since a slow mirror that still progresses cannot be told from a stalled one
+# by time alone. QRVT_PM_TIMEOUT sets it (0: none).
+$PkgTimeout = 1800
 if ($env:QRVT_PM_TIMEOUT) {
     if ($env:QRVT_PM_TIMEOUT -notmatch '^[0-9]+$') { throw "setup: QRVT_PM_TIMEOUT must be a number of seconds, not '$env:QRVT_PM_TIMEOUT'" }
     $PkgTimeout = [int]$env:QRVT_PM_TIMEOUT
@@ -65,7 +66,7 @@ function Invoke-Bounded([int]$Seconds, [string]$What, [string]$FilePath, [string
     $null = $p.Handle # keeps the handle, without which ExitCode stays empty
     if ($Seconds -gt 0 -and -not $p.WaitForExit($Seconds * 1000)) {
         try { $p.Kill($true) } catch { $p.Kill() } # the process tree where .NET can (PowerShell 7)
-        throw "setup: $What did not finish within $Seconds s (a download may be stalled); run setup again, or set QRVT_PM_TIMEOUT to a longer limit in seconds (0: none)"
+        throw "setup: $What did not finish within $Seconds s (a download may be slow or stalled); run setup again, or set QRVT_PM_TIMEOUT to a longer limit in seconds (0: none)"
     }
     $p.WaitForExit()
     return $p.ExitCode

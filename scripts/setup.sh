@@ -14,7 +14,7 @@
 # Go, wasmtime and zig come from their vendors' release archives, checked against the SHA-256
 # sums pinned below, and go under $QRVT_PREFIX (default ~/.local). git, curl, xz, ffmpeg and
 # qemu-user-static come from the system package manager: Homebrew, apt, dnf or pacman.
-# Each package-manager command is stopped after 15 minutes (apt-get update after 5), so that a
+# Each package install is stopped after 30 minutes (apt-get update after 5), so that a
 # stalled mirror fails with a message instead of hanging; QRVT_PM_TIMEOUT sets that limit in
 # seconds for every such command (0: none).
 set -eu
@@ -85,9 +85,11 @@ die() {
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # Limits of the package-manager commands, in seconds: a stalled mirror otherwise hangs the setup
-# without a word (PR #52's CI run waited 35 minutes in apt-get update). apt also gives up on a
-# connection silent for 30 s and retries a failed download 3 times.
-pm_timeout=${QRVT_PM_TIMEOUT:-900}
+# without a word (PR #52's CI run waited 35 minutes in apt-get update). An install gets 30 minutes:
+# a slow mirror that still progresses cannot be told from a stalled one by time alone (main's run
+# 44727272641 stopped one at 15). apt also gives up on a connection silent for 30 s and retries a
+# failed download 3 times, which is what catches a true stall.
+pm_timeout=${QRVT_PM_TIMEOUT:-1800}
 update_timeout=${QRVT_PM_TIMEOUT:-300}
 case $pm_timeout in '' | *[!0-9]*) die "QRVT_PM_TIMEOUT must be a number of seconds, not '$pm_timeout'" ;; esac
 apt_opts="-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3"
@@ -146,7 +148,7 @@ bounded() {
 	kill "$b_dog" 2>/dev/null || true
 	wait "$b_dog" 2>/dev/null || true
 	if [ -e "$b_mark/expired" ]; then
-		printf 'setup: %s did not finish within %s s (a package mirror may be stalled); run setup again, or set QRVT_PM_TIMEOUT to a longer limit in seconds (0: none)\n' "$*" "$b_limit" >&2 || true
+		printf 'setup: %s did not finish within %s s (a package mirror may be slow or stalled); run setup again, or set QRVT_PM_TIMEOUT to a longer limit in seconds (0: none)\n' "$*" "$b_limit" >&2 || true
 		b_status=124
 	fi
 	rm -rf "$b_mark" || true
