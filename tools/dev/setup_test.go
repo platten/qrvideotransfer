@@ -383,3 +383,39 @@ func TestSetupPs1BoundedRuns(t *testing.T) {
 		}
 	}
 }
+
+// TestSetupLimits: a package install may take 30 minutes and an index update 5, in both scripts
+// (designer's ruling, 2026-11-20: main's run 44727272641 hit the 15-minute limit on a slow mirror
+// that was still progressing, which a time limit cannot tell from a stalled one; the Acquire
+// timeouts and curl's speed limit catch a true stall), the message says "slow or stalled", and
+// each CI step that runs a script leaves room for an update and an install.
+func TestSetupLimits(t *testing.T) {
+	sh, ps := readScript(t, "setup.sh"), readScript(t, "setup.ps1")
+	for _, c := range []struct{ script, name, want string }{
+		{sh, "setup.sh", "pm_timeout=${QRVT_PM_TIMEOUT:-1800}"},
+		{sh, "setup.sh", "update_timeout=${QRVT_PM_TIMEOUT:-300}"},
+		{sh, "setup.sh", "(a package mirror may be slow or stalled)"},
+		{ps, "setup.ps1", "$PkgTimeout = 1800"},
+		{ps, "setup.ps1", "(a download may be slow or stalled)"},
+	} {
+		if !strings.Contains(c.script, c.want) {
+			t.Errorf("%s lacks %q", c.name, c.want)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ci := string(b)
+	for _, step := range []string{"- name: scripts/setup.sh --yes --spike --cross", "- name: scripts/setup.ps1 -Yes -Spike -Cross",
+		"- name: scripts/setup.sh --yes --cross, then check the installed versions"} {
+		i := strings.Index(ci, step)
+		if i < 0 {
+			t.Fatalf("ci.yml has no step %q", step)
+		}
+		m := regexp.MustCompile(`timeout-minutes: (\d+)`).FindStringSubmatch(ci[i:])
+		if m == nil || m[1] != "40" {
+			t.Errorf("%q: limit %v minutes, want 40 (5 + 30 and the downloads)", step, m)
+		}
+	}
+}
