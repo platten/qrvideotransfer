@@ -95,12 +95,25 @@ func (g *diagnostics) note(r *captureResult, key *params) {
 	}
 }
 
-// others returns the captures whose header was of a transfer other than key, the one decoded (nil
-// when none was).
+// others returns the captures whose header was of a transfer other than key, the one decoded. When
+// none was (no capture was located), the transfer is the one whose header was read most often, the
+// first seen of those that tie.
 func (g *diagnostics) others(key *params) int64 {
+	if key == nil {
+		best := -1
+		for i, c := range g.early {
+			if best < 0 || c.n > g.early[best].n {
+				best = i
+			}
+		}
+		if best < 0 {
+			return g.other
+		}
+		key = &g.early[best].key
+	}
 	n := g.other
 	for _, c := range g.early {
-		if key == nil || c.key != *key {
+		if c.key != *key {
 			n += c.n
 		}
 	}
