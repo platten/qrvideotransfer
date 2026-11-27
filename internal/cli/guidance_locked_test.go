@@ -37,22 +37,28 @@ func TestLockedRateGuidanceText(t *testing.T) {
 
 // TestFailureJSONUnchanged: for the failure classes that existed before the guidance by class,
 // --json's error line keeps its fields (type, message, guidance, exit), its message and its exit
-// code; only the guidance text of a shortfall and of an unsupported version changed.
+// code; only the guidance text of a shortfall naming blocks and of an unsupported version changed.
+// The other classes' guidance is pinned to its text before (main at 9e4f53a), byte for byte; "-"
+// marks the two that changed, and "" an error line without guidance.
 func TestFailureJSONUnchanged(t *testing.T) {
 	f := newFiles(t)
 	for _, c := range []struct {
-		err  error
-		exit int
+		err      error
+		exit     int
+		guidance string
 	}{
-		{&qrvt.NotEnoughDataError{Blocks: []qrvt.Shortfall{{Have: 1, Need: 4}}}, 3},
-		{&qrvt.NotEnoughDataError{}, 3},
-		{&qrvt.UnsupportedVersionError{What: "stream version", Value: 9}, 5},
-		{&qrvt.UnsafeArchiveError{Path: "../x", Reason: "leaves the folder"}, 5},
-		{&qrvt.LimitError{Limit: "unpacked size", Value: 2, Max: 1, Flag: "--max-size"}, 5},
-		{qrvt.ErrWrongPassphrase, 4},
-		{qrvt.ErrBadSignature, 4},
-		{qrvt.ErrMissingSignature, 4},
-		{errors.New("disk full"), 1},
+		{&qrvt.NotEnoughDataError{Blocks: []qrvt.Shortfall{{Have: 1, Need: 4}}}, 3, "-"},
+		{&qrvt.NotEnoughDataError{}, 3, "Record one more loop and pass both files to qrvt decode."},
+		{&qrvt.UnsupportedVersionError{What: "stream version", Value: 9}, 5, "-"},
+		{&qrvt.UnsafeArchiveError{Path: "../x", Reason: "leaves the folder"}, 5,
+			"Nothing was written. The archive tries to do something unsafe; do not trust its sender."},
+		{&qrvt.LimitError{Limit: "unpacked size", Value: 2, Max: 1, Flag: "--max-size"}, 5,
+			"If you expect a transfer this large, raise the limit with --max-size."},
+		{qrvt.ErrWrongPassphrase, 4, "Check the passphrase (and the --passphrase-file, if you used one) and try again."},
+		{qrvt.ErrBadSignature, 4, "The video was altered or damaged after it was signed. Nothing was decrypted or unpacked."},
+		{qrvt.ErrMissingSignature, 4, "The transfer is not signed by any key given with --verify-key. Nothing was decrypted or " +
+			"unpacked. Check that you have the sender's current public key."},
+		{errors.New("disk full"), 1, ""},
 	} {
 		out, _, err := run(t, &fakeAPI{err: c.err}, nil, "--json", "decode", f.r1, "-o", f.dir)
 		if ExitCode(err) != c.exit {
@@ -70,6 +76,9 @@ func TestFailureJSONUnchanged(t *testing.T) {
 		}
 		if !slices.Equal(keys, want) || line["type"] != "error" || line["message"] != c.err.Error() || line["exit"] != float64(c.exit) {
 			t.Errorf("%v: error line %v, want fields %v, message %q, exit %d", c.err, line, want, c.err.Error(), c.exit)
+		}
+		if g, _ := line["guidance"].(string); c.guidance != "-" && g != c.guidance {
+			t.Errorf("%v: guidance %q, want it unchanged, %q", c.err, g, c.guidance)
 		}
 	}
 }
