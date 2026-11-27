@@ -118,11 +118,12 @@ const otherMin = 3
 
 // shortGuidance says what a decode lacks, with its numbers, in one sentence, and what to do in
 // another (DESIGN.md section 13), by failure class: no code found, finders but no header read,
-// another transfer, headers but no stream descriptor, and blocks short, for example "2.1% short: 21
-// shards missing in 1 of 1 blocks (96 of 96 code frames seen). Record one more loop and pass both
-// files to qrvt decode." When the camera is locked to the display rate, the last two ask for a
-// faster camera instead. An error without diagnostics (no captures counted) gets the blocks it
-// names, if any, and the generic action.
+// another transfer (when no blocks are known; beside a blocks shortfall it is a clause of the
+// shortfall's sentence), headers but no stream descriptor, and blocks short, for example "2.1%
+// short: 21 shards missing in 1 of 1 blocks (96 of 96 code frames seen). Record one more loop and
+// pass both files to qrvt decode." When the camera is locked to the display rate, the last two
+// ask for a faster camera instead. An error without diagnostics (no captures counted) gets the
+// blocks it names, if any, and the generic action.
 func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeOptions) string {
 	more := "Record one more loop and pass all the recordings to qrvt decode."
 	switch {
@@ -148,7 +149,7 @@ func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeO
 		return fmt.Sprintf("The code's corners were found in %d of %d captures, but no frame header could be read%s. "+
 			"Film closer and steadier, with the screen sharp and evenly lit, and check that the video was made by qrvt.",
 			e.Located, e.Captures, why)
-	case e.Other >= otherMin:
+	case e.Other >= otherMin && len(e.Blocks) == 0:
 		return fmt.Sprintf("%d of the %d captures with a frame header showed another transfer, which was ignored: "+
 			"a decode follows the first transfer it reads. Decode each transfer's recordings separately.", e.Other, e.HeadersRead)
 	case len(e.Blocks) > 0:
@@ -163,6 +164,10 @@ func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeO
 		}
 		pct := float64(shards) * 100 / float64(max(need*total, 1))
 		missing = fmt.Sprintf("%.1f%% short: %d shards missing in %d of %d blocks%s", pct, shards, len(e.Blocks), total, frames)
+		if e.Other >= otherMin {
+			missing += fmt.Sprintf(", and %d of the %d captures with a frame header showed another transfer, which was ignored",
+				e.Other, e.HeadersRead)
+		}
 	case e.Captures > 0:
 		missing = fmt.Sprintf("Frame headers were read in %d of %d captures%s, but not the stream descriptor", e.HeadersRead,
 			e.Captures, frames)
@@ -172,10 +177,11 @@ func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeO
 	if e.LockedRate {
 		clean := ""
 		if last != nil && last.CleanFraction > 0 {
-			clean = fmt.Sprintf(", %.0f%% of each capture clean", 100*last.CleanFraction)
+			clean = fmt.Sprintf(", %.0f%% of each capture clean on average", 100*last.CleanFraction)
 		}
-		return missing + ", and every pass repeated the same frame mixing" + clean + ": the camera is locked to the display rate. " +
-			"Film again with a camera at least twice the display rate, such as 60 fps for a 30 fps video: more passes at this rate repeat the same mixing."
+		return missing + ", and every pass repeated the same frame mixing" + clean +
+			": the camera is locked to the display rate. Film again with a camera at least twice the display rate, " +
+			"such as 60 fps for a 30 fps video: more passes at this rate repeat the same mixing."
 	}
 	return missing + ". " + more
 }
