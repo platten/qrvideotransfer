@@ -116,6 +116,14 @@ func TestShortDiagnostics(t *testing.T) {
 		{"other session first", cat(rep(captureResult{finders: true, key: other}, 2), rep(located(key, 0, nil), 2),
 			rep(captureResult{finders: true, key: key}, 1)),
 			ShortError{Captures: 5, Located: 5, HeadersRead: 5, Other: 2, FramesTotal: f}, false},
+		// One transfer's headers read in every capture, none located (the mesh fit failed, say):
+		// nothing is of another transfer (re-review of M4's third pull request).
+		{"headers, never located", rep(captureResult{finders: true, key: key}, 4),
+			ShortError{Captures: 4, Located: 4, HeadersRead: 4}, false},
+		// Two transfers, none located: the one seen most is the transfer, the other is other.
+		{"two transfers, none located", cat(rep(captureResult{finders: true, key: other}, 2),
+			rep(captureResult{finders: true, key: key}, 3)),
+			ShortError{Captures: 5, Located: 5, HeadersRead: 5, Other: 2}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
