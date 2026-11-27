@@ -52,11 +52,15 @@ func TestFailureClasses(t *testing.T) {
 			[]string{"1.2% short", "50 shards missing in 2 of 4 blocks", "90 of 96 code frames", "Record one more loop and pass both files"}},
 		{"other session", &qrvt.NotEnoughDataError{Captures: 412, Located: 300, HeadersRead: 290, Other: 210, FramesSeen: 20, FramesTotal: 96}, 3,
 			[]string{"210 of the 290 captures", "another transfer", "Decode each transfer"}},
+		// Another transfer beside a blocks shortfall: the shortfall's numbers and action stay.
+		{"other session, blocks short", &qrvt.NotEnoughDataError{Blocks: short, Captures: 412, Located: 400, HeadersRead: 400,
+			Other: 12, FramesSeen: 90, FramesTotal: 96, Descriptor: true}, 3,
+			[]string{"1.2% short", "50 shards missing", "12 of the 400 captures", "another transfer", "Record one more loop"}},
 		{"unsupported version", &qrvt.UnsupportedVersionError{What: "format version", Value: 2}, 5,
 			[]string{"format version 2", "newer qrvt", "Update qrvt"}},
 		{"locked rate, blocks short", &qrvt.NotEnoughDataError{Blocks: short, Captures: 16, Located: 16, HeadersRead: 16, FramesSeen: 4,
 			FramesTotal: 4, Descriptor: true, LockedRate: true}, 3,
-			[]string{"1.2% short", "35%", "locked to the display rate", "at least twice the display rate"}},
+			[]string{"1.2% short", "35% of each capture clean on average", "locked to the display rate", "at least twice the display rate"}},
 		{"locked rate, no descriptor", &qrvt.NotEnoughDataError{Captures: 16, Located: 16, HeadersRead: 16, FramesSeen: 4, FramesTotal: 4,
 			LockedRate: true}, 3, []string{"stream descriptor", "locked to the display rate", "at least twice the display rate"}},
 	}
