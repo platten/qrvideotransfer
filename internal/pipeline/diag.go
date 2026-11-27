@@ -22,12 +22,13 @@ const (
 	// lockSample bounds the frames the locked-rate check follows: every frame of a loop of up to
 	// lockSample frames, else every ceil(F / lockSample)th.
 	lockSample = 4096
-	// lockTolerance is how far the later passes' best clean fractions may lie from the first
-	// pass's, on average over the frames compared, and still count as unchanged. One capture's
-	// clean fraction varies with the noise of the phase field: in locked simulated recordings by up
-	// to 0.03 from pass to pass on a 120 x 120 grid and up to 0.1 on a 212 x 120 grid (2026-11-20),
-	// which the average over the frames removes; a drift that moves the mixing shifts them all.
-	lockTolerance = 0.05
+	// lockTolerance is how far, in magnitude and on average over the frames compared, the later
+	// passes' best clean fractions may lie from the first pass's and still count as unchanged. One
+	// capture's clean fraction varies with the noise of the phase field. Measured (2026-11-27,
+	// simulated): the 27 locked recordings of TestLockedRateSafety that fall short averaged 0.004 to
+	// 0.038; frame-periodic cameras (25 and 40 fps against 30, F = 12) up to 0.068; a 24 fps camera,
+	// whose phase rotates from pass to pass (F = 12), 0.24 to 0.63.
+	lockTolerance = 0.12
 	// lockMinPairs is the fewest comparisons of a later pass with the first that the check needs.
 	lockMinPairs = 4
 	// lockMixed is the mean first-pass clean fraction below which part of every capture is mixed:
@@ -146,15 +147,15 @@ func (g *diagnostics) agreed() *frame.HeaderError {
 // (DESIGN.md section 13). A pass over a frame is a run of consecutive captures whose first header
 // names it; for each followed frame it keeps the best clean fraction of its first pass and of its
 // latest. The camera is locked when, for the frames seen in more than one pass, the later passes'
-// bests differ from the first's by at most lockTolerance on average (signed, so that the noise of
-// single captures cancels), over at least lockMinPairs comparisons, and the first passes' mean is
-// under lockMixed.
+// bests differ from the first's by at most lockTolerance in magnitude on average, over at least
+// lockMinPairs comparisons, and the first passes' mean is under lockMixed. The magnitude, not the
+// signed difference: a camera whose phase rotates from pass to pass changes every frame's clean
+// fraction, though not their mean.
 type lockTrack struct {
 	stride uint32
 	frames []lockFrame // followed frames, frame k at k / stride
 	pairs  int         // comparisons of finished later passes with the first
-	diff   float64     // their differences from the first pass, summed
-	abs    float64     // the differences' magnitudes, summed
+	abs    float64     // the magnitudes of their differences from the first pass, summed
 }
 
 // lockFrame is one followed frame's passes.
@@ -195,21 +196,20 @@ func (t *lockTrack) see(k uint32, index int, clean float32) {
 // compare counts the comparison of e's latest pass with its first.
 func (t *lockTrack) compare(e *lockFrame) {
 	t.pairs++
-	t.diff += float64(e.cur - e.first)
 	t.abs += math.Abs(float64(e.cur - e.first))
 }
 
 // locked reports whether the camera is locked to the display rate.
 func (t *lockTrack) locked() bool {
 	s := t.stats()
-	return s.pairs >= lockMinPairs && math.Abs(s.diff) <= lockTolerance && s.first < lockMixed
+	return s.pairs >= lockMinPairs && s.abs <= lockTolerance && s.first < lockMixed
 }
 
-// lockStats are the comparisons of later passes with the first: their count, their mean signed and
-// absolute differences, and the first passes' mean.
+// lockStats are the comparisons of later passes with the first: their count, their mean absolute
+// difference, and the first passes' mean.
 type lockStats struct {
-	pairs            int
-	diff, abs, first float64
+	pairs      int
+	abs, first float64
 }
 
 // stats returns the comparisons so far, the latest pass of each frame included.
@@ -226,5 +226,5 @@ func (t *lockTrack) stats() lockStats {
 	if u.pairs == 0 {
 		return lockStats{}
 	}
-	return lockStats{u.pairs, u.diff / float64(u.pairs), u.abs / float64(u.pairs), sum / float64(n)}
+	return lockStats{u.pairs, u.abs / float64(u.pairs), sum / float64(n)}
 }
