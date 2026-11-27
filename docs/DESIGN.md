@@ -1809,9 +1809,10 @@ package manager; without root or sudo the script says that qemu is missing and g
 what they are about to install, and ask, before installing anything. Every package-manager
 command (apt-get, dnf, pacman, brew, winget) has a limit, 30 minutes for an install and 5 for
 `apt-get update` (`QRVT_PM_TIMEOUT` sets it in seconds, 0 for none), after which it is stopped and
-the script fails, saying that a mirror may be slow or stalled; apt-get also gives up on a connection silent for 30 s and retries a download 3
-times, and the release archives' downloads stop on a stall (curl: under 1 KiB/s for a minute,
-retried 3 times; PowerShell: a 300 s timeout). The build and test scripts are thin wrappers around
+the script fails, saying that a mirror may be slow or stalled; apt-get also gives up on a
+connection silent for 30 s and retries a download 3 times, and the release archives' downloads
+stop on a stall (curl: under 1 KiB/s for a minute, retried 3 times; PowerShell: a 300 s
+timeout). The build and test scripts are thin wrappers around
 `go run ./tools/dev <task>`, so that logic exists once. CI calls the same scripts on all three systems.
 
 `install-tools` downloads golangci-lint, GoReleaser, syft (the SBOM generator) and actionlint as
@@ -2783,9 +2784,9 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   test's `t.Log` output is not printed, so macOS's behaviour stays as read in Apple's source, not
   observed (no `-v` was added to CI for it). This is the second BSD/GNU `mktemp` difference this
   pull request found (the first, `mktemp -u`, above), so a change to the shell scripts gets a
-  macOS CI run before it is called done. Checked for other GNU-only reliance in the setup tests: `pkill -f`/`-P`/`-KILL`, `ps -eo
-  args`, `sleep` with whole seconds, `sh -n`, `trap`, `kill -0` and `$$` are all POSIX or
-  BSD-compatible.
+  macOS CI run before it is called done. Checked for other GNU-only reliance in the setup tests:
+  `pkill -f`/`-P`/`-KILL`, `ps -eo args`, `sleep` with whole seconds, `sh -n`, `trap`, `kill -0` and
+  `$$` are all POSIX or BSD-compatible.
 - **A cache-restore error in the check job on macos-26-intel (2026-11-19).** In each of the
   eight job logs read, the "Vulnerability scan" step logged about 17,000 lines of
   `##[error]/usr/local/bin/gtar: ...: Cannot open: File exists` (for example
