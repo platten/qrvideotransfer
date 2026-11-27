@@ -50,7 +50,7 @@ func refused(key params, r frame.HeaderReason, e func(*frame.Header)) captureRes
 // TestShortDiagnostics: each failure class of DESIGN.md section 13 ends in a ShortError whose
 // counts say what the recordings showed, with processCapture stubbed. A refusal is agreed only when
 // at least agreeCaptures captures give the same reason and value, at least half of the captures
-// with finders, and no header was read.
+// with finders, with at least two frame indices among them, and no header was read.
 func TestShortDiagnostics(t *testing.T) {
 	key, truth := fixture(t)
 	f := int(key.frames)
@@ -70,10 +70,12 @@ func TestShortDiagnostics(t *testing.T) {
 	v := func(n uint8) func(*frame.Header) { return func(h *frame.Header) { h.Version = n } }
 	v2, crc := refused(key, frame.HeaderVersion, v(2)), refused(key, frame.HeaderCRC, nil)
 	mod5 := refused(key, frame.HeaderModulation, func(h *frame.Header) { h.Modulation = 5 })
+	// rep repeats r n times; a refused header's frame index counts up, as a playing video's does.
 	rep := func(r captureResult, n int) []captureResult {
 		out := make([]captureResult, n)
 		for i := range out {
 			out[i] = r
+			out[i].reject.Header.FrameIndex += uint32(i)
 		}
 		return out
 	}
@@ -96,6 +98,8 @@ func TestShortDiagnostics(t *testing.T) {
 		{"finders, header refused", rep(crc, 4), ShortError{Captures: 4, Located: 4}, false},
 		{"unsupported version", cat(rep(v2, 3), rep(crc, 1)), ShortError{Captures: 4, Located: 4, Reject: v2err}, false},
 		{"two agree", cat(rep(v2, 2), rep(crc, 2)), ShortError{Captures: 4, Located: 4}, false},
+		// A still frame: one false CRC pass repeated in every capture does not agree.
+		{"one frame index", []captureResult{v2, v2, v2, v2}, ShortError{Captures: 4, Located: 4}, false},
 		{"three agree of seven", cat(rep(v2, 3), rep(crc, 4)), ShortError{Captures: 7, Located: 7}, false},
 		{"values differ", cat(rep(v2, 2), rep(refused(key, frame.HeaderVersion, v(3)), 2)), ShortError{Captures: 4, Located: 4}, false},
 		{"a header was read", cat(rep(v2, 3), []captureResult{located(key, 0, nil)}),
@@ -107,6 +111,11 @@ func TestShortDiagnostics(t *testing.T) {
 			ShortError{Captures: 2, Located: 2, HeadersRead: 1, FramesSeen: 1, FramesTotal: f, Descriptor: true}, true},
 		{"other session", cat(rep(located(key, 0, nil), 2), rep(located(other, 0, nil), 3)),
 			ShortError{Captures: 5, Located: 5, HeadersRead: 5, Other: 3, FramesTotal: f}, false},
+		// Headers of another transfer read before the decode locked onto one (not located, so not
+		// locked onto) count too.
+		{"other session first", cat(rep(captureResult{finders: true, key: other}, 2), rep(located(key, 0, nil), 2),
+			rep(captureResult{finders: true, key: key}, 1)),
+			ShortError{Captures: 5, Located: 5, HeadersRead: 5, Other: 2, FramesTotal: f}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
