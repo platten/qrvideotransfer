@@ -2771,7 +2771,17 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   nothing, and BSD and macOS `mktemp -u` create the file and then unlink it (Apple shell_cmds and
   FreeBSD `mktemp.c`), so a Ctrl-C there would leave an empty file; and macOS `/bin/sh`, bash
   3.2, on whose signal behaviour the design depended in four places, could not be tested. It is
-  not to be rebuilt without a test on macOS. **setup.sh on macOS is verified only by CI** (PR #56's
+  not to be rebuilt without a test on macOS. **The residual met in CI (PR #59, M4's third pull
+  request):** `TestSetupShBoundedCleansUp` met it once on macos-26-intel in the race step (run
+  46056088318): `sh`, bash 3.2 there, died of the interrupt itself before its trap was set, so it
+  did not exit with 130 and left its marker folder. By the designer's ruling (option (c)) the test
+  changed, not setup.sh or `bounded`: it sends each interrupt only once it sees from outside that
+  `bounded` is waiting (the command has written its process ID and the watchdog's sleep exists,
+  then a 200 ms pause, the trap being set right after the watchdog's fork); a shell that exits
+  130 must pass every cleanup check as before; one that still dies of the interrupt without its
+  trap met the residual, which is logged, cleaned up and tried again, at most 3 times per
+  interrupt, failing after 3 in a row (the wait would then be wrong); the count of such hits is
+  logged for each shell. **setup.sh on macOS is verified only by CI** (PR #56's
   first run): macOS `mktemp -d` without a template does not use TMPDIR, taking the per-user folder
   of `confstr(_CS_DARWIN_USER_TEMP_DIR)` and reading TMPDIR only if that fails (Apple shell_cmds
   `mktemp.c`), so `TestSetupShBoundedMktempFails`, which failed it through a missing TMPDIR, failed

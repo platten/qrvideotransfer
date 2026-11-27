@@ -1,0 +1,1 @@
+Section 19: TestSetupShBoundedCleansUp met the accepted interrupt residual once on macos-26-intel (PR #59, run 46056088318, bash 3.2 as sh); by the designer's ruling the test now interrupts only once bounded is seen waiting, and retries a residual hit up to 3 times, logging the count; setup.sh and bounded are unchanged.

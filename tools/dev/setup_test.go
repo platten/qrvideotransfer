@@ -243,30 +243,61 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 			}
 
 			// Ten interrupts, each early in the watchdog's life, where the trap once failed under
-			// set -e (review of 193dbb8: a pkill or kill with nothing to signal).
+			// set -e (review of 193dbb8: a pkill or kill with nothing to signal). Each is sent once
+			// bounded is seen waiting from outside: the command has written its process ID and the
+			// watchdog's sleep exists, then a settling pause, since the trap is set right after the
+			// watchdog's fork. A shell that still dies of the interrupt itself, without its trap,
+			// met the accepted residual window before the trap (DESIGN.md section 19; once on
+			// macos-26-intel's bash 3.2 as sh, CI run 46056088318): it is logged, cleaned up and
+			// tried again, at most 3 times per interrupt, after which the handshake is wrong.
+			residual := 0
 			for i := 0; i < 10; i++ {
-				cmd, _, pid, marks := startBounded(t, shell, fn, "bounded "+limit+` sh -c 'echo $$ > "$PIDFILE"; exec sleep 60'`)
-				// A positive control: the marker folder is in marks (markIn's wrapper) while the
-				// command runs, so that the count of entries left below means something on every
-				// system; before the wrapper, macOS put it elsewhere and the count passed vacuously.
-				if made, _ := os.ReadDir(marks); len(made) != 1 || !made[0].IsDir() || !strings.HasPrefix(made[0].Name(), "qrvt.") {
-					t.Errorf("%s: interrupt %d: %v in the marker folder's place while the command runs, want one qrvt.* folder", shell, i, made)
-				}
-				_ = cmd.Process.Signal(os.Interrupt)
-				err := cmd.Wait()
-				var exit *exec.ExitError
-				if !errors.As(err, &exit) || exit.ExitCode() != 130 {
-					t.Errorf("%s: interrupt %d: %v; want exit status 130", shell, i, err)
-				}
-				if alive(pid, 5*time.Second) {
-					t.Errorf("%s: interrupt %d: the command (pid %d) outlived it", shell, i, pid)
-					p, _ := os.FindProcess(pid)
-					_ = p.Kill()
-				}
-				if left, _ := os.ReadDir(marks); len(left) > 0 {
-					t.Errorf("%s: interrupt %d: %d entries left in the marker folder's place", shell, i, len(left))
+				for try := 1; ; try++ {
+					cmd, _, pid, marks := startBounded(t, shell, fn, "bounded "+limit+` sh -c 'echo $$ > "$PIDFILE"; exec sleep 60'`)
+					// A positive control: the marker folder is in marks (markIn's wrapper) while the
+					// command runs, so that the count of entries left below means something on every
+					// system; before the wrapper, macOS put it elsewhere and the count passed vacuously.
+					if made, _ := os.ReadDir(marks); len(made) != 1 || !made[0].IsDir() || !strings.HasPrefix(made[0].Name(), "qrvt.") {
+						t.Errorf("%s: interrupt %d: %v in the marker folder's place while the command runs, want one qrvt.* folder", shell, i, made)
+					}
+					if !watchdogSleeping(limit, 10*time.Second) {
+						_ = cmd.Process.Kill()
+						_ = cmd.Wait()
+						t.Fatalf("%s: interrupt %d: the watchdog's sleep %s never appeared", shell, i, limit)
+					}
+					time.Sleep(200 * time.Millisecond)
+					_ = cmd.Process.Signal(os.Interrupt)
+					err := cmd.Wait()
+					var exit *exec.ExitError
+					if errors.As(err, &exit) {
+						if ws, ok := exit.Sys().(syscall.WaitStatus); ok && ws.Signal() == syscall.SIGINT { // -1 unless a signal ended it
+							residual++
+							t.Logf("%s: interrupt %d, try %d: the shell died of the interrupt before its trap ran (the accepted residual)", shell, i, try)
+							if p, err := os.FindProcess(pid); err == nil {
+								_ = p.Kill()
+							}
+							_ = exec.Command("pkill", "-f", "^sleep "+limit+"$").Run()
+							if try == 3 {
+								t.Fatalf("%s: interrupt %d: 3 tries in a row died before the trap; the wait for bounded's waiting state is wrong", shell, i)
+							}
+							continue
+						}
+					}
+					if !errors.As(err, &exit) || exit.ExitCode() != 130 {
+						t.Errorf("%s: interrupt %d: %v; want exit status 130", shell, i, err)
+					}
+					if alive(pid, 5*time.Second) {
+						t.Errorf("%s: interrupt %d: the command (pid %d) outlived it", shell, i, pid)
+						p, _ := os.FindProcess(pid)
+						_ = p.Kill()
+					}
+					if left, _ := os.ReadDir(marks); len(left) > 0 {
+						t.Errorf("%s: interrupt %d: %d entries left in the marker folder's place", shell, i, len(left))
+					}
+					break
 				}
 			}
+			t.Logf("%s: %d interrupts met the residual window before the trap", shell, residual)
 			time.Sleep(300 * time.Millisecond)
 			if ps, err := exec.Command("ps", "-eo", "args").Output(); err == nil && strings.Contains(string(ps), "sleep "+limit+"\n") {
 				t.Errorf("%s: a watchdog's sleep %s outlived an interrupt", shell, limit)
@@ -274,6 +305,17 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 			}
 		})
 	}
+}
+
+// watchdogSleeping reports whether bounded's watchdog has started its sleep of limit seconds,
+// waiting up to wait for it.
+func watchdogSleeping(limit string, wait time.Duration) bool {
+	for deadline := time.Now().Add(wait); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if ps, err := exec.Command("ps", "-eo", "args").Output(); err == nil && strings.Contains(string(ps), "sleep "+limit+"\n") {
+			return true
+		}
+	}
+	return false
 }
 
 // TestSetupShBoundedMktempFails: when mktemp cannot make the marker folder, bounded fails with
