@@ -1415,6 +1415,10 @@ qrvt profiles | version | completion | man
   `--json` only the error line is printed, the events schema allowing one summary or error line,
   and the header's frame count is in the `stats` events. An agreed unsupported format version,
   modulation or inner code is an `UnsupportedVersionError` (exit 5), by the same rule as `decode`.
+  The guidance follows decode's failure classes with inspect's own actions: record at least one
+  whole loop in one recording and run `qrvt inspect` on it, run `qrvt inspect` again, and, for
+  another transfer, film one transfer at a time; it never asks to pass recordings to `qrvt
+  decode`.
 - **calibrate.** `make` writes a test video stepping through modes, densities and display rates. `read`
   measures each step in a recording and prints a table with the recommended `encode` command, plus
   warnings for clipping, dropped frames, moire and exposure.
@@ -2024,7 +2028,12 @@ section 13).
     glare rows of section 15 at full size (M3 exit): `TestCameraTwiceDisplay`'s 96 cases,
     `TestLockedRateSafety`'s 96 locked cases (long only), `TestDriftBestEffort`'s 48 drifting
     `robust` cases (long only: the drift best-effort assertion) and `TestGlareDecode`'s every case
-    and patch position, `robust` with a 20% patch included.
+    and patch position, `robust` with a 20% patch included; `TestInspectNoiseResources` (long
+    only, M4's fourth pull request), inspect on noise, 16 frames at 848 x 480 and 32 at 3840 x 2160
+    with GOMAXPROCS 16 and 32, **a SECURITY.md section 9.5 resource bound** (always: the root
+    package's `TestInspectNoise`, 3 noise captures at 480 x 480, with nothing written and an
+    allocation ceiling); `TestInspectStopsEarly` (long only), a filmed recording that inspect stops
+    reading once its descriptor decodes.
   - `internal/vision`, long only: `TestGeometryPresetsLong`, `TestGeometryHarshLong`,
     `TestGeometryHarshRegression`, `TestDetectModuleSweep`, `TestGlareStudy`, `TestDecoyMatrix`,
     `TestDecoyMatrixReview`, `TestPipelineMixedCost`, `TestRawBERSweeps` (section 15's blur,
@@ -2863,9 +2872,10 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   GitHub-hosted runners for public repositories,
   https://docs.github.com/en/actions/reference/runners/github-hosted-runners, read 2026-11-27).
   The step's peak is therefore `internal/video`'s, about 3.5 GiB at the runner's CPU count, a
-  quarter of its memory: the figures do not call for a change, and the step is unchanged. Not
-  measured: macOS's own accounting of the race detector's shadow memory and of the engine's 512 MiB
-  reservations, and what the runner itself holds besides.
+  quarter of its memory: the figures do not call for a change, and the step is unchanged. These
+  are Linux figures: macOS's memory accounting was not measured (nor how it counts the race
+  detector's shadow memory and the engine's 512 MiB reservations, or what the runner itself holds
+  besides), and the runner's 14 GB is GitHub's documented figure, not a measurement.
 
 ## 20. Sources
 
