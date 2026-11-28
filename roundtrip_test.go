@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/platten/qrvideotransfer/internal/calib"
 	"github.com/platten/qrvideotransfer/internal/channel"
 	"github.com/platten/qrvideotransfer/internal/prng"
 	"github.com/platten/qrvideotransfer/internal/video"
@@ -303,17 +304,12 @@ func TestShortCamera(t *testing.T) {
 	}
 }
 
-// gray4MinPixels is the Gray4 condition of DESIGN.md section 11 (condition 2) for the handheld
-// blur (Gaussian sigma 1.5 camera pixels, `handheld`, `budget-android` and `iphone-hdr`): the
-// least camera pixels per cell, s = fill x camera width / GridX, at which each protection decodes,
-// re-derived from the simulator and S2's real recordings (2026-11-18). `fast` is not established:
-// 10 is the provisional planning figure until the G1 recordings.
-var gray4MinPixels = map[Protection]float64{Robust: 4.8, Normal: 6.0, Fast: 10}
-
-// TestMatrixFeasible: every Gray4 row of the round-trip matrix filmed under the handheld blur meets
-// section 11's condition at its preset's own camera, and the rows the short version runs meet it
-// at the short version's camera too; a row that does not is infeasible and is not in the matrix
-// (section 15).
+// TestMatrixFeasible: every Gray4 row of the round-trip matrix filmed under the handheld blur
+// (Gaussian sigma 1.5 camera pixels: `handheld`, `budget-android` and `iphone-hdr`) meets section
+// 11's condition 2, calib.MinPixels (one source with the calibration rules; `fast` is not
+// established and 10 is provisional), at its preset's own camera, and the rows the short version
+// runs meet it at the short version's camera too; a row that does not is infeasible and is not in
+// the matrix (section 15).
 func TestMatrixFeasible(t *testing.T) {
 	for _, r := range matrix() {
 		c, err := channel.Preset(r.preset)
@@ -323,7 +319,7 @@ func TestMatrixFeasible(t *testing.T) {
 		if r.mod != Gray4 || c.Optics.Blur != 1.5 {
 			continue
 		}
-		need := gray4MinPixels[r.protection]
+		need := calib.MinPixels(uint8(Gray4), uint8(r.protection))
 		if s := c.Geometry.Fill * float64(c.Geometry.Width) / float64(r.w/4); s < need {
 			t.Errorf("%s: %.2f camera pixels per cell, below the %.1f its protection needs", r.name(), s, need)
 		}

@@ -123,12 +123,13 @@ so an "RGB or CMYK" code is an 8-colour cell carrying 3 bits. That is the `color
 | Mode | Flag | Bits per cell | Camera pixels per cell needed, steady / handheld (simulated) | Display bits per cell (simulated) | Role |
 | --- | --- | --- | --- | --- | --- |
 | Four greys | `--mode gray4` | 2 | 3.5 (section 4; `normal` re-checked at 3.6, 99.7%; `fast` and `robust` not re-derived) / 6 (`normal`; 4.8 `robust`; `fast` not established, 10 provisionally) | 8.4 | Provisional default |
-| Black and white | `--mode bw` | 1 | 2.6 / 3.4 | 7.3 | Most robust |
+| Black and white | `--mode bw` | 1 | 2.6 / 4.8 (`normal`; 4.0 `robust`; `fast` not established; provisional until G1) | 7.3 | Most robust |
 | Eight colours | `--mode color` | 3 | 4.3 / 5.5-6 | 28 | Best when the recording bitrate is generous |
 | Eight greys, 10-bit | `--hdr` | 3 | not simulated | not simulated | Experimental |
 
-The handheld figures for four greys were re-derived on 2026-11-18 (section 11, condition 2). The
-other figures are those of the simulation of section 4.
+The handheld figures for four greys were re-derived on 2026-11-18 and those for black and white
+on 2026-11-28 (section 11, condition 2). The other figures are those of the simulation of
+section 4.
 
 Why four greys is the provisional default:
 
@@ -929,6 +930,18 @@ Whether a setting works depends on the camera. All of these must hold (simulated
    under the handheld blur (3.6 for budget-android) and 4.4 under the 10-bit HLG preset, so the
    planning point of 5 leaves a margin of about 1.25 and 1.1 times; at 5 the cell-centre error is
    about 0.05 cell RMS.
+   **The geometry floor is part of the condition.** For every mode the minimum is the larger of
+   the mode-and-code minimum and the camera's geometry floor: 4.0 handheld, 3.6 on
+   `budget-android`, 4.4 under 10-bit HLG.
+   **Black and white** (re-derived 2026-11-28, replacing section 4's 3.4 from code-value blur):
+   `normal` 4.8 and `robust` at the floor (4.0 handheld, 3.6 on `budget-android`), provisional
+   until G1; `fast` is not established. The simulator's `budget-android` at 1080p decodes, per
+   capture through the vision pipeline (the method of the four-grey figures, 24 captures at
+   12 fps, every capture located), every `robust` codeword from 3.0, `normal` 97.2% at 3.0 and
+   every one from 3.2, and `fast` 17.3% at 3.2, 94.8% at 3.4 and every one from 3.6: simulator
+   minima of `robust` at most 3.0, `normal` 3.2 and `fast` 3.6. S2's real Gray2 passes `normal`'s
+   0.78 bits per sent bit at 3.0, 3.6 and 6.4 and is inconclusive at 4.0, where most captures
+   failed to locate (below); G1 settles the values.
    **Condition 2's `normal` minimum leaves no glare margin.** At 6.0 camera pixels per cell on
    `handheld`, four greys `normal` decodes without glare but with a specular patch over 5% of the
    code at 0 or 1 of 4 patch positions (short, where it fails, by 4 to 54 of the 259 shards
@@ -938,15 +951,22 @@ Whether a setting works depends on the camera. All of these must hold (simulated
    with 20% each decoded at 3 of 4 patch positions (section 19).
 3. Recorder bits per cell per code frame `q = 0.9 x bitrate / (rate x cells)` at least 9 for `fast`,
    5.5 for `normal`, 2.5 for `robust` with HEVC; 1.4 times those with H.264.
-4. The display video's bitrate, `8.4 x cells x rate`, stays playable: 33 Mbit/s for 1080p30,
-   58 for 1440p30, 131 for 4K30.
+4. The display video's bitrate, `bits x cells x rate` with the mode's display bits per cell of
+   section 5 (black and white 7.3, four greys 8.4, colour 28), stays within 131 Mbit/s, four
+   greys at 4K30: four greys gives 33 Mbit/s for 1080p30 and 58 for 1440p30. A mode without a
+   section 5 figure is not planned.
 
 Planning figures are the simulated single-pass rate derated by 40% for everything not simulated. All
 of them are simulated. The main figures are **handheld** (fill 0.80, the four-grey condition of
-condition 2: `robust` 4.8, `normal` 6, `fast` 10 provisionally). Each row takes the highest-rate
-setting that conditions 1 to 3 allow. A planning row may use a setting only if the simulator and real
-recordings both support it, wherever real recordings exist for that modulation; otherwise the setting
-is labelled not established and is not used for planning.
+condition 2: `robust` 4.8, `normal` 6, `fast` 10 provisionally). **The planning rule:** each row
+takes the setting of highest planning rate that conditions 1 to 4 allow (`internal/calib`,
+`Best`); only an exact tie goes to the larger condition-2 margin, then to the simpler mode (black
+and white, then four greys, then colour). The 1080p30 row is the one exception, held unchanged
+pending G1 (note a). A planning row may use a setting only if the simulator and real recordings
+both support it, wherever real recordings exist for that modulation; otherwise the setting is
+labelled not established and is not used for planning. The settings established handheld are
+black and white and four greys, each `robust` and `normal`; every `fast` and every colour
+setting is not established.
 
 **Black and white at 4.8 camera pixels per cell.** `normal` is established: real recordings reach the
 0.78 bits per sent bit it needs from 3.0. `fast` is not established, and is to be settled at G1:
@@ -962,10 +982,19 @@ class.
 
 | Camera (handheld) | Recommended | s | Planning rate | 10 MB | 1 GB |
 | --- | --- | --- | --- | --- | --- |
-| 1080p30 (older Android, webcam) | 720p at 12 fps, black and white, `normal` | 4.8 | about 25 KB/s | about 7 min | about 11 h, impractical |
+| 1080p30 (older Android, webcam) | 720p at 12 fps, black and white, `normal` (provisional, pending G1; notes a and b) | 4.8 | about 25 KB/s | about 7 min | about 11 h, impractical |
 | 4K30 | 1080p at 12 fps, four greys, `normal` | 6.4 | about 112 KB/s | about 1.5 min | about 2.5 h |
 | 4K60 (with a 1080p or larger monitor) | 1080p at 30 fps, four greys, `normal` | 6.4 | about 280 KB/s | about 36 s | about 1 h |
 | 4K120 | 1080p at 60 fps, four greys, `normal` | 6.4 | about 560 KB/s | about 18 s | about 30 min |
+
+Notes on the 1080p30 row:
+- (a) Four greys `robust` at the same density (720p at 12 fps, s 4.8, exactly its minimum) is
+  about 3% faster: about 24.75 against 24.0 KiB/s. The planning rule picks it; the row keeps
+  black and white `normal` until G1, and `calibrate` may recommend either.
+- (b) The row assumes a 720p video scaled to the screen. The calibration ladder at a native
+  1920 x 1080 monitor cannot produce that grid (320 x 180 needs 6-pixel cells there); on that
+  ladder the rule gives 12 fps, 8-pixel cells, four greys `normal` (240 x 135 grid, s 6.4, about
+  27.8 KiB/s), which is the expectation of M4's exit test for `budget-android`.
 
 At a 4K camera, 1440p gives 4.8 camera pixels per cell handheld. That allows four greys `robust`, at
 about 255 KB/s at 30 fps, or black and white `normal`, at about 251 KB/s; both are below 1080p
@@ -1424,6 +1453,50 @@ qrvt profiles | version | completion | man
 - **calibrate.** `make` writes a test video stepping through modes, densities and display rates. `read`
   measures each step in a recording and prints a table with the recommended `encode` command, plus
   warnings for clipping, dropped frames, moire and exposure.
+  - **The plan** (`internal/calib`). The video is at 60 fps; a display rate r shows each code
+    frame for 60 / r video frames. Its code frames follow fixed slots: for each display rate 12,
+    30 and 60, each cell size 4, 8, 12 and 16 pixels, each mode (black and white, four greys,
+    colour), a slot of r x 4 code frames, 4 seconds. Every slot's frame indices are reserved
+    whatever the video's size, so F is 4,896 for every size, a multiple of 4, and a frame's
+    index alone names its slot. The video shows a slot as a segment only where its cell divides
+    the width and height, the grid is at least 120 x 90 (smaller grids are not located
+    reliably) and within FORMAT.md's limits, and condition 4 of section 11 holds; the other
+    slots' frames are not shown. Lengths: 480p 36 s, 720p 72 s, 1080p 104 s, 1440p 100 s, 4K
+    120 s.
+  - **Its frames** follow S2's convention (spikes/pattern): FORMAT.md code frames, version 1,
+    session 0x5332, inner code 2, whose data cells hold their scramble bits alone (every codeword
+    bit zero), so there is no stream descriptor. Every header field is within FORMAT.md's valid
+    ranges, and an ordinary decoder needs no value of the convention: `decode` reads the headers
+    and never a descriptor (codeword 0 is the all-zero codeword, whose CRC fails), so it falls
+    short with nothing known, as for any recording without a descriptor.
+  - **Telling a calibration video from a transfer** needs no reserved value. A header is a
+    calibration frame's when `calib.Recover` accepts it: session 0x5332, inner code 2, F 4,896,
+    the mode of the slot its index names, and a grid that, times the slot's cell, gives a video
+    size whose plan shows that slot with that grid. Recovery is unique, since the index names
+    one slot and grid x cell one size. A transfer meets all of these only by chance (its session's
+    low 16 bits, a stream of exactly 4,896 frames, the default inner code and a matching grid);
+    its stream descriptor decodes and its codewords do not decode to zero, so `read` treats a
+    recording in which a descriptor decodes as a transfer. A codeword counts as decoded
+    (`Measurement.Decoded`) only when it decodes to the calibration's all-zero codeword (the
+    coset of the all-zero shard, as the real-device check), never merely when the inner code
+    converges, so such a transfer whose descriptor does not decode reads as a calibration in
+    which no segment passes, so no recommendation is made. Headers that recover to more than one
+    video size are not a calibration video: a transfer's fixed grid recovers to a different size
+    in each slot of another cell, where a calibration recording's headers all recover to one.
+  - **The exit test's distance** between two settings is the sum, over display rate (12 < 30 <
+    60), cell size (16 < 12 < 8 < 4), mode (black and white < four greys < colour) and protection
+    (`robust` < `normal` < `fast`), of the difference of their ranks; "within one step" is a
+    distance of at most 1.
+  - **The recommendation** is the highest-rate setting among the segments that pass, decoded
+    with each inner code (at least 92% of the codewords on the summed frames decode to the
+    calibration's all-zero codeword and at least 90% of the code frames are seen; provisional,
+    pending G1), that conditions 1, 3 and 4
+    allow and that is established at condition 2's minimum (section 11). Its rate is the planning
+    rate scaled by the share of the segment's codewords decoded, so worse measurements never give
+    a faster setting. A setting not established, or established only on a tripod, is recommended
+    only when its segment passed with margin (half the shortfall the pass allows: 96% and 95%,
+    provisional, pending G1), and is labelled "measured on your device"; that holds for that
+    user's recommendation only.
 
 ## 14. Architecture
 
@@ -2440,6 +2513,12 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   18,018 (the 29.98 fps camera beating against the display). RGB8 at 4-pixel cells decoded
   nothing with `normal` anywhere. Laptop recordings 3 to 5 are limited by location (the corners
   issue above). No margin recordings exist yet.
+- **`calib.NetBytes` rebuilds a frame mapping on every call (M4, performance, not optimised
+  now).** Section 11's net bytes per frame come from `frame.NewMapping`, built afresh each time:
+  pinned to 4 CPUs, about 0.52 ms and 0.56 MB for a 320 x 180 grid, 1.4-1.7 ms and 1.7 MB for 480 x
+  270, and 7.7-8.7 ms and 6.7 MB for 960 x 540 (2026-11-28). `Best` and `Recommend` call it once
+  per candidate, so most of `internal/calib`'s always-on 0.3-0.65 s is these rebuilds; caching
+  by grid, mode and inner code would remove them.
 - **CI-size suites near the runner's limits (M3, performance, not optimised now).** PR #47's
   first run failed on macos-26-intel only: in the coverage step `internal/vision` reached `go
   test`'s 10-minute default (600.6 s), running beside the two packages M3 adds (root 449.9 s,

@@ -1,0 +1,1 @@
+Section 11, condition 4: the display video's bitrate uses each mode's display bits per cell of section 5 (black and white 7.3, four greys 8.4, colour 28) against the 131 Mbit/s cap of four greys at 4K30 (designer's ruling); a mode without a section 5 figure is not planned.
