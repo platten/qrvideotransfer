@@ -21,12 +21,18 @@ import (
 
 // TestScanCaptures: Scan hands a capture to the sink with what the vision chain found: the
 // headers, the camera pixels per cell, the palette's clipped share and each code frame's soft bits
-// by bit position, which, put in codeword order, are exactly the soft bits Decode sums. With stubbed
+// by bit position, which, put in codeword order, are exactly the soft bits Decode sums; an
+// overexposed capture (brightness times 1.2) reports its clipped palette patches. With stubbed
 // captures: every capture in order, recording after recording, with its presentation time; a sink
 // that stops, or fails, ends the scan.
 func TestScanCaptures(t *testing.T) {
 	tr := rateCode(t, 2, 2, 480, 500)
-	a := writeRaw(t, tr.frames[:1], 30)
+	bright := *tr.frames[1]
+	bright.Y = make([]uint16, len(bright.Y))
+	for i, v := range tr.frames[1].Y {
+		bright.Y[i] = uint16(min(255, float64(v)*1.2))
+	}
+	a := writeRaw(t, []*video.Frame{tr.frames[0], &bright}, 30)
 	want := (&captureWorker{}).process(tr.frames[0], 0)
 	g, err := newGeometry(want.key)
 	if err != nil {
@@ -34,7 +40,7 @@ func TestScanCaptures(t *testing.T) {
 	}
 	var got []*Capture
 	progress := 0
-	sr, err := Scan(context.Background(), ScanConfig{Recordings: []string{a}, Backend: video.NewRaw(), Workers: 1,
+	sr, err := Scan(context.Background(), ScanConfig{Recordings: []string{a}, Backend: video.NewRaw(), Workers: 2,
 		Progress: func(e Event) {
 			if e.Stage == StageDecodeVideo && e.Kind == KindProgress {
 				progress++
@@ -43,7 +49,7 @@ func TestScanCaptures(t *testing.T) {
 		got = append(got, c)
 		return false, nil
 	})
-	if err != nil || sr.Captures != 1 || len(got) != 1 || progress != 1 || len(sr.Probes) != 1 || sr.Probes[0].Width != 480 {
+	if err != nil || sr.Captures != 2 || len(got) != 2 || progress != 2 || len(sr.Probes) != 1 || sr.Probes[0].Width != 480 {
 		t.Fatalf("scan: %v, %+v, %d captures, %d progress events", err, sr, len(got), progress)
 	}
 	c := got[0]
@@ -58,6 +64,10 @@ func TestScanCaptures(t *testing.T) {
 	g.gather(cw, c.Phases[0].Soft, c.Phases[0].Frame)
 	if !reflect.DeepEqual(cw, want.phases[0].soft) {
 		t.Error("the soft bits differ from Decode's")
+	}
+	// The white patches, 8 of the 32, clip (0.25 measured).
+	if c := got[1]; !c.Located || c.PaletteClipped <= 0 || c.PaletteClipped > 0.5 {
+		t.Errorf("overexposed capture: located %v, %.3f of the palette clipped", c.Located, c.PaletteClipped)
 	}
 
 	// Stopping and failing, with stubbed captures of blank frames: the PTS goes through.
