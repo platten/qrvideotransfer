@@ -89,6 +89,9 @@ func TestErrorText(t *testing.T) {
 	if !strings.Contains(e.Error(), "found in 2 of 3 captures, but no frame header") || !errors.Is(e, ErrNoCalibration) {
 		t.Errorf("%v", e)
 	}
+	if e := (&Error{Reason: NoCode, Captures: 3}); !strings.Contains(e.Error(), "no code in any of 3 captures") {
+		t.Errorf("%v", e)
+	}
 	if neg(-128) != 127 || neg(5) != -5 {
 		t.Error("neg")
 	}

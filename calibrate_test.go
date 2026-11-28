@@ -258,8 +258,10 @@ func TestAnalyzeCalibrationConverts(t *testing.T) {
 	}
 	_, err = AnalyzeCalibration(context.Background(), AnalyzeOptions{Recordings: []string{"x"}, Backend: testSpec})
 	var ce *CalibrationError
-	if !errors.As(err, &ce) || ce.Reason != CalibrationNothingPassed || ce.Calibration != 9 || ce.Sizes != 1 {
-		t.Errorf("%v", err)
+	// The analysis's warnings, which may explain why nothing passed, ride on the error.
+	if !errors.As(err, &ce) || ce.Reason != CalibrationNothingPassed || ce.Calibration != 9 || ce.Sizes != 1 ||
+		len(ce.Warnings) != 1 || ce.Warnings[0].Code != WarnClipping {
+		t.Errorf("%v (%+v)", err, ce)
 	}
 	analyze = func(context.Context, calib.AnalyzeConfig) (*calib.Analysis, error) { return nil, context.Canceled }
 	if _, err = AnalyzeCalibration(context.Background(), AnalyzeOptions{Recordings: []string{"x"}, Backend: testSpec}); !errors.Is(err, context.Canceled) {

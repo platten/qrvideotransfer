@@ -3,8 +3,10 @@ package calib
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -68,31 +70,33 @@ func stepOf(t *testing.T, a *Analysis, s Setting) Step {
 	return Step{}
 }
 
-// TestAnalyzeFilmed is the always-on filmed run (DESIGN.md section 15): a 1280 x 720 monitor's
-// calibration video, its 30 fps steps of 4- and 8-pixel cells in black and white and four greys,
-// 4 code frames each (32 video frames at 60 fps), filmed once through by `ideal` at 1920 x 1080 and
-// 60 fps, 34 captures. The plan is recovered and the recommendation is exactly the rules' choice:
-// four greys `fast` on 4-pixel cells (8,480 bytes per frame, the fastest step), not established, so
-// only because its segment passed with margin: measured on the user's device.
-func TestAnalyzeFilmed(t *testing.T) {
-	shortSlots(t, 4)
-	frames := makeRaw(t, 1280, 720, func(s Segment) bool {
-		return s.Rate == 30 && (s.Cell == 4 || s.Cell == 8) && s.Mode != ModeColor
+// filmed makes the calibration video of a w x h monitor, keeping its 30 fps steps of the cells
+// given in black and white and four greys with n code frames each, films it once through with
+// `ideal` resized to camW x camH at 60 fps (its video frames and 2 captures more), and checks the
+// analysis: the plan is recovered, and the recommendation is exactly the rules' choice, four greys
+// `fast` on 4-pixel cells (the fastest step), not established, so only because its segment passed
+// with margin: measured on the user's device; black and white `normal` on 4-pixel cells passes,
+// established.
+func filmed(t *testing.T, w, h int, cells []int, n, camW, camH int) {
+	t.Helper()
+	shortSlots(t, n)
+	frames := makeRaw(t, w, h, func(s Segment) bool {
+		return s.Rate == 30 && slices.Contains(cells, s.Cell) && s.Mode != ModeColor
 	})
-	if len(frames) != 32 {
-		t.Fatalf("%d video frames", len(frames))
+	if want := len(cells) * 2 * n * 2; len(frames) != want {
+		t.Fatalf("%d video frames, want %d", len(frames), want)
 	}
 	c, err := channel.Preset("ideal")
 	if err != nil {
 		t.Fatal(err)
 	}
-	c = c.Resize(1920, 1080)
-	rec := filmRaw(t, frames, c, 34)
-	a, err := analyzeRaw(t, rec)
+	c = c.Resize(camW, camH)
+	captures := len(frames) + 2
+	a, err := analyzeRaw(t, filmRaw(t, frames, c, captures))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Plan.Width != 1280 || a.Plan.Height != 720 || a.Captures != 34 {
+	if a.Plan.Width != w || a.Plan.Height != h || a.Captures != int64(captures) {
 		t.Fatalf("plan %dx%d, %d captures", a.Plan.Width, a.Plan.Height, a.Captures)
 	}
 	for _, s := range a.Steps {
@@ -100,12 +104,27 @@ func TestAnalyzeFilmed(t *testing.T) {
 			s.Decoded, s.Codewords, s.Pixels, s.Passed, s.Margin, s.BytesPerSec)
 	}
 	r := a.Recommendation
-	if want := (Setting{Rate: 30, Cell: 4, Mode: ModeGray4, Inner: Fast}); r.Setting != want || !r.Measured || r.GridX != 320 {
+	if want := (Setting{Rate: 30, Cell: 4, Mode: ModeGray4, Inner: Fast}); r.Setting != want || !r.Measured || r.GridX != w/4 {
 		t.Errorf("recommended %+v (measured %v), want %+v measured on the device", r.Setting, r.Measured, want)
 	}
 	if s := stepOf(t, a, Setting{30, 4, ModeBW, Normal}); !s.Passed || s.Standing != EstablishedAt {
 		t.Errorf("black and white normal at cell 4: %+v", s)
 	}
+}
+
+// TestAnalyzeFilmed is the always-on filmed run (DESIGN.md section 15, designer's ruling on the
+// cost): an 848 x 480 monitor's 30 fps steps of 4-pixel cells in black and white and four greys,
+// 2 code frames each (8 video frames at 60 fps), filmed by `ideal` at 1280 x 720, 10 captures.
+func TestAnalyzeFilmed(t *testing.T) { filmed(t, 848, 480, []int{4}, 2, 1280, 720) }
+
+// TestAnalyzeFilmedLong is the larger filmed run, long only: a 1280 x 720 monitor's 30 fps steps of
+// 4- and 8-pixel cells in black and white and four greys, 4 code frames each (32 video frames),
+// filmed by `ideal` at 1920 x 1080, 34 captures.
+func TestAnalyzeFilmedLong(t *testing.T) {
+	if os.Getenv("QRVT_LONG_TESTS") != "1" {
+		t.Skip("long test: QRVT_LONG_TESTS=1")
+	}
+	filmed(t, 1280, 720, []int{4, 8}, 4, 1920, 1080)
 }
 
 // filmRaw films looping 60 fps frames with camera c into a raw recording of n captures.
@@ -266,7 +285,7 @@ func TestAnalyzeMixedSizes(t *testing.T) {
 }
 
 // Required test 2 at this level: a transfer's headers are not a calibration video's
-// (NotCalibration), and noise shows no code (NoCode).
+// (NotCalibration). Noise (NoCode) is the root package's TestAnalyzeCalibrationNoise.
 func TestAnalyzeNotCalibration(t *testing.T) {
 	frames := transferFrames(t, 0x1234, 8, 212, 120, ModeGray4, []uint32{0, 1})
 	_, err := analyzeRaw(t, writeRaw(t, frames, 12))
@@ -274,20 +293,5 @@ func TestAnalyzeNotCalibration(t *testing.T) {
 	if !errors.As(err, &e) || e.Reason != NotCalibration || e.HeadersRead != 2 || e.Calibration != 0 ||
 		!strings.Contains(err.Error(), "not the calibration video's") {
 		t.Errorf("a transfer: %v (%+v)", err, e)
-	}
-	g := prng.SplitMix64{State: 3}
-	var noise []*video.Frame
-	for range 3 {
-		f := &video.Frame{W: 480, H: 480, Bits: 8, Y: make([]uint16, 480*480), Cb: make([]uint16, 240*240), Cr: make([]uint16, 240*240)}
-		for _, p := range [][]uint16{f.Y, f.Cb, f.Cr} {
-			for i := range p {
-				p[i] = uint16(g.Next() & 0xff)
-			}
-		}
-		noise = append(noise, f)
-	}
-	_, err = analyzeRaw(t, writeRaw(t, noise, 30))
-	if !errors.As(err, &e) || e.Reason != NoCode || e.Captures != 3 || !strings.Contains(err.Error(), "no code in any of 3 captures") {
-		t.Errorf("noise: %v", err)
 	}
 }

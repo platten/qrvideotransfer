@@ -872,10 +872,46 @@ func TestCalibrateReadSteps(t *testing.T) {
 			{FPS: 30, Cell: 8, Modulation: qrvt.Gray2, Protection: qrvt.Normal, Frames: 4, FramesSeen: 3, Codewords: 0, PixelsPerCell: 10.8, Passed: true},
 		}}
 	out, _, err := run(t, &fakeAPI{rec: rec}, nil, "calibrate", "read", f.r1)
-	for _, want := range []string{"measured on your device", "Step 30 fps, cell 4, gray4", "4 of 4 frames seen, 5.4 camera pixels per cell;",
+	for _, want := range []string{"measured on your device: this setting is not established at your camera's pixels per cell", "Step 30 fps, cell 4, gray4", "4 of 4 frames seen, 5.4 camera pixels per cell;",
 		"fast 100%, passed with margin", "normal 95%, passed", "robust 0%", "Step 30 fps, cell 8, bw", "normal 0%, passed, not established"} {
 		if err != nil || !strings.Contains(out, want) {
 			t.Errorf("%v: no %q in\n%s", err, want, out)
 		}
+	}
+}
+
+// In the --json summary the Note of a setting measured on the user's device is present when
+// Measured is set and absent otherwise.
+func TestCalibrateReadJSONNote(t *testing.T) {
+	f := newFiles(t)
+	rec := &qrvt.Recommendation{Profile: qrvt.Profile{Width: 848, Height: 480, Cell: 4, FPS: 30, Modulation: qrvt.Gray4,
+		Protection: qrvt.Fast, ParityPercent: 20}, Command: "qrvt encode", BytesPerSec: 1000, Measured: true}
+	out, _, err := run(t, &fakeAPI{rec: rec}, nil, "--json", "calibrate", "read", f.r1)
+	if err != nil || !strings.Contains(out, `"key":"Note","value":"measured on your device`) {
+		t.Errorf("%v: no Note in\n%s", err, out)
+	}
+	rec.Measured = false
+	out, _, err = run(t, &fakeAPI{rec: rec}, nil, "--json", "calibrate", "read", f.r1)
+	if err != nil || strings.Contains(out, `"Note"`) {
+		t.Errorf("%v: a Note without Measured\n%s", err, out)
+	}
+}
+
+// A calibration that recommends nothing shows the warnings that may explain it in its final
+// guidance, in the plain output and the JSON error line.
+func TestCalibrationWarningsInGuidance(t *testing.T) {
+	f := newFiles(t)
+	cal := &qrvt.CalibrationError{Reason: qrvt.CalibrationNothingPassed, Calibration: 9, Warnings: []qrvt.Warning{
+		{Code: qrvt.WarnClipping, Text: "Highlights clip in 9% of the palette patches."},
+		{Code: qrvt.WarnDownscaled, Text: "The player may be scaling the video."}}}
+	_, errOut, err := run(t, &fakeAPI{err: cal}, nil, "calibrate", "read", f.r1)
+	for _, want := range []string{"Highlights clip in 9% of the palette patches.", "The player may be scaling the video.", "If the recording is of a qrvt"} {
+		if err == nil || !strings.Contains(errOut+err.Error(), want) {
+			t.Errorf("plain: no %q in %q (%v)", want, errOut, err)
+		}
+	}
+	out, _, err := run(t, &fakeAPI{err: cal}, nil, "--json", "calibrate", "read", f.r1)
+	if err == nil || !strings.Contains(out, "Highlights clip in 9%") || !strings.Contains(out, `"type":"error"`) {
+		t.Errorf("json: %v\n%s", err, out)
 	}
 }
