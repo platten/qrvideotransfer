@@ -228,7 +228,7 @@ type Warning struct {
 
 // StreamInfo is what a code video carries, as reported by [Inspect].
 type StreamInfo struct {
-	Session       uint64
+	Session uint64
 	// Width and Height are the pixels of the input video as probed: for a code video the code's,
 	// for a filmed recording the camera's, not the code's (its grid is GridX by GridY cells).
 	Width, Height int
