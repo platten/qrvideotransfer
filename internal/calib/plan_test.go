@@ -144,7 +144,7 @@ func TestRecoverUnique(t *testing.T) {
 		}
 		for _, s := range p.Segments {
 			for k := range s.CodeFrames {
-				idx := s.FirstIndex + uint32(k) //nolint:gosec // small
+				idx := s.FirstIndex + uint32(k)
 				n := 0
 				for _, o := range slots {
 					if idx < o.FirstIndex || idx >= o.FirstIndex+uint32(o.CodeFrames) || o.Mode != s.Mode {
