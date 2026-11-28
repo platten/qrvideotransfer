@@ -10,7 +10,6 @@ import (
 func TestNotImplemented(t *testing.T) {
 	ctx := context.Background()
 	var errs []error
-	errs = append(errs, CalibrationVideo(ctx, CalibrationOptions{}))
 	_, err := AnalyzeCalibration(ctx, AnalyzeOptions{})
 	errs = append(errs, err)
 	for i, err := range errs {

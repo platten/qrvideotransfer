@@ -797,3 +797,25 @@ func TestInspectPartial(t *testing.T) {
 		t.Errorf("unsupported version: exit %d (%v), stdout %q", ExitCode(err), err, out)
 	}
 }
+
+// calibrate make shows the plan's steps, length and estimate before it starts, in the plain
+// output and the JSON start line, and refuses as a usage error a resolution no step fits.
+func TestCalibrateMakeEstimate(t *testing.T) {
+	_, errOut, err := run(t, &fakeAPI{}, nil, "calibrate", "make", "-o", "cal.mp4", "--jobs", "4")
+	for _, want := range []string{"Steps: 26, of 4 s each: 1m44s of video at 60 fps", "Estimate: about ", "min to make with the embedded engine"} {
+		if err != nil || !strings.Contains(errOut, want) {
+			t.Errorf("%v: no %q in\n%s", err, want, errOut)
+		}
+	}
+	out, _, err := run(t, &fakeAPI{}, nil, "--json", "calibrate", "make", "-o", "cal.mp4")
+	if err != nil || !strings.Contains(strings.SplitN(out, "\n", 2)[0], `"Estimate"`) {
+		t.Errorf("%v: JSON start line %q", err, strings.SplitN(out, "\n", 2)[0])
+	}
+	_, _, err = run(t, &fakeAPI{}, nil, "calibrate", "make", "-o", "cal.mp4", "--resolution", "1366x768")
+	if ExitCode(err) != exitUsage || err == nil || !strings.Contains(err.Error(), "--resolution 1366x768: no calibration step fits it") {
+		t.Errorf("1366x768: %v (exit %d)", err, ExitCode(err))
+	}
+	if roundEstimate(400*time.Millisecond) != "1 s" || roundEstimate(42*time.Second) != "42 s" || roundEstimate(150*time.Second) != "3 min" {
+		t.Error("roundEstimate")
+	}
+}
