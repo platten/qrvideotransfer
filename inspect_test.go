@@ -6,29 +6,28 @@ import (
 	"testing"
 
 	"github.com/platten/qrvideotransfer/internal/prng"
+	"github.com/platten/qrvideotransfer/internal/video"
 )
 
 // TestInspect: Inspect on the encoder's own frames reports every field of StreamInfo, the display
-// rate from the stream descriptor among them.
+// rate from the stream descriptor among them; frames whose headers are read but whose stream
+// descriptor is not give the header's fields (Descriptor false) beside a NotEnoughDataError with
+// the failure diagnostics; noise gives the error alone. The smallest setting, a 480 x 480 code of
+// 500 bytes (F = 4), since each capture costs a run of the vision chain.
 func TestInspect(t *testing.T) {
-	in, _ := payloadDir(t, 31, 3000)
-	path, rep := encodeTest(t, EncodeOptions{Inputs: []string{in}, Profile: profile480, Compression: CompressNone})
-	var events int
-	si, err := Inspect(context.Background(), InspectOptions{Path: path, Backend: testSpec, Progress: func(Event) { events++ }})
+	in, _ := payloadDir(t, 31, 500)
+	p := Profile{Width: 480, Height: 480, Cell: 4, FPS: 30, Modulation: Gray4, Protection: Normal, ParityPercent: 20}
+	path, rep := encodeTest(t, EncodeOptions{Inputs: []string{in}, Profile: p, Compression: CompressNone})
+	events := 0
+	si, err := Inspect(context.Background(), InspectOptions{Path: path, Backend: testSpec, Workers: 1, Progress: func(Event) { events++ }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events == 0 {
-		t.Error("no events")
-	}
-	want := StreamInfo{Session: rep.Session, Width: 848, Height: 480, GridX: 212, GridY: 120, Modulation: Gray4, Protection: Normal,
-		Frames: rep.Frames, FPS: 12, StreamLen: rep.StreamLen, ShardSize: 128, Blocks: rep.Blocks, K: rep.K, M: rep.M,
+	want := StreamInfo{Session: rep.Session, Width: 480, Height: 480, GridX: 120, GridY: 120, Modulation: Gray4, Protection: Normal,
+		Frames: rep.Frames, FPS: 30, StreamLen: rep.StreamLen, ShardSize: 128, Blocks: rep.Blocks, K: rep.K, M: rep.M,
 		StreamHash: si.StreamHash, Descriptor: true}
-	if *si != want {
-		t.Errorf("got %+v\nwant %+v", *si, want)
-	}
-	if si.StreamHash == [16]byte{} {
-		t.Error("no stream hash")
+	if *si != want || si.StreamHash == [16]byte{} || events == 0 {
+		t.Errorf("got %+v, %d events\nwant %+v", *si, events, want)
 	}
 	if _, err := Inspect(context.Background(), InspectOptions{Backend: testSpec}); err == nil {
 		t.Error("no path accepted")
@@ -36,40 +35,31 @@ func TestInspect(t *testing.T) {
 	if _, err := Inspect(context.Background(), InspectOptions{Path: path, Backend: "/nonexistent/ffmpeg"}); err == nil {
 		t.Error("a missing ffmpeg accepted")
 	}
-}
 
-// TestInspectPartial: a recording whose frame headers are read but whose stream descriptor is not
-// gives the header's fields (Descriptor false) beside a NotEnoughDataError with the failure
-// diagnostics; noise gives the error alone.
-func TestInspectPartial(t *testing.T) {
-	in, _ := payloadDir(t, 32, 3000)
-	path, rep := encodeTest(t, EncodeOptions{Inputs: []string{in}, Profile: profile480, Compression: CompressNone})
-	frames := readRaw(t, path)
+	// +-40 levels of noise: headers read, nothing else (internal/pipeline's TestInspectHeadersOnly).
+	frames := readRaw(t, path)[:1]
 	g := prng.SplitMix64{State: 3}
-	for _, f := range frames { // +-40 levels: headers read, nothing else (internal/pipeline's TestInspectHeadersOnly)
+	for _, f := range frames {
 		for i := range f.Y {
 			f.Y[i] = uint16(max(0, min(255, int(f.Y[i])+int(g.Next()%81)-40)))
 		}
 	}
-	rec := writeRawFrames(t, frames[:2], 12)
-	si, err := Inspect(context.Background(), InspectOptions{Path: rec, Backend: testSpec})
+	si, err = Inspect(context.Background(), InspectOptions{Path: writeRawFrames(t, frames, 30), Backend: testSpec, Workers: 1})
 	var short *NotEnoughDataError
-	if !errors.As(err, &short) || short.Captures != 2 || short.HeadersRead == 0 || short.Descriptor || short.FramesTotal != rep.Frames {
+	if !errors.As(err, &short) || short.Captures != 1 || short.HeadersRead != 1 || short.Descriptor || short.FramesTotal != rep.Frames {
 		t.Fatalf("%v (%+v)", err, short)
 	}
-	want := &StreamInfo{Width: 848, Height: 480, GridX: 212, GridY: 120, Modulation: Gray4, Protection: Normal, Frames: rep.Frames}
-	if si == nil || *si != *want {
-		t.Errorf("partial %+v, want %+v", si, want)
+	partial := &StreamInfo{Width: 480, Height: 480, GridX: 120, GridY: 120, Modulation: Gray4, Protection: Normal, Frames: rep.Frames}
+	if si == nil || *si != *partial {
+		t.Errorf("partial %+v, want %+v", si, partial)
 	}
 
-	noise := readRaw(t, path)[:4]
-	for _, f := range noise {
-		for i := range f.Y {
-			f.Y[i] = uint16(g.Next() & 0xff)
-		}
+	noise := []*video.Frame{{W: 128, H: 128, Bits: 8, Y: make([]uint16, 128*128), Cb: make([]uint16, 64*64), Cr: make([]uint16, 64*64)}}
+	for i := range noise[0].Y {
+		noise[0].Y[i] = uint16(g.Next() & 0xff)
 	}
-	si, err = Inspect(context.Background(), InspectOptions{Path: writeRawFrames(t, noise, 12), Backend: testSpec})
-	if !errors.As(err, &short) || si != nil || short.HeadersRead != 0 || short.Captures != 4 {
+	si, err = Inspect(context.Background(), InspectOptions{Path: writeRawFrames(t, noise, 30), Backend: testSpec})
+	if !errors.As(err, &short) || si != nil || short.HeadersRead != 0 || short.Captures != 1 {
 		t.Errorf("noise: %+v, %v", si, err)
 	}
 }
