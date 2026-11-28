@@ -236,9 +236,8 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%s: %v: %s", shell, err, out)
 			}
-			time.Sleep(300 * time.Millisecond)
-			if ps, err := exec.Command("ps", "-eo", "args").Output(); err == nil && strings.Contains(string(ps), "sleep "+limit+"\n") {
-				t.Errorf("%s: a watchdog's sleep %s outlived bounded", shell, limit)
+			if !watchdogGone(limit, 5*time.Second) {
+				t.Errorf("%s: a watchdog's sleep %s outlived bounded by 5 s", shell, limit)
 				_ = exec.Command("pkill", "-f", "^sleep "+limit+"$").Run()
 			}
 
@@ -260,7 +259,7 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 					if made, _ := os.ReadDir(marks); len(made) != 1 || !made[0].IsDir() || !strings.HasPrefix(made[0].Name(), "qrvt.") {
 						t.Errorf("%s: interrupt %d: %v in the marker folder's place while the command runs, want one qrvt.* folder", shell, i, made)
 					}
-					if !watchdogSleeping(limit, 10*time.Second) {
+					if !watchdogSleeping(limit, cmd.Process.Pid, 10*time.Second) {
 						_ = cmd.Process.Kill()
 						_ = cmd.Wait()
 						t.Fatalf("%s: interrupt %d: the watchdog's sleep %s never appeared", shell, i, limit)
@@ -298,24 +297,68 @@ func TestSetupShBoundedCleansUp(t *testing.T) {
 				}
 			}
 			t.Logf("%s: %d interrupts met the residual window before the trap", shell, residual)
-			time.Sleep(300 * time.Millisecond)
-			if ps, err := exec.Command("ps", "-eo", "args").Output(); err == nil && strings.Contains(string(ps), "sleep "+limit+"\n") {
-				t.Errorf("%s: a watchdog's sleep %s outlived an interrupt", shell, limit)
+			if !watchdogGone(limit, 5*time.Second) {
+				t.Errorf("%s: a watchdog's sleep %s outlived an interrupt by 5 s", shell, limit)
 				_ = exec.Command("pkill", "-f", "^sleep "+limit+"$").Run()
 			}
 		})
 	}
 }
 
-// watchdogSleeping reports whether bounded's watchdog has started its sleep of limit seconds,
-// waiting up to wait for it.
-func watchdogSleeping(limit string, wait time.Duration) bool {
+// watchdogSleeping reports whether the watchdog of the bounded that shell runs has started its
+// sleep of limit seconds, waiting up to wait for it: a process "sleep limit" whose parent, the
+// watchdog's subshell, is a child of shell. A sleep of the same limit left by an earlier bounded,
+// whose shell is gone, does not count.
+func watchdogSleeping(limit string, shell int, wait time.Duration) bool {
 	for deadline := time.Now().Add(wait); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-		if ps, err := exec.Command("ps", "-eo", "args").Output(); err == nil && strings.Contains(string(ps), "sleep "+limit+"\n") {
-			return true
+		parent, sleeps := psSleeps(limit)
+		for _, pid := range sleeps {
+			if parent[parent[pid]] == shell {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// watchdogGone reports whether no process "sleep limit" is left, polling for up to wait: a
+// watchdog's sleep, killed as bounded returns, may take a moment to go on a loaded machine.
+func watchdogGone(limit string, wait time.Duration) bool {
+	for deadline := time.Now().Add(wait); ; time.Sleep(50 * time.Millisecond) {
+		if _, sleeps := psSleeps(limit); len(sleeps) == 0 {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+	}
+}
+
+// psSleeps returns every process's parent by process ID and the processes running "sleep limit",
+// from ps; nothing when ps fails.
+func psSleeps(limit string) (map[int]int, []int) {
+	out, err := exec.Command("ps", "-eo", "pid=,ppid=,args=").Output()
+	if err != nil {
+		return nil, nil
+	}
+	parent := map[int]int{}
+	var sleeps []int
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		pid, err1 := strconv.Atoi(f[0])
+		ppid, err2 := strconv.Atoi(f[1])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		parent[pid] = ppid
+		if strings.Join(f[2:], " ") == "sleep "+limit {
+			sleeps = append(sleeps, pid)
+		}
+	}
+	return parent, sleeps
 }
 
 // TestSetupShBoundedMktempFails: when mktemp cannot make the marker folder, bounded fails with
