@@ -176,8 +176,12 @@ func TestFrameLoss(t *testing.T) {
 			}
 			// The diagnostics of a lossless recording: every capture located, its header read.
 			k := int64(len(kept))
+			// Headers samples the first 16 captures' headers, all of this transfer.
 			diag := ShortError{Blocks: short.Blocks, Captures: k, Located: k, HeadersRead: k, FramesSeen: len(kept), FramesTotal: res.Frames,
-				Descriptor: true}
+				Descriptor: true, Headers: short.Headers}
+			if len(short.Headers) != min(int(k), 16) || short.Headers[0].TotalFrames != uint32(res.Frames) {
+				t.Errorf("header sample %+v", short.Headers)
+			}
 			if short.Reject != nil || short.LockedRate || !reflect.DeepEqual(*short, diag) {
 				t.Errorf("diagnostics %+v, want %+v", *short, diag)
 			}

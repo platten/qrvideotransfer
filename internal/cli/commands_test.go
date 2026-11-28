@@ -37,6 +37,10 @@ func TestExitCode(t *testing.T) {
 		{&qrvt.UnsupportedVersionError{}, 5},
 		{context.Canceled, 130},
 		{guide(qrvt.ErrWrongPassphrase, nil, nil), 4},
+		{&qrvt.CalibrationError{Reason: qrvt.CalibrationNoCode}, 3},
+		{&qrvt.CalibrationError{Reason: qrvt.CalibrationNothingPassed}, 3},
+		{&qrvt.CalibrationError{Reason: qrvt.CalibrationTransfer}, 1},
+		{&qrvt.CalibrationError{Reason: qrvt.CalibrationMixedSizes}, 1},
 	}
 	for _, tc := range tests {
 		if got := ExitCode(tc.err); got != tc.want {
@@ -817,5 +821,61 @@ func TestCalibrateMakeEstimate(t *testing.T) {
 	}
 	if roundEstimate(400*time.Millisecond) != "1 s" || roundEstimate(42*time.Second) != "42 s" || roundEstimate(150*time.Second) != "3 min" {
 		t.Error("roundEstimate")
+	}
+}
+
+// The guidance of the calibration's errors (DESIGN.md section 13, required tests 1 to 4): decode
+// given the calibration video points to qrvt calibrate read; calibrate read given a transfer, or
+// headers recovering to more than one size, points to qrvt decode; and when no step passed it
+// names both a poor recording and a transfer, never only the first.
+func TestCalibrationGuidance(t *testing.T) {
+	cases := []struct {
+		err  error
+		cmd  string
+		want []string
+	}{
+		{&qrvt.NotEnoughDataError{Captures: 9, Located: 9, HeadersRead: 8, Calibration: true}, "decode",
+			[]string{"8 of 9 captures are those of the calibration video", "Measure it with qrvt calibrate read."}},
+		{&qrvt.NotEnoughDataError{Captures: 9, Located: 9, HeadersRead: 8, Calibration: true}, "inspect",
+			[]string{"qrvt calibrate read"}},
+		{&qrvt.CalibrationError{Reason: qrvt.CalibrationTransfer, HeadersRead: 4}, "calibrate read", []string{"decode them with qrvt decode"}},
+		{&qrvt.CalibrationError{Reason: qrvt.CalibrationMixedSizes, Sizes: 2}, "calibrate read", []string{"a qrvt transfer, not the calibration video"}},
+		{&qrvt.CalibrationError{Reason: qrvt.CalibrationNothingPassed}, "calibrate read",
+			[]string{"Film the calibration video again", "If the recording is of a qrvt transfer", "qrvt decode"}},
+		{&qrvt.CalibrationError{Reason: qrvt.CalibrationNoCode}, "calibrate read", []string{"film the whole screen"}},
+		{&qrvt.CalibrationError{Reason: qrvt.CalibrationNoHeader}, "calibrate read", []string{"the one qrvt calibrate make wrote"}},
+	}
+	for _, c := range cases {
+		g := guideFor(c.cmd, c.err, nil, nil)
+		var ge *guidedError
+		if !errors.As(g, &ge) || !errors.Is(g, c.err) {
+			t.Fatalf("%v: not guided", c.err)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(ge.guidance, w) {
+				t.Errorf("%v: no %q in %q", c.err, w, ge.guidance)
+			}
+		}
+	}
+}
+
+// calibrate read prints the recommendation, the label of a setting measured on the user's device,
+// and one summary field per step with each protection level's share decoded.
+func TestCalibrateReadSteps(t *testing.T) {
+	f := newFiles(t)
+	rec := &qrvt.Recommendation{Profile: qrvt.Profile{Width: 1280, Height: 720, Cell: 4, FPS: 30, Modulation: qrvt.Gray4,
+		Protection: qrvt.Fast, ParityPercent: 20}, Command: "qrvt encode <files> -o transfer.mp4 --resolution 1280x720", BytesPerSec: 152640,
+		Measured: true, Steps: []qrvt.CalibrationStep{
+			{FPS: 30, Cell: 4, Modulation: qrvt.Gray4, Protection: qrvt.Fast, Frames: 4, FramesSeen: 4, Codewords: 216, Decoded: 216, PixelsPerCell: 5.4, Passed: true, Margin: true},
+			{FPS: 30, Cell: 4, Modulation: qrvt.Gray4, Protection: qrvt.Normal, Frames: 4, FramesSeen: 4, Codewords: 264, Decoded: 250, PixelsPerCell: 5.4, Passed: true, Established: true},
+			{FPS: 30, Cell: 4, Modulation: qrvt.Gray4, Protection: qrvt.Robust, Frames: 4, FramesSeen: 4, Codewords: 268, Decoded: 0, PixelsPerCell: 5.4},
+			{FPS: 30, Cell: 8, Modulation: qrvt.Gray2, Protection: qrvt.Normal, Frames: 4, FramesSeen: 3, Codewords: 0, PixelsPerCell: 10.8, Passed: true},
+		}}
+	out, _, err := run(t, &fakeAPI{rec: rec}, nil, "calibrate", "read", f.r1)
+	for _, want := range []string{"measured on your device", "Step 30 fps, cell 4, gray4", "4 of 4 frames seen, 5.4 camera pixels per cell;",
+		"fast 100%, passed with margin", "normal 95%, passed", "robust 0%", "Step 30 fps, cell 8, bw", "normal 0%, passed, not established"} {
+		if err != nil || !strings.Contains(out, want) {
+			t.Errorf("%v: no %q in\n%s", err, want, out)
+		}
 	}
 }
