@@ -72,6 +72,22 @@ func TestRecommendMeasured(t *testing.T) {
 	}
 }
 
+// Condition 4: a segment over the display cap is never chosen, even when it passes with margin
+// and would be the fastest: colour at 60 fps on 4-pixel cells of a 1080p monitor needs
+// 28 x 129,600 x 60 = 218 Mbit/s.
+func TestRecommendDisplayCap(t *testing.T) {
+	cam := Camera{FPS: 120, Bitrate: 1e12, Floor: FloorHandheld}
+	over := meas(60, 4, ModeColor, Normal, 12, 1, 1)
+	if c := cam.Check(over.Setting, over.GridX, over.GridY, over.Pixels); !c[0] || !c[2] || c[3] {
+		t.Fatalf("conditions %v: the case does not isolate condition 4", c)
+	}
+	base := meas(12, 4, ModeGray4, Normal, 6.4, 1, 1)
+	r, ok := Recommend(cam, []Measurement{base, over})
+	if !ok || r.Setting != base.Setting {
+		t.Errorf("recommended %+v", r)
+	}
+}
+
 // Exact ties: the larger condition-2 margin, then the simpler mode.
 func TestRecommendTie(t *testing.T) {
 	a := meas(12, 4, ModeBW, Normal, 6.4, 1, 1)

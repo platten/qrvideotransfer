@@ -138,6 +138,16 @@ func TestConditionsMatchDesign(t *testing.T) {
 		if bits, err := strconv.ParseFloat(row[4], 64); err != nil || bits != displayBits[m] {
 			t.Errorf("%s: display bits %q", row[0], row[4])
 		}
+		// Colour's handheld minimum is the upper end of section 5's range, for every code.
+		if m == ModeColor {
+			hand := strings.TrimSpace(strings.SplitN(row[3], "/", 2)[1])
+			hi, err := strconv.ParseFloat(hand[strings.LastIndex(hand, "-")+1:], 64)
+			for _, in := range Protections {
+				if err != nil || MinPixels(ModeColor, in) != hi {
+					t.Errorf("colour %d: minimum %v, section 5 says %q", in, MinPixels(ModeColor, in), row[3])
+				}
+			}
+		}
 	}
 	if seen != 3 {
 		t.Errorf("%d modes in section 5's table", seen)
@@ -146,15 +156,51 @@ func TestConditionsMatchDesign(t *testing.T) {
 	s13 := strings.Join(strings.Fields(strings.Join(l13, " ")), " ")
 	for _, want := range []string{"F is 4,896 for every size", "session 0x5332, inner code 2", "at least 120 x 90",
 		"(12 < 30 < 60), cell size (16 < 12 < 8 < 4), mode (black and white < four greys < colour) and protection (`robust` < `normal` < `fast`)",
-		"\"within one step\" is a distance of at most 1", "at least 92% of the codewords", "at least 90% of the code frames", "96% and 95%",
-		"\"measured on your device\""} {
+		"\"within one step\" is a distance of at most 1",
+		"at least 92% of the codewords on the summed frames decode to the calibration's all-zero codeword and at least 90% of the code frames are seen; provisional, pending G1",
+		"96% and 95%, provisional, pending G1", "\"measured on your device\"",
+		"The video is at 60 fps", "a slot of r x 4 code frames, 4 seconds",
+		"reads as a calibration in which no segment passes, so no recommendation is made",
+		"Headers that recover to more than one video size are not a calibration video",
+		"`Measurement.Decoded`"} {
 		if !strings.Contains(s13, want) {
 			t.Errorf("section 13 no longer says %q", want)
 		}
 	}
-	if TotalFrames != 4896 || Session != 0x5332 || InnerCode != 2 || MinGridX != 120 || MinGridY != 90 ||
+	// The plan's lengths, as section 13 lists them.
+	var lengths []string
+	for _, sz := range presets {
+		p, err := NewPlan(sz.W, sz.H)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := map[int]string{480: "480p", 720: "720p", 1080: "1080p", 1440: "1440p", 2160: "4K"}[sz.H]
+		lengths = append(lengths, name+" "+strconv.Itoa(p.Seconds())+" s")
+	}
+	if want := "Lengths: " + strings.Join(lengths, ", ") + "."; !strings.Contains(s13, want) {
+		t.Errorf("section 13 no longer says %q", want)
+	}
+	if VideoFPS != 60 || SegmentSeconds != 4 || TotalFrames != 4896 || Session != 0x5332 || InnerCode != 2 || MinGridX != 120 || MinGridY != 90 ||
 		PassCodewords != 0.92 || PassFrames != 0.90 || math.Abs(MarginCodewords-0.96) > 1e-12 || math.Abs(MarginFrames-0.95) > 1e-12 || MeasuredLabel != "measured on your device" {
 		t.Error("the calibration constants differ from section 13")
+	}
+}
+
+// The established set is section 11's sentence, read back from it: black and white and four
+// greys, each `robust` and `normal`, and nothing else.
+func TestEstablishedMatchesDesign(t *testing.T) {
+	s11, _ := design(t, "## 11. Expected performance")
+	const sentence = "The settings established handheld are black and white and four greys, each `robust` and `normal`; every `fast` and every colour setting is not established."
+	if !strings.Contains(s11, sentence) {
+		t.Fatalf("section 11 no longer says %q", sentence)
+	}
+	for _, m := range Modes {
+		for _, in := range Protections {
+			want := (m == ModeBW || m == ModeGray4) && (in == Robust || in == Normal)
+			if Established(m, in) != want {
+				t.Errorf("mode %d, code %d: established %v, section 11 says %v", m, in, Established(m, in), want)
+			}
+		}
 	}
 }
 

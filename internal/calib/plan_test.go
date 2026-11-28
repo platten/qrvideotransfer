@@ -132,7 +132,8 @@ func TestRecoverEveryFrame(t *testing.T) {
 	}
 }
 
-// Property: for every supported monitor size and every frame it shows, exactly one slot, and so
+// Property: for every supported monitor size and every frame it shows (every index of every
+// segment), exactly one slot, and so
 // one video size, is consistent with the header's (index, grid, mode), counted by brute force over
 // every slot rather than through Recover.
 func TestRecoverUnique(t *testing.T) {
@@ -142,7 +143,8 @@ func TestRecoverUnique(t *testing.T) {
 			continue
 		}
 		for _, s := range p.Segments {
-			for _, idx := range []uint32{s.FirstIndex, s.FirstIndex + uint32(s.CodeFrames) - 1} {
+			for k := range s.CodeFrames {
+				idx := s.FirstIndex + uint32(k) //nolint:gosec // small
 				n := 0
 				for _, o := range slots {
 					if idx < o.FirstIndex || idx >= o.FirstIndex+uint32(o.CodeFrames) || o.Mode != s.Mode {
