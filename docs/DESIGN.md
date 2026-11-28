@@ -1409,7 +1409,9 @@ qrvt profiles | version | completion | man
   as the stream descriptor decodes, and prints the header's and the descriptor's fields: session,
   video size, grid, mode, protection, frames and the display rate (descriptor byte 37, FORMAT.md
   section 10), the stream's length and hash, the shard size and the blocks. It makes no shard store,
-  checks no disk space and writes nothing. A recording that ends first falls short as a decode does,
+  checks no disk space and writes nothing of its own; as for decode, the embedded engine may fill
+  its compiled-module cache in the user cache folder (section 12). A recording that ends first
+  falls short as a decode does,
   with the same diagnostics and guidance (exit 3): when a frame header was read, the header's fields
   are printed first as a partial summary, titled as such (`StreamInfo.Descriptor` false); with
   `--json` only the error line is printed, the events schema allowing one summary or error line,
@@ -2031,8 +2033,9 @@ section 13).
     and patch position, `robust` with a 20% patch included; `TestInspectNoiseResources` (long
     only, M4's fourth pull request), inspect on noise, 16 frames at 848 x 480 and 32 at 3840 x 2160
     with GOMAXPROCS 16 and 32, **a SECURITY.md section 9.5 resource bound** (always: the root
-    package's `TestInspectNoise`, 3 noise captures at 480 x 480, with nothing written and an
-    allocation ceiling); `TestInspectStopsEarly` (long only), a filmed recording that inspect stops
+    package's `TestInspectNoise`, 3 noise captures at 480 x 480, with nothing written in the
+    temporary folder or beside the recording and an allocation ceiling); `TestInspectStopsEarly`
+    (long only), a filmed recording that inspect stops
     reading once its descriptor decodes.
   - `internal/vision`, long only: `TestGeometryPresetsLong`, `TestGeometryHarshLong`,
     `TestGeometryHarshRegression`, `TestDetectModuleSweep`, `TestGlareStudy`, `TestDecoyMatrix`,
