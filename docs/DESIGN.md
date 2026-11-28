@@ -2328,7 +2328,7 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
 | Player drops frames or processes the picture | 4-pixel cells keep bitrate low; bitrate caps per preset; `calibrate` counts frame-index gaps | Gap statistics from real playback |
 | Sub-pixel registration fails under shake or stabilisation | Anchors every 30 cells; outlier rejection | Position-error assertion |
 | Glare, exposure and focus hunting | Constant mean brightness; saturated cells erased; capture guidance | Glare and exposure-step simulator cases |
-| Moire when display and camera pixels nearly match | Stripe cancellation; `calibrate` advises a change of distance | Sub-pixel-structure simulator case |
+| Moire when display and camera pixels nearly match | Stripe cancellation; for M5, `calibrate` to detect moire and advise a change of distance (not detected yet, section 19) | Sub-pixel-structure simulator case |
 | Miscalibrated confidence or a wrong LDPC table | Honest-confidence test; published-threshold test | Both tests in M1 and M2 |
 | 1 GB scale: 8.5 GB video, 13 GB recording, hours of processing, clip-length limits on phones | Streaming stages, disk stores, resume, merging split recordings | Nightly 1 GB run |
 | One maintainer behind go-ffmpreg; GPL source obligations for the embedded binary | Version and checksum pinned; build script and licence notice in the repository | Release checklist |
@@ -2567,7 +2567,10 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   CPU-seconds of vision, so the 34-capture filmed run at 1920 x 1080 took about 2.9 s pinned to 4
   CPUs; by the designer's ruling it is long only (`TestAnalyzeFilmedLong`), and the always-on
   `TestAnalyzeFilmed` films 10 captures at 1280 x 720 with the same assertions. M4's sixth pull
-  request's always-on total is accepted at about 2.75 s.
+  request adds about 2.9 to 3.1 s of always-on tests pinned to 4 CPUs (`internal/calib` 2.1 to
+  2.3 s, the root package 0.8 s), accepted by the designer. Much of it is a fixed charge per
+  `Analyze` call, the start of `pipeline.Scan` and of its vision workers, paid by every small test
+  recording whatever its captures.
 - **For M7: calibrate read's frame mappings sit outside its soft-bit count (`held`).** Up to
   about 81 MiB for the largest plan a header can recover to, within the 1 GiB bound with the cap
   and vision (section 13); counting them, or bounding the sizes a header may recover to, is for
