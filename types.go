@@ -228,8 +228,10 @@ type Warning struct {
 
 // StreamInfo is what a code video carries, as reported by [Inspect].
 type StreamInfo struct {
-	Session       uint64
-	Width, Height int // video pixels, when known
+	Session uint64
+	// Width and Height are the pixels of the input video as probed: for a code video the code's,
+	// for a filmed recording the camera's, not the code's (its grid is GridX by GridY cells).
+	Width, Height int
 	GridX, GridY  int
 	Modulation    Modulation
 	Protection    Protection
@@ -239,6 +241,10 @@ type StreamInfo struct {
 	ShardSize     int
 	Blocks, K, M  int
 	StreamHash    [16]byte // first 16 bytes of the SHA-256 of the stream
+	// Descriptor is set when the stream descriptor was read. When it is not, [Inspect] returns the
+	// frame header's fields only (Width, Height, GridX, GridY, Modulation, Protection, Frames)
+	// beside its error, and the rest is zero.
+	Descriptor bool
 }
 
 // EncodeReport describes a finished (or, with DryRun, planned) encode.

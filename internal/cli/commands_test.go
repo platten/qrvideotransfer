@@ -750,3 +750,50 @@ func TestNewEnv(t *testing.T) {
 	}
 	_, _, _ = (Root{}).GenerateKey()
 }
+
+// TestInspectPartial: an inspect that read frame headers but not the stream descriptor prints the
+// header's fields as a partial summary on stdout, then the not-enough-data error with its
+// guidance (exit 3); with --json it prints the error line only, the summary or error line of the
+// events schema. An agreed unsupported version is exit 5, with no summary.
+func TestInspectPartial(t *testing.T) {
+	f := newFiles(t)
+	partial := &qrvt.StreamInfo{Width: 1920, Height: 1080, GridX: 480, GridY: 270, Modulation: qrvt.Gray4, Protection: qrvt.Normal,
+		Frames: 840}
+	short := &qrvt.NotEnoughDataError{Captures: 40, Located: 40, HeadersRead: 38, FramesSeen: 30, FramesTotal: 840}
+	out, errOut, err := run(t, &fakeAPI{info: partial, err: short}, nil, "inspect", f.r1)
+	if ExitCode(err) != exitShort {
+		t.Fatalf("exit %d, want %d (%v)", ExitCode(err), exitShort, err)
+	}
+	for _, want := range []string{"stream descriptor was not read", "1920x1080", "480x270", "gray4", "normal", "840"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("partial summary lacks %q:\n%s", want, out)
+		}
+	}
+	for _, not := range []string{"Session", "Stream", "Shards", "Blocks", "fps"} {
+		if strings.Contains(out, not) {
+			t.Errorf("partial summary shows %q:\n%s", not, out)
+		}
+	}
+	if msg, g := splitGuidance(err); !strings.Contains(g, "not the stream descriptor") || msg == "" {
+		t.Errorf("error %q, guidance %q; stderr %q", msg, g, errOut)
+	}
+
+	out, errOut, err = run(t, &fakeAPI{info: partial, err: short}, nil, "--json", "inspect", f.r1)
+	if ExitCode(err) != exitShort || errOut != "" {
+		t.Fatalf("exit %d (%v), stderr %q", ExitCode(err), err, errOut)
+	}
+	ls := jsonLines(t, out)
+	for _, l := range ls[:len(ls)-1] {
+		if l.Type == "summary" || l.Type == "error" {
+			t.Errorf("a %s line before the last: %q", l.Type, out)
+		}
+	}
+	if last := ls[len(ls)-1]; last.Type != "error" || last.Exit != exitShort {
+		t.Errorf("last line %+v, want the error line", last)
+	}
+
+	out, _, err = run(t, &fakeAPI{err: &qrvt.UnsupportedVersionError{What: "format version", Value: 2}}, nil, "inspect", f.r1)
+	if ExitCode(err) != exitRefused || strings.Contains(out, "Code video") {
+		t.Errorf("unsupported version: exit %d (%v), stdout %q", ExitCode(err), err, out)
+	}
+}

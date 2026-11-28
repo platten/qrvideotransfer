@@ -65,9 +65,16 @@ func ExitCode(err error) int {
 	return exitFailure
 }
 
-// guide adds failure guidance (DESIGN.md section 13) to the typed errors of the root package. last
-// is the latest decoding statistics and o the decode options, both possibly nil.
+// guide adds failure guidance (DESIGN.md section 13) to the typed errors of the root package, as
+// for qrvt decode. last is the latest decoding statistics and o the decode options, both possibly
+// nil.
 func guide(err error, last *qrvt.Stats, o *qrvt.DecodeOptions) error {
+	return guideFor("decode", err, last, o)
+}
+
+// guideFor is guide for the command named: a shortfall of qrvt inspect gets inspect's actions
+// (shortGuidance).
+func guideFor(command string, err error, last *qrvt.Stats, o *qrvt.DecodeOptions) error {
 	if err == nil {
 		return nil
 	}
@@ -80,7 +87,7 @@ func guide(err error, last *qrvt.Stats, o *qrvt.DecodeOptions) error {
 	)
 	switch {
 	case errors.As(err, &short):
-		g = shortGuidance(short, last, o)
+		g = shortGuidance(short, last, o, command == "inspect")
 	case errors.Is(err, qrvt.ErrWrongPassphrase):
 		g = "Check the passphrase (and the --passphrase-file, if you used one) and try again."
 	case errors.Is(err, qrvt.ErrBadSignature):
@@ -123,10 +130,14 @@ const otherMin = 3
 // short: 21 shards missing in 1 of 1 blocks (96 of 96 code frames seen). Record one more loop and
 // pass both files to qrvt decode." When the camera is locked to the display rate, the last two
 // ask for a faster camera instead. An error without diagnostics (no captures counted) gets the
-// blocks it names, if any, and the generic action.
-func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeOptions) string {
-	more := "Record one more loop and pass all the recordings to qrvt decode."
+// blocks it names, if any, and the generic action. For inspect (DESIGN.md section 13, "inspect"),
+// which reads one recording and stops at the stream descriptor, the actions name qrvt inspect
+// and a longer recording instead of qrvt decode.
+func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeOptions, inspect bool) string {
+	more, again := "Record one more loop and pass all the recordings to qrvt decode.", "qrvt decode"
 	switch {
+	case inspect:
+		more, again = "Record at least one whole loop in one recording and run qrvt inspect on it.", "qrvt inspect"
 	case o != nil && o.StateDir != "":
 		more = "Record one more loop and decode it with the same --state-dir."
 	case o != nil && len(o.Recordings) == 1:
@@ -140,7 +151,7 @@ func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeO
 	switch {
 	case e.Captures > 0 && e.Located == 0:
 		return fmt.Sprintf("No code was found in any of the %d captures. "+
-			"Film the whole code, in focus and filling most of the picture, and run qrvt decode again.", e.Captures)
+			"Film the whole code, in focus and filling most of the picture, and run %s again.", e.Captures, again)
 	case e.Captures > 0 && e.HeadersRead == 0:
 		why := ""
 		if e.Reject != "" {
@@ -149,6 +160,9 @@ func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeO
 		return fmt.Sprintf("The code's corners were found in %d of %d captures, but no frame header could be read%s. "+
 			"Film closer and steadier, with the screen sharp and evenly lit, and check that the video was made by qrvt.",
 			e.Located, e.Captures, why)
+	case e.Other >= otherMin && len(e.Blocks) == 0 && inspect:
+		return fmt.Sprintf("%d of the %d captures with a frame header showed another transfer, which was ignored: "+
+			"inspect follows the first transfer it reads. Film one transfer at a time.", e.Other, e.HeadersRead)
 	case e.Other >= otherMin && len(e.Blocks) == 0:
 		return fmt.Sprintf("%d of the %d captures with a frame header showed another transfer, which was ignored: "+
 			"a decode follows the first transfer it reads. Decode each transfer's recordings separately.", e.Other, e.HeadersRead)

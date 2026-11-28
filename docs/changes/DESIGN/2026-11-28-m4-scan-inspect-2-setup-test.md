@@ -1,0 +1,1 @@
+Section 19: TestSetupShBoundedCleansUp waits for the watchdog of the bounded under test by its parentage, and the checks that no watchdog's sleep outlived bounded poll for up to 5 s instead of one look after 300 ms (test only; 60 of 60 at -count=20 under sh, dash and bash).

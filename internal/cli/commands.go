@@ -136,10 +136,10 @@ func (a *app) inspectCmd() *cobra.Command {
 			return a.run(cmd, info, nil, func(ctx context.Context, _ ui.Renderer, progress func(qrvt.Event)) (*ui.Summary, error) {
 				o.Progress = progress
 				si, err := a.env.API.Inspect(ctx, o)
-				if err != nil {
+				if si == nil {
 					return nil, err
 				}
-				return inspectSummary(o.Path, si), nil
+				return inspectSummary(o.Path, si), err
 			})
 		},
 	}
@@ -148,10 +148,16 @@ func (a *app) inspectCmd() *cobra.Command {
 }
 
 // inspectSummary describes what a code video carries.
+// Without the stream descriptor it is partial: the frame header's fields only.
 func inspectSummary(path string, si *qrvt.StreamInfo) *ui.Summary {
 	s := &ui.Summary{Title: "Code video " + path}
+	if !si.Descriptor {
+		s.Title += " (frame headers only: the stream descriptor was not read)"
+	}
 	add := func(k, v string) { s.Fields = append(s.Fields, ui.Field{Key: k, Value: v}) }
-	add("Session", fmt.Sprintf("%016x", si.Session))
+	if si.Descriptor {
+		add("Session", fmt.Sprintf("%016x", si.Session))
+	}
 	if si.Width > 0 {
 		add("Video", fmt.Sprintf("%dx%d", si.Width, si.Height))
 	}
@@ -163,6 +169,9 @@ func inspectSummary(path string, si *qrvt.StreamInfo) *ui.Summary {
 		frames += fmt.Sprintf(" at %d fps, a loop of %s", si.FPS, ui.FormatDuration(time.Duration(si.Frames)*time.Second/time.Duration(si.FPS)))
 	}
 	add("Frames", frames)
+	if !si.Descriptor {
+		return s
+	}
 	add("Stream", fmt.Sprintf("%s, hash %s", ui.FormatBytes(si.StreamLen), hex.EncodeToString(si.StreamHash[:])))
 	add("Shards", fmt.Sprintf("%d bytes", si.ShardSize))
 	add("Blocks", fmt.Sprintf("%d x (%d + %d)", si.Blocks, si.K, si.M))

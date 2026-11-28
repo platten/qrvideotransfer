@@ -106,14 +106,15 @@ func (f *fakeAPI) AnalyzeCalibration(_ context.Context, o qrvt.AnalyzeOptions) (
 func (f *fakeAPI) Inspect(_ context.Context, o qrvt.InspectOptions) (*qrvt.StreamInfo, error) {
 	f.play(o.Progress, nil)
 	f.ins = &o
+	if f.info != nil { // with f.err, a partial result
+		return f.info, f.err
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
-	if f.info != nil {
-		return f.info, nil
-	}
 	return &qrvt.StreamInfo{Session: 0xabc, Width: 1920, Height: 1080, GridX: 480, GridY: 270, Modulation: qrvt.Gray4,
-		Protection: qrvt.Normal, Frames: 840, FPS: 12, StreamLen: 1 << 20, ShardSize: 128, Blocks: 1, K: 8192, M: 1639}, nil
+		Protection: qrvt.Normal, Frames: 840, FPS: 12, StreamLen: 1 << 20, ShardSize: 128, Blocks: 1, K: 8192, M: 1639,
+		Descriptor: true}, nil
 }
 
 func (f *fakeAPI) GenerateKey() ([]byte, []byte, error) {

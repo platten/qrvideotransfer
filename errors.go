@@ -27,7 +27,7 @@ type NotEnoughDataError struct {
 	Captures    int64       // captures read
 	Located     int64       // captures in which the code's finders were found (a header was tried, whether or not it was read)
 	HeadersRead int64       // captures whose frame header was read, of any transfer
-	Other       int64       // of those, captures of a transfer other than the one decoded, which were ignored
+	Other       int64       // of those, captures of a transfer other than the one decoded (or, when none was decoded, the one read most often), which were ignored
 	FramesSeen  int         // code frames of the decoded transfer seen
 	FramesTotal int         // its code frames; 0 when no header was read
 	Descriptor  bool        // the stream descriptor was read
