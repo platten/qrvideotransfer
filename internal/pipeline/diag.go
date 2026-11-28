@@ -41,7 +41,12 @@ type diagnostics struct {
 	finders, headers, other int64
 	early                   []keyCount // headers read before the decode locked onto a transfer
 	refusals                []refusalCount
+	sample                  []frame.Header // the first header of the first sampleHeaders captures with one
 }
+
+// sampleHeaders is how many captures' first headers the diagnostics keep, for telling a
+// calibration video (ShortError.Headers).
+const sampleHeaders = 16
 
 // keyCount is how many captures showed a transfer's header.
 type keyCount struct {
@@ -65,6 +70,9 @@ func (g *diagnostics) note(r *captureResult, key *params) {
 	switch {
 	case r.key != params{}:
 		g.headers++
+		if len(g.sample) < sampleHeaders && len(r.headers) > 0 {
+			g.sample = append(g.sample, r.headers[0])
+		}
 		if key != nil {
 			if r.key != *key {
 				g.other++

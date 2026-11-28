@@ -295,4 +295,30 @@ type Recommendation struct {
 	Command     string  // the suggested encode command line
 	BytesPerSec float64 // planning rate
 	Warnings    []Warning
+	// Measured is set when the setting is not established (DESIGN.md section 11) and only the
+	// user's own recording supports it: its step passed with margin. It is shown as "measured on
+	// your device" and holds for this user's recommendation only.
+	Measured bool
+	// Steps are what each step of the calibration video measured, by display rate, cell size and
+	// mode in the video's order, then fast, normal and robust.
+	Steps []CalibrationStep
+}
+
+// CalibrationStep is one step of the calibration video, decoded with one protection level, as
+// [AnalyzeCalibration] measured it.
+type CalibrationStep struct {
+	FPS           int // display rate
+	Cell          int
+	Modulation    Modulation
+	Protection    Protection
+	GridX, GridY  int
+	PixelsPerCell float64 // camera pixels per cell side, measured
+	Frames        int     // the step's code frames
+	FramesSeen    int
+	Codewords     int // codewords of the frames seen
+	Decoded       int // of those, decoded to the calibration's all-zero codeword
+	Passed        bool
+	Margin        bool    // passed with margin
+	Established   bool    // established at the camera pixels per cell measured (DESIGN.md section 11)
+	BytesPerSec   float64 // planning rate, scaled by the share of the step's codewords decoded
 }

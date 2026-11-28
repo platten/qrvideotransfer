@@ -410,6 +410,15 @@ for the always-on budget, a noise capture costing 0.1 to 0.3 s of detection; alw
 inspect is an entry point for hostile input, the root package's `TestInspectNoise` inspects 3
 noise captures at 480 x 480 and asserts the typed not-enough-data error, a nil `StreamInfo`, nothing written in the
 temporary folder or beside the recording, and at most 128 MiB allocated (14.4 MiB measured).
+`TestAnalyzeNoiseResources` (`internal/calib`, M4's sixth pull request) does the same for
+`calibrate read`, in the long run only: noise ends within 60 s and 1 GiB of Go heap growth with the
+typed error and no recommendation, 16 frames at 848 x 480 (0.3 s, 125 MiB) and 32 at 3840 x 2160
+with GOMAXPROCS 16 and 32 (1.2 s and 362 MiB both; linux amd64, development machine). It reads
+through `pipeline.Scan`, the same loop, vision workers and grid-stage gate, holds summed soft bits
+within the decode's 256 MB cap and writes nothing; always, the root package's
+`TestAnalyzeCalibrationNoise` reads 3 noise captures at 480 x 480 and asserts the typed
+`CalibrationError`, nothing written in the temporary folder or beside the recording, and at most
+128 MiB allocated (14.6 MiB measured).
 Further, `TestEvictionLoopCost` holds a decode at its
 256 MB cap for 200 captures within both bounds. Section 9.4's bit flips are asserted for every bit
 of a signed and encrypted stream, with the named error, no passphrase asked for and nothing

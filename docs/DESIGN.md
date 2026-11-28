@@ -1482,15 +1482,15 @@ qrvt profiles | version | completion | man
     the mode of the slot its index names, and a grid that, times the slot's cell, gives a video
     size whose plan shows that slot with that grid. Recovery is unique, since the index names
     one slot and grid x cell one size. A transfer meets all of these only by chance (its session's
-    low 16 bits, a stream of exactly 4,896 frames, the default inner code and a matching grid);
-    its stream descriptor decodes and its codewords do not decode to zero, so `read` treats a
-    recording in which a descriptor decodes as a transfer. A codeword counts as decoded
-    (`Measurement.Decoded`) only when it decodes to the calibration's all-zero codeword (the
-    coset of the all-zero shard, as the real-device check), never merely when the inner code
-    converges, so such a transfer whose descriptor does not decode reads as a calibration in
-    which no segment passes, so no recommendation is made. Headers that recover to more than one
-    video size are not a calibration video: a transfer's fixed grid recovers to a different size
-    in each slot of another cell, where a calibration recording's headers all recover to one.
+    low 16 bits, a stream of exactly 4,896 frames, the default inner code and a matching grid),
+    and its codewords never decode to zero. A codeword counts as decoded (`Measurement.Decoded`)
+    only when it decodes to the calibration's all-zero codeword (the coset of the all-zero
+    shard, as the real-device check), never merely when the inner code converges, so such a
+    transfer, whether or not its descriptor decodes, reads as a calibration in which no segment
+    passes, so no recommendation is made, and the guidance names a transfer as well as a poor
+    recording. Headers that recover to more than one video size are not a calibration video: a
+    transfer's fixed grid recovers to a different size in each slot of another cell, where a
+    calibration recording's headers all recover to one; `read` stops at the second size.
   - **The exit test's distance** between two settings is the sum, over display rate (12 < 30 <
     60), cell size (16 < 12 < 8 < 4), mode (black and white < four greys < colour) and protection
     (`robust` < `normal` < `fast`), of the difference of their ranks; "within one step" is a
@@ -1505,6 +1505,31 @@ qrvt profiles | version | completion | man
     only when its segment passed with margin (half the shortfall the pass allows: 96% and 95%,
     provisional, pending G1), and is labelled "measured on your device"; that holds for that
     user's recommendation only.
+  - **Reading it** (`calib.Analyze` on `pipeline.Scan`, root `AnalyzeCalibration`). Every
+    capture's first header must recover (`calib.Recover`), all to one size; a code frame of
+    another segment than its header's is dropped. Each code frame's soft bits are summed across
+    the captures that show it, adjacent captures at half weight (section 7, rule 7), gathered
+    with the interleaver of each inner code, `fast`, `normal` and `robust`, and decoded once two
+    captures have passed without it. The summed soft bits held stay within the decode's 256 MB
+    cap, the frame seen longest ago decoded first. Several recordings add up: a frame counts as
+    seen, and a codeword as decoded, once any recording gives it. The camera is the recordings'
+    lowest frame rate and bitrate (file size over duration), H.264 if any is, and the geometry
+    floor of 10-bit HLG when any is HLG. Warnings use the existing codes: `ExposureTooLong` when
+    a capture shows no single code frame, `Clipping` when over 5% of the palette patches clip on
+    average, `FramesDropped` when a recording's presentation times span over 1% more frames than
+    it has, and `Downscaled` when 4-pixel cells fail with every code where 8-pixel cells pass at
+    the same rate and mode with the camera pixels `robust` needs; moire is not detected yet
+    (section 19). `calibrate read` prints the recommended command and settings, the label, and one
+    summary field per step with each protection level's share of codewords decoded; the events
+    schema is unchanged. When it can recommend nothing it returns a `CalibrationError`: no code
+    (film the whole screen) or no header read (film closer), exit 3; a transfer, or headers of
+    more than one size (decode it with `qrvt decode`), exit 1; no step passed (film again or, if
+    it is a transfer, decode it), exit 3.
+  - **`decode` given the calibration video**, or a recording of it, falls short as any
+    recording without a descriptor does (exit 3); `NotEnoughDataError.Calibration` is set when
+    the headers it read (the first of up to 16 captures, `pipeline.ShortError.Headers`) all
+    recover to one size, and the guidance says to measure it with `qrvt calibrate read`. `inspect`
+    does the same. Decode's behaviour on transfers is unchanged.
 
 ## 14. Architecture
 
@@ -2102,7 +2127,12 @@ section 13).
   with what only its long version asserts:
   - root package: `TestRoundTripMatrix`, every row with each preset's own camera and
     `matrixSessions` sessions (PR #47); `TestRoundTripMatrixX264`, its long rows with
-    `x264Sessions` sessions; `TestSigningEndToEnd`, the unsigned recording (PR #49).
+    `x264Sessions` sessions; `TestSigningEndToEnd`, the unsigned recording (PR #49);
+    `TestCalibrationVideoEmbedded`, the whole 848 x 480 calibration video made with the embedded
+    engine and read back (M4's sixth pull request).
+  - `internal/calib`: `TestAnalyzeNoiseResources`, calibrate read on noise, 16 frames at 848 x 480
+    and 32 at 3840 x 2160 with GOMAXPROCS 16 and 32, **a SECURITY.md section 9.5 resource bound**
+    (always: the root package's `TestAnalyzeCalibrationNoise`, 3 noise captures at 480 x 480).
   - `internal/pipeline`: `TestHostileRecordingResources`, 32 frames at 3840 x 2160 with GOMAXPROCS
     16 and 32, **a SECURITY.md section 9.5 resource bound** (always: 16 frames at 848 x 480);
     `TestLocatedRecordingResources` at 4K and `TestTamperedStreamEndToEnd`'s full tamper matrix
@@ -2521,6 +2551,14 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   18,018 (the 29.98 fps camera beating against the display). RGB8 at 4-pixel cells decoded
   nothing with `normal` anywhere. Laptop recordings 3 to 5 are limited by location (the corners
   issue above). No margin recordings exist yet.
+- **Moire is not detected by `calibrate read` (M4).** The vision chain cancels stripes
+  (`TileEqualiser`) without reporting them, so `Moire` is never raised; a stripe measure for the
+  warning is left for G1's real recordings.
+- **The always-on filmed calibration run (M4, performance).** `TestAnalyzeFilmed` (34 captures at
+  1920 x 1080 through the vision chain) takes about 2.9 s pinned to 4 CPUs, and `internal/calib`'s
+  other always-on read tests about 1.3 s, against M4's target of about 0.5 s per pull request: a
+  capture costs about 0.3 CPU-seconds of vision. Kept as the designer specified; a long-only move
+  is the alternative.
 - **Making the calibration video (M4, performance, measured 2026-11-28).** With the embedded
   engine and 16 workers on a 16-thread machine: 848 x 480 (36 s of video, 9 segments, so 9
   workers busy) in 8.7 s; 1920 x 1080 (104 s, 567 MB) in 59 s; 3840 x 2160 (120 s, 1.42 GB) in

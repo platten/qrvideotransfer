@@ -140,11 +140,6 @@ func Decode(ctx context.Context, o DecodeOptions) (*DecodeReport, error) {
 	return rep, nil
 }
 
-// AnalyzeCalibration measures a recording of the calibration video and recommends a profile.
-func AnalyzeCalibration(ctx context.Context, o AnalyzeOptions) (*Recommendation, error) {
-	return nil, ErrNotImplemented
-}
-
 // Inspect reports what a code video or a recording of one carries, without unpacking it. It reads
 // the recording as Decode does, stops as soon as the stream descriptor decodes, and writes
 // nothing. When the recording ends first, it returns a *NotEnoughDataError with what the

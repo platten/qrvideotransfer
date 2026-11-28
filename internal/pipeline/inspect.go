@@ -69,7 +69,7 @@ func Inspect(ctx context.Context, c InspectConfig) (*InspectResult, error) {
 	if in.desc == nil {
 		return res, &ShortError{Captures: st.Captures, Located: in.diag.finders, HeadersRead: in.diag.headers,
 			Other: in.diag.others(in.key), FramesSeen: in.framesSeen, FramesTotal: st.FramesTotal, Reject: in.diag.agreed(),
-			LockedRate: in.lock.locked()}
+			LockedRate: in.lock.locked(), Headers: in.diag.sample}
 	}
 	return res, nil
 }

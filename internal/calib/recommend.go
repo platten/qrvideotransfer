@@ -67,8 +67,8 @@ const MeasuredLabel = "measured on your device"
 // Recommendation is the setting Recommend chose.
 type Recommendation struct {
 	Measurement
-	Rate     float64 // planning rate scaled by the measured completeness, bytes per second
-	Standing Standing
+	BytesPerSec float64 // planning rate scaled by the measured completeness
+	Standing    Standing
 	// Measured is set when the setting is not established handheld (Standing is not
 	// EstablishedAt): only the user's segment, which passed with margin, supports it, and it is
 	// shown with MeasuredLabel. It holds for this user's recommendation only.
@@ -103,8 +103,8 @@ func Recommend(c Camera, ms []Measurement) (Recommendation, bool) {
 			continue
 		}
 		mg := margin(m.Setting, m.Pixels, c.Floor)
-		if !found || better(rate, mg, m.Setting, best.Rate, bestMargin, best.Setting) {
-			best = Recommendation{Measurement: m, Rate: rate, Standing: st, Measured: measured}
+		if !found || better(rate, mg, m.Setting, best.BytesPerSec, bestMargin, best.Setting) {
+			best = Recommendation{Measurement: m, BytesPerSec: rate, Standing: st, Measured: measured}
 			bestMargin, found = mg, true
 		}
 	}

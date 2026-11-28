@@ -444,7 +444,7 @@ func (d *decoder) flush() error {
 func (d *decoder) shortfall() error {
 	e := ShortError{Captures: d.stats.Captures, Located: d.diag.finders, HeadersRead: d.diag.headers, Other: d.diag.others(d.key),
 		FramesSeen: d.framesSeen, FramesTotal: d.stats.FramesTotal, Descriptor: d.desc != nil, Reject: d.diag.agreed(),
-		LockedRate: d.lock.locked()}
+		LockedRate: d.lock.locked(), Headers: d.diag.sample}
 	if d.store == nil {
 		return &e
 	}

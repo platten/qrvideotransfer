@@ -47,6 +47,7 @@ func ExitCode(err error) int {
 		unsafe *qrvt.UnsafeArchiveError
 		limit  *qrvt.LimitError
 		ver    *qrvt.UnsupportedVersionError
+		cal    *qrvt.CalibrationError
 	)
 	switch {
 	case err == nil:
@@ -56,6 +57,11 @@ func ExitCode(err error) int {
 	case errors.Is(err, context.Canceled):
 		return exitInterrupted
 	case errors.As(err, &short):
+		return exitShort
+	case errors.As(err, &cal):
+		if cal.Reason == qrvt.CalibrationTransfer || cal.Reason == qrvt.CalibrationMixedSizes {
+			return exitFailure // not a calibration video: filming more does not help
+		}
 		return exitShort
 	case errors.Is(err, qrvt.ErrWrongPassphrase), errors.Is(err, qrvt.ErrBadSignature), errors.Is(err, qrvt.ErrMissingSignature):
 		return exitAuth
@@ -83,11 +89,14 @@ func guideFor(command string, err error, last *qrvt.Stats, o *qrvt.DecodeOptions
 		unsafe *qrvt.UnsafeArchiveError
 		limit  *qrvt.LimitError
 		ver    *qrvt.UnsupportedVersionError
+		cal    *qrvt.CalibrationError
 		g      string
 	)
 	switch {
 	case errors.As(err, &short):
 		g = shortGuidance(short, last, o, command == "inspect")
+	case errors.As(err, &cal):
+		g = calibrationGuidance(cal)
 	case errors.Is(err, qrvt.ErrWrongPassphrase):
 		g = "Check the passphrase (and the --passphrase-file, if you used one) and try again."
 	case errors.Is(err, qrvt.ErrBadSignature):
@@ -149,6 +158,9 @@ func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeO
 	}
 	var missing string
 	switch {
+	case e.Calibration:
+		return fmt.Sprintf("The frame headers read in %d of %d captures are those of the calibration video (qrvt calibrate make), "+
+			"not of a transfer. Measure it with qrvt calibrate read.", e.HeadersRead, e.Captures)
 	case e.Captures > 0 && e.Located == 0:
 		return fmt.Sprintf("No code was found in any of the %d captures. "+
 			"Film the whole code, in focus and filling most of the picture, and run %s again.", e.Captures, again)
@@ -198,4 +210,24 @@ func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeO
 			"such as 60 fps for a 30 fps video: more passes at this rate repeat the same mixing."
 	}
 	return missing + ". " + more
+}
+
+// calibrationGuidance says what to do when qrvt calibrate read found nothing to measure, by
+// reason (DESIGN.md section 13). When the headers are the calibration video's but no step passed,
+// the recording may be poor or the input a transfer matching the calibration's header pattern, so
+// the guidance names both.
+func calibrationGuidance(e *qrvt.CalibrationError) string {
+	switch e.Reason {
+	case qrvt.CalibrationNoCode:
+		return "Play the calibration video full screen and film the whole screen, in focus and filling most of the picture, " +
+			"then run qrvt calibrate read again."
+	case qrvt.CalibrationNoHeader:
+		return "Film closer and steadier, with the screen sharp and evenly lit, and check that the video playing is the one " +
+			"qrvt calibrate make wrote."
+	case qrvt.CalibrationTransfer, qrvt.CalibrationMixedSizes:
+		return "The recordings show a qrvt transfer, not the calibration video: decode them with qrvt decode, " +
+			"or film the video qrvt calibrate make wrote."
+	}
+	return "Film the calibration video again, closer and steadier, for its whole length. If the recording is of a qrvt " +
+		"transfer rather than the calibration video, decode it with qrvt decode instead."
 }

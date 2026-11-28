@@ -86,6 +86,10 @@ type ShortError struct {
 	Descriptor  bool               // the stream descriptor was read
 	Reject      *frame.HeaderError // the refusal agreed by the captures (agreeCaptures), or nil
 	LockedRate  bool               // the camera is locked to the display rate (lockTrack)
+	// Headers are the first header of each of the first 16 captures with one, of any transfer, in
+	// capture order, so that the caller can tell a calibration video (internal/calib), which the
+	// pipeline knows nothing of.
+	Headers []frame.Header
 }
 
 // Error implements the error interface.

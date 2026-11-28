@@ -107,12 +107,17 @@ func (a *app) calibrateCmd() *cobra.Command {
 					return nil, err
 				}
 				p := rec.Profile
-				return &ui.Summary{Title: "Recommended settings", Warnings: rec.Warnings, Fields: []ui.Field{
+				fields := []ui.Field{
 					{Key: "Command", Value: rec.Command},
 					{Key: "Video", Value: fmt.Sprintf("%dx%d at %d fps, %s, cell %d", p.Width, p.Height, p.FPS, modeName(p.Modulation), p.Cell)},
 					{Key: "Protection", Value: fmt.Sprintf("%s, parity %d%%", protectionName(p.Protection), p.ParityPercent)},
 					{Key: "Planning rate", Value: ui.FormatBytes(int64(rec.BytesPerSec)) + "/s"},
-				}}, nil
+				}
+				if rec.Measured {
+					fields = append(fields, ui.Field{Key: "Note", Value: "measured on your device: this setting is not established " +
+						"in general, and your recording passed it with margin"})
+				}
+				return &ui.Summary{Title: "Recommended settings", Warnings: rec.Warnings, Fields: append(fields, stepFields(rec.Steps)...)}, nil
 			})
 		},
 	}
@@ -371,4 +376,34 @@ func roundEstimate(d time.Duration) string {
 		return fmt.Sprintf("%d s", max(1, int(d.Round(time.Second).Seconds())))
 	}
 	return fmt.Sprintf("%d min", int(d.Round(time.Minute).Minutes()))
+}
+
+// stepFields are the calibration's per-step table as summary fields: one per step of the video
+// (display rate, cell size and mode), with each protection level's share of codewords decoded.
+func stepFields(steps []qrvt.CalibrationStep) []ui.Field {
+	var out []ui.Field
+	for i := 0; i < len(steps); {
+		s := steps[i]
+		key := fmt.Sprintf("Step %d fps, cell %d, %s", s.FPS, s.Cell, modeName(s.Modulation))
+		val := fmt.Sprintf("%d of %d frames seen, %.1f camera pixels per cell;", s.FramesSeen, s.Frames, s.PixelsPerCell)
+		for ; i < len(steps) && steps[i].FPS == s.FPS && steps[i].Cell == s.Cell && steps[i].Modulation == s.Modulation; i++ {
+			p := steps[i]
+			pct := 0.0
+			if p.Codewords > 0 {
+				pct = 100 * float64(p.Decoded) / float64(p.Codewords)
+			}
+			mark := ""
+			switch {
+			case p.Passed && p.Established:
+				mark = ", passed"
+			case p.Margin:
+				mark = ", passed with margin"
+			case p.Passed:
+				mark = ", passed, not established"
+			}
+			val += fmt.Sprintf(" %s %.0f%%%s", protectionName(p.Protection), pct, mark)
+		}
+		out = append(out, ui.Field{Key: key, Value: val})
+	}
+	return out
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/platten/qrvideotransfer/internal/calib"
 	"github.com/platten/qrvideotransfer/internal/frame"
 	"github.com/platten/qrvideotransfer/internal/payload"
 	"github.com/platten/qrvideotransfer/internal/pipeline"
@@ -109,5 +110,24 @@ func convertShort(short *pipeline.ShortError) error {
 	if short.Reject != nil {
 		e.Reject = strings.TrimPrefix(short.Reject.Error(), "frame: ")
 	}
+	e.Calibration = !short.Descriptor && calibrationHeaders(short.Headers)
 	return e
+}
+
+// calibrationHeaders reports whether headers, at least one, are all a calibration video's
+// (calib.Recover) and recover to one video size (DESIGN.md section 13).
+func calibrationHeaders(hs []frame.Header) bool {
+	var size calib.Size
+	for i, h := range hs {
+		p, _, err := calib.Recover(h)
+		if err != nil {
+			return false
+		}
+		if sz := (calib.Size{W: p.Width, H: p.Height}); i == 0 {
+			size = sz
+		} else if sz != size {
+			return false
+		}
+	}
+	return len(hs) > 0
 }
