@@ -20,7 +20,10 @@ const (
 	MarginFrames    = 1 - (1-PassFrames)/2
 )
 
-// Measurement is what calibrate read measured for one segment, decoded with one inner code.
+// Measurement is what calibrate read measured for one segment, decoded with one inner code. A
+// codeword is Decoded only when it decodes to the calibration's all-zero codeword (the coset of
+// the all-zero shard): a transfer's codewords, which converge to other codewords, never count, so
+// a transfer read as a calibration passes no segment (DESIGN.md section 13).
 type Measurement struct {
 	Setting              // the segment's rate, cell and mode, and the inner code decoded with
 	GridX, GridY int     // the segment's grid
@@ -28,7 +31,7 @@ type Measurement struct {
 	Frames       int     // the segment's code frames
 	Seen         int     // code frames with soft bits
 	Codewords    int     // codewords on the seen frames
-	Decoded      int     // of those, decoded
+	Decoded      int     // of those, decoded to the calibration's all-zero codeword, not merely converged
 }
 
 func (m Measurement) fractions() (cw, fr float64) {

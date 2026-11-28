@@ -958,12 +958,15 @@ Whether a setting works depends on the camera. All of these must hold (simulated
 
 Planning figures are the simulated single-pass rate derated by 40% for everything not simulated. All
 of them are simulated. The main figures are **handheld** (fill 0.80, the four-grey condition of
-condition 2: `robust` 4.8, `normal` 6, `fast` 10 provisionally). Each row takes the setting of
-highest planning rate that conditions 1 to 4 allow (`internal/calib`, `Best`); only an exact tie
-goes to the larger condition-2 margin, then to the simpler mode (black and white, then four
-greys, then colour). A planning row may use a setting only if the simulator and real
-recordings both support it, wherever real recordings exist for that modulation; otherwise the setting
-is labelled not established and is not used for planning.
+condition 2: `robust` 4.8, `normal` 6, `fast` 10 provisionally). **The planning rule:** each row
+takes the setting of highest planning rate that conditions 1 to 4 allow (`internal/calib`,
+`Best`); only an exact tie goes to the larger condition-2 margin, then to the simpler mode (black
+and white, then four greys, then colour). The 1080p30 row is the one exception, held unchanged
+pending G1 (note a). A planning row may use a setting only if the simulator and real recordings
+both support it, wherever real recordings exist for that modulation; otherwise the setting is
+labelled not established and is not used for planning. The settings established handheld are
+black and white and four greys, each `robust` and `normal`; every `fast` and every colour
+setting is not established.
 
 **Black and white at 4.8 camera pixels per cell.** `normal` is established: real recordings reach the
 0.78 bits per sent bit it needs from 3.0. `fast` is not established, and is to be settled at G1:
@@ -986,8 +989,8 @@ class.
 
 Notes on the 1080p30 row:
 - (a) Four greys `robust` at the same density (720p at 12 fps, s 4.8, exactly its minimum) is
-  about 3% faster: about 24.75 against 24.0 KiB/s. The planning rule's strict highest rate picks it;
-  `calibrate` may recommend it.
+  about 3% faster: about 24.75 against 24.0 KiB/s. The planning rule picks it; the row keeps
+  black and white `normal` until G1, and `calibrate` may recommend either.
 - (b) The row assumes a 720p video scaled to the screen. The calibration ladder at a native
   1920 x 1080 monitor cannot produce that grid (320 x 180 needs 6-pixel cells there); on that
   ladder the rule gives 12 fps, 8-pixel cells, four greys `normal` (240 x 135 grid, s 6.4, about
@@ -1473,19 +1476,27 @@ qrvt profiles | version | completion | man
     one slot and grid x cell one size. A transfer meets all of these only by chance (its session's
     low 16 bits, a stream of exactly 4,896 frames, the default inner code and a matching grid);
     its stream descriptor decodes and its codewords do not decode to zero, so `read` treats a
-    recording in which a descriptor decodes as a transfer.
+    recording in which a descriptor decodes as a transfer. A codeword counts as decoded
+    (`Measurement.Decoded`) only when it decodes to the calibration's all-zero codeword (the
+    coset of the all-zero shard, as the real-device check), never merely when the inner code
+    converges, so such a transfer whose descriptor does not decode reads as a calibration in
+    which no segment passes, so no recommendation is made. Headers that recover to more than one
+    video size are not a calibration video: a transfer's fixed grid recovers to a different size
+    in each slot of another cell, where a calibration recording's headers all recover to one.
   - **The exit test's distance** between two settings is the sum, over display rate (12 < 30 <
     60), cell size (16 < 12 < 8 < 4), mode (black and white < four greys < colour) and protection
     (`robust` < `normal` < `fast`), of the difference of their ranks; "within one step" is a
     distance of at most 1.
   - **The recommendation** is the highest-rate setting among the segments that pass, decoded
-    with each inner code (at least 92% of the codewords on the summed frames decode and at least
-    90% of the code frames are seen; provisional, revisited at G1), that conditions 1, 3 and 4
+    with each inner code (at least 92% of the codewords on the summed frames decode to the
+    calibration's all-zero codeword and at least 90% of the code frames are seen; provisional,
+    pending G1), that conditions 1, 3 and 4
     allow and that is established at condition 2's minimum (section 11). Its rate is the planning
     rate scaled by the share of the segment's codewords decoded, so worse measurements never give
     a faster setting. A setting not established, or established only on a tripod, is recommended
-    only when its segment passed with margin (half the shortfall the pass allows: 96% and 95%),
-    and is labelled "measured on your device"; that holds for that user's recommendation only.
+    only when its segment passed with margin (half the shortfall the pass allows: 96% and 95%,
+    provisional, pending G1), and is labelled "measured on your device"; that holds for that
+    user's recommendation only.
 
 ## 14. Architecture
 
@@ -2502,6 +2513,12 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   18,018 (the 29.98 fps camera beating against the display). RGB8 at 4-pixel cells decoded
   nothing with `normal` anywhere. Laptop recordings 3 to 5 are limited by location (the corners
   issue above). No margin recordings exist yet.
+- **`calib.NetBytes` rebuilds a frame mapping on every call (M4, performance, not optimised
+  now).** Section 11's net bytes per frame come from `frame.NewMapping`, built afresh each time:
+  pinned to 4 CPUs, about 0.52 ms and 0.56 MB for a 320 x 180 grid, 1.4-1.7 ms and 1.7 MB for 480 x
+  270, and 7.7-8.7 ms and 6.7 MB for 960 x 540 (2026-11-28). `Best` and `Recommend` call it once
+  per candidate, so most of `internal/calib`'s always-on 0.3-0.65 s is these rebuilds; caching
+  by grid, mode and inner code would remove them.
 - **CI-size suites near the runner's limits (M3, performance, not optimised now).** PR #47's
   first run failed on macos-26-intel only: in the coverage step `internal/vision` reached `go
   test`'s 10-minute default (600.6 s), running beside the two packages M3 adds (root 449.9 s,
