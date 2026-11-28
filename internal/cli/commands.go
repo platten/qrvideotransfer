@@ -53,8 +53,16 @@ func (a *app) calibrateCmd() *cobra.Command {
 				return err
 			}
 			o := qrvt.CalibrationOptions{Output: mk.output, Width: w, Height: h, Backend: mk.backend, Workers: mk.jobs}
-			info := ui.Info{Command: "calibrate make", Output: o.Output, Video: []ui.Field{{Key: "Size", Value: fmt.Sprintf("%dx%d", w, h)}},
-				Stages: []qrvt.Stage{qrvt.StageRender, qrvt.StageEncodeVideo}}
+			plan, err := qrvt.PlanCalibration(o)
+			if err != nil {
+				return usagef("--resolution %dx%d: no calibration step fits it: the video needs a cell of 4, 8, 12 or 16 pixels "+
+					"that divides both sides into a grid of at least 120 x 90 cells", w, h)
+			}
+			info := ui.Info{Command: "calibrate make", Output: o.Output, ShowVideo: true, Video: []ui.Field{
+				{Key: "Size", Value: fmt.Sprintf("%dx%d", w, h)},
+				{Key: "Steps", Value: fmt.Sprintf("%d, of 4 s each: %s of video at 60 fps", plan.Steps, plan.Duration)},
+				{Key: "Estimate", Value: "about " + roundEstimate(plan.Estimate) + " to make with the embedded engine"},
+			}, Stages: []qrvt.Stage{qrvt.StageRender, qrvt.StageEncodeVideo}}
 			return a.run(cmd, info, nil, func(ctx context.Context, _ ui.Renderer, progress func(qrvt.Event)) (*ui.Summary, error) {
 				o.Progress = progress
 				if err := a.env.API.CalibrationVideo(ctx, o); err != nil {
@@ -354,4 +362,13 @@ func (a *app) demoCmd() *cobra.Command {
 	}
 	cmd.Flags().DurationVar(&delay, "delay", 60*time.Millisecond, "Pause between events.\nExample: --delay 20ms")
 	return cmd
+}
+
+// roundEstimate rounds an expected duration for a person: whole seconds under a minute, else whole
+// minutes.
+func roundEstimate(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%d s", max(1, int(d.Round(time.Second).Seconds())))
+	}
+	return fmt.Sprintf("%d min", int(d.Round(time.Minute).Minutes()))
 }

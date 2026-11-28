@@ -140,11 +140,6 @@ func Decode(ctx context.Context, o DecodeOptions) (*DecodeReport, error) {
 	return rep, nil
 }
 
-// CalibrationVideo writes a test video that steps through modes, densities and display rates.
-func CalibrationVideo(ctx context.Context, o CalibrationOptions) error {
-	return ErrNotImplemented
-}
-
 // AnalyzeCalibration measures a recording of the calibration video and recommends a profile.
 func AnalyzeCalibration(ctx context.Context, o AnalyzeOptions) (*Recommendation, error) {
 	return nil, ErrNotImplemented

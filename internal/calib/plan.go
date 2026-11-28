@@ -37,25 +37,32 @@ type Slot struct {
 var slotCells = []int{4, 8, 12, 16}
 
 // slots lists every slot in order.
-var slots = makeSlots()
+var slots = makeSlots(func(rate int) int { return rate * SegmentSeconds })
 
 // TotalFrames is F, the header's frame count of every calibration video: the sum of every slot's
 // code frames, 4,896.
-var TotalFrames = slots[len(slots)-1].FirstIndex + uint32(slots[len(slots)-1].CodeFrames)
+var TotalFrames = framesOf(slots)
 
-func makeSlots() []Slot {
+// makeSlots lists the slots with frames(rate) code frames each; tests shorten them.
+func makeSlots(frames func(rate int) int) []Slot {
 	var out []Slot
 	var idx uint32
 	for _, r := range Rates {
 		for _, c := range slotCells {
 			for _, m := range Modes {
-				n := r * SegmentSeconds
+				n := frames(r)
 				out = append(out, Slot{Rate: r, Cell: c, Mode: m, FirstIndex: idx, CodeFrames: n})
 				idx += uint32(n) //nolint:gosec // 36 slots of at most 240 frames
 			}
 		}
 	}
 	return out
+}
+
+// framesOf is the code frames of every slot, F.
+func framesOf(ss []Slot) uint32 {
+	last := ss[len(ss)-1]
+	return last.FirstIndex + uint32(last.CodeFrames) //nolint:gosec // small
 }
 
 // Segment is a slot the video shows.

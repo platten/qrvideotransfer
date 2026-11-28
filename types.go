@@ -109,6 +109,17 @@ type CalibrationOptions struct {
 	Backend       string
 	Workers       int
 	Progress      func(Event)
+	TempDir       string // "": the system temporary directory
+}
+
+// CalibrationPlan describes the video [CalibrationVideo] makes for a monitor, as
+// [PlanCalibration] reports it before any work starts.
+type CalibrationPlan struct {
+	Width, Height int
+	Steps         int           // segments: one display rate, cell size and mode each
+	Frames        int           // video frames, at 60 fps
+	Duration      time.Duration // the video's length
+	Estimate      time.Duration // the expected time to make it with the embedded engine
 }
 
 // AnalyzeOptions are the inputs of [AnalyzeCalibration].

@@ -32,6 +32,11 @@ func newPlain(o Options, info Info) *plain {
 		line += " -> " + Clean(info.Output)
 	}
 	p.printf(o.Err, "%s\n", line)
+	if info.ShowVideo {
+		for _, f := range info.Video {
+			p.printf(o.Err, "  %s: %s\n", Clean(f.Key), Clean(f.Value))
+		}
+	}
 	return p
 }
 

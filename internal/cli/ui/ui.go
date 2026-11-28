@@ -30,6 +30,9 @@ type Info struct {
 	Video   []Field      // video settings, when known
 	Stages  []qrvt.Stage // the stages expected, shown as pending bars from the start
 	Signal  bool         // show the signal panel and the block map (reading a recording)
+	// ShowVideo makes the plain renderer print the video fields at the start too, for a job whose
+	// estimate the user should see before it runs (calibrate make).
+	ShowVideo bool
 }
 
 // Summary is what a finished job prints.

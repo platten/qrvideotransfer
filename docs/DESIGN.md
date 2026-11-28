@@ -1453,6 +1453,14 @@ qrvt profiles | version | completion | man
 - **calibrate.** `make` writes a test video stepping through modes, densities and display rates. `read`
   measures each step in a recording and prints a table with the recommended `encode` command, plus
   warnings for clipping, dropped frames, moire and exposure.
+  - **Making it** (`calib.Make`, root `CalibrationVideo`). Before any work `calibrate make` prints
+    the steps, the video's length and the expected time to make it (`qrvt.PlanCalibration`:
+    `calib.EncodeCost`, 0.073 worker-seconds per million pixels of video frame with the embedded
+    engine, measured, section 19), then shows progress. A resolution no step fits is a usage
+    error naming `--resolution`. Workers each render and encode whole segments to files of their
+    own in a temporary folder, removed on return; the runs are joined beside the output and
+    renamed into place, so a cancelled or failed make leaves neither temporary files nor a
+    partial video.
   - **The plan** (`internal/calib`). The video is at 60 fps; a display rate r shows each code
     frame for 60 / r video frames. Its code frames follow fixed slots: for each display rate 12,
     30 and 60, each cell size 4, 8, 12 and 16 pixels, each mode (black and white, four greys,
@@ -2513,6 +2521,13 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   18,018 (the 29.98 fps camera beating against the display). RGB8 at 4-pixel cells decoded
   nothing with `normal` anywhere. Laptop recordings 3 to 5 are limited by location (the corners
   issue above). No margin recordings exist yet.
+- **Making the calibration video (M4, performance, measured 2026-11-28).** With the embedded
+  engine and 16 workers on a 16-thread machine: 848 x 480 (36 s of video, 9 segments, so 9
+  workers busy) in 8.7 s; 1920 x 1080 (104 s, 567 MB) in 59 s; 3840 x 2160 (120 s, 1.42 GB) in
+  241 s, about 4 minutes, against the about 15 minutes M4's plan expected. `calibrate make`'s
+  estimate, `calib.EncodeCost` of 0.073 worker-seconds per million pixels spread over at most one
+  worker per segment, is fitted to the 1080p run and gives 272 s for 4K and 7 s for 480p; a
+  machine with fewer cores, or the macos-26-intel runner, takes proportionally longer.
 - **`calib.NetBytes` rebuilds a frame mapping on every call (M4, performance, not optimised
   now).** Section 11's net bytes per frame come from `frame.NewMapping`, built afresh each time:
   pinned to 4 CPUs, about 0.52 ms and 0.56 MB for a 320 x 180 grid, 1.4-1.7 ms and 1.7 MB for 480 x

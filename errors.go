@@ -7,10 +7,14 @@ import (
 
 // Sentinel errors. Test with errors.Is.
 var (
-	ErrNotImplemented   = errors.New("qrvt: not implemented yet")
-	ErrWrongPassphrase  = errors.New("qrvt: wrong passphrase")
-	ErrBadSignature     = errors.New("qrvt: signature does not verify")
-	ErrMissingSignature = errors.New("qrvt: transfer is not signed by a trusted key")
+	ErrNotImplemented = errors.New("qrvt: not implemented yet")
+	// ErrNoCalibrationPlan: no step of the calibration video fits the monitor resolution given
+	// (DESIGN.md section 13: no cell of 4, 8, 12 or 16 pixels divides it into a grid of at least
+	// 120 x 90).
+	ErrNoCalibrationPlan = errors.New("qrvt: no calibration video fits that resolution")
+	ErrWrongPassphrase   = errors.New("qrvt: wrong passphrase")
+	ErrBadSignature      = errors.New("qrvt: signature does not verify")
+	ErrMissingSignature  = errors.New("qrvt: transfer is not signed by a trusted key")
 )
 
 // Shortfall says how many shards a block lacks.
