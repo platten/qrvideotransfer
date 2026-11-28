@@ -116,10 +116,10 @@ func TestMake(t *testing.T) {
 	v := 0
 	for _, s := range p.Segments {
 		for k := range s.CodeFrames {
-			want := codeFrame(t, s, s.FirstIndex+uint32(k)) //nolint:gosec // small
+			want := codeFrame(t, s, s.FirstIndex+uint32(k))
 			for range VideoFPS / s.Rate {
 				if !sameFrame(frames[v], want) {
-					t.Fatalf("video frame %d is not code frame %d of segment %+v", v, s.FirstIndex+uint32(k), s) //nolint:gosec // small
+					t.Fatalf("video frame %d is not code frame %d of segment %+v", v, s.FirstIndex+uint32(k), s)
 				}
 				v++
 			}

@@ -214,7 +214,7 @@ func writeSegment(ctx context.Context, c MakeConfig, s Segment, path string, don
 	repeat := VideoFPS / s.Rate
 	v := 0
 	for k := range s.CodeFrames {
-		idx := s.FirstIndex + uint32(k) //nolint:gosec // within the slot
+		idx := s.FirstIndex + uint32(k)
 		// The symbols, codewords and frame are sized for the mapping and renderer, so neither fails.
 		_ = mapper.Symbols(symbols, idx, cws)
 		_ = r.Render(f, s.Header(idx), symbols)
