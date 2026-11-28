@@ -415,7 +415,10 @@ temporary folder or beside the recording, and at most 128 MiB allocated (14.4 Mi
 typed error and no recommendation, 16 frames at 848 x 480 (0.3 s, 125 MiB) and 32 at 3840 x 2160
 with GOMAXPROCS 16 and 32 (1.2 s and 362 MiB both; linux amd64, development machine). It reads
 through `pipeline.Scan`, the same loop, vision workers and grid-stage gate, holds summed soft bits
-within the decode's 256 MB cap and writes nothing; always, the root package's
+within the decode's 256 MB cap and writes nothing. Its frame mappings are outside that count, up
+to about 81 MiB for the largest plan a header can recover to (7680 x 4320), so its total memory
+is the cap, the mappings and the vision workers' budget, under 1 GiB (DESIGN.md section 13; the
+accounting is for M7); always, the root package's
 `TestAnalyzeCalibrationNoise` reads 3 noise captures at 480 x 480 and asserts the typed
 `CalibrationError`, nothing written in the temporary folder or beside the recording, and at most
 128 MiB allocated (14.6 MiB measured).

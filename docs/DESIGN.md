@@ -1452,7 +1452,8 @@ qrvt profiles | version | completion | man
   decode`.
 - **calibrate.** `make` writes a test video stepping through modes, densities and display rates. `read`
   measures each step in a recording and prints a table with the recommended `encode` command, plus
-  warnings for clipping, dropped frames, moire and exposure.
+  warnings for clipping, dropped frames, exposure and a scaled video; moire is not detected yet
+  (section 19).
   - **Making it** (`calib.Make`, root `CalibrationVideo`). Before any work `calibrate make` prints
     the steps, the video's length and the expected time to make it (`qrvt.PlanCalibration`:
     `calib.EncodeCost`, 0.073 worker-seconds per million pixels of video frame with the embedded
@@ -1505,26 +1506,30 @@ qrvt profiles | version | completion | man
     only when its segment passed with margin (half the shortfall the pass allows: 96% and 95%,
     provisional, pending G1), and is labelled "measured on your device"; that holds for that
     user's recommendation only.
-  - **Reading it** (`calib.Analyze` on `pipeline.Scan`, root `AnalyzeCalibration`). Every
-    capture's first header must recover (`calib.Recover`), all to one size; a code frame of
-    another segment than its header's is dropped. Each code frame's soft bits are summed across
-    the captures that show it, adjacent captures at half weight (section 7, rule 7), gathered
-    with the interleaver of each inner code, `fast`, `normal` and `robust`, and decoded once two
-    captures have passed without it. The summed soft bits held stay within the decode's 256 MB
-    cap, the frame seen longest ago decoded first. Several recordings add up: a frame counts as
-    seen, and a codeword as decoded, once any recording gives it. The camera is the recordings'
-    lowest frame rate and bitrate (file size over duration), H.264 if any is, and the geometry
-    floor of 10-bit HLG when any is HLG. Warnings use the existing codes: `ExposureTooLong` when
-    a capture shows no single code frame, `Clipping` when over 5% of the palette patches clip on
-    average, `FramesDropped` when a recording's presentation times span over 1% more frames than
-    it has, and `Downscaled` when 4-pixel cells fail with every code where 8-pixel cells pass at
-    the same rate and mode with the camera pixels `robust` needs; moire is not detected yet
-    (section 19). `calibrate read` prints the recommended command and settings, the label, and one
-    summary field per step with each protection level's share of codewords decoded; the events
-    schema is unchanged. When it can recommend nothing it returns a `CalibrationError`: no code
-    (film the whole screen) or no header read (film closer), exit 3; a transfer, or headers of
-    more than one size (decode it with `qrvt decode`), exit 1; no step passed (film again or, if
-    it is a transfer, decode it), exit 3.
+  - **Reading it** (`calib.Analyze` on `pipeline.Scan`, root `AnalyzeCalibration`). Every capture's
+    first header must recover (`calib.Recover`), all to one size; a code frame of another segment
+    than its header's is dropped. Each code frame's soft bits are summed across the captures that
+    show it, adjacent captures at half weight (section 7, rule 7), gathered with the interleaver of
+    each inner code, `fast`, `normal` and `robust`, and decoded once two captures have passed
+    without it. The summed soft bits held stay within the decode's 256 MB cap, the frame seen
+    longest ago decoded first. The frame mappings, one per segment and inner code, sit outside that
+    count: up to about 81 MiB for the largest plan a header can recover to (7680 x 4320; 29 MiB at
+    1080p, 69 MiB at 4K), so read's memory is the cap, the mappings and the vision workers' budget,
+    under 1 GiB (SECURITY.md section 9.5). Several recordings add up: a frame counts as seen, and a
+    codeword as decoded, once any recording gives it. The camera is the recordings' lowest frame
+    rate and bitrate (file size over duration), H.264 if any is, and the geometry floor of 10-bit
+    HLG when any is HLG. Warnings use the existing codes: `ExposureTooLong` when a capture shows no
+    single code frame, `Clipping` when over 5% of the palette patches clip on average,
+    `FramesDropped` when a recording's presentation times span over 1% more frames than it has, and
+    `Downscaled` when 4-pixel cells fail with every code where 8-pixel cells pass at the same rate
+    and mode with the camera pixels `robust` needs; moire is not detected yet (section 19). The
+    warnings also ride on a `CalibrationError` (`Warnings`), and its guidance ends with them, so
+    that a step's failure shows what may explain it in the final output. `calibrate read` prints the
+    recommended command and settings, the label, and one summary field per step with each protection
+    level's share of codewords decoded; the events schema is unchanged. When it can recommend
+    nothing it returns a `CalibrationError`: no code (film the whole screen) or no header read (film
+    closer), exit 3; a transfer, or headers of more than one size (decode it with `qrvt decode`),
+    exit 1; no step passed (film again or, if it is a transfer, decode it), exit 3.
   - **`decode` given the calibration video**, or a recording of it, falls short as any
     recording without a descriptor does (exit 3); `NotEnoughDataError.Calibration` is set when
     the headers it read (the first of up to 16 captures, `pipeline.ShortError.Headers`) all
@@ -2130,9 +2135,13 @@ section 13).
     `x264Sessions` sessions; `TestSigningEndToEnd`, the unsigned recording (PR #49);
     `TestCalibrationVideoEmbedded`, the whole 848 x 480 calibration video made with the embedded
     engine and read back (M4's sixth pull request).
-  - `internal/calib`: `TestAnalyzeNoiseResources`, calibrate read on noise, 16 frames at 848 x 480
-    and 32 at 3840 x 2160 with GOMAXPROCS 16 and 32, **a SECURITY.md section 9.5 resource bound**
-    (always: the root package's `TestAnalyzeCalibrationNoise`, 3 noise captures at 480 x 480).
+  - `internal/calib`: `TestAnalyzeFilmedLong`, the larger filmed run (a 1280 x 720 monitor's 30 fps
+    steps of 4- and 8-pixel cells, 4 code frames each, 34 captures by `ideal` at 1920 x 1080;
+    always: `TestAnalyzeFilmed`, an 848 x 480 monitor's cell-4 steps, 2 code frames each, 10
+    captures at 1280 x 720); `TestAnalyzeNoiseResources`, calibrate read on noise, 16 frames at 848
+    x 480 and 32 at 3840 x 2160 with GOMAXPROCS 16 and 32, **a SECURITY.md section 9.5 resource
+    bound** (always: the root package's `TestAnalyzeCalibrationNoise`, 3 noise captures at 480 x
+    480).
   - `internal/pipeline`: `TestHostileRecordingResources`, 32 frames at 3840 x 2160 with GOMAXPROCS
     16 and 32, **a SECURITY.md section 9.5 resource bound** (always: 16 frames at 848 x 480);
     `TestLocatedRecordingResources` at 4K and `TestTamperedStreamEndToEnd`'s full tamper matrix
@@ -2553,19 +2562,25 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   issue above). No margin recordings exist yet.
 - **Moire is not detected by `calibrate read` (M4).** The vision chain cancels stripes
   (`TileEqualiser`) without reporting them, so `Moire` is never raised; a stripe measure for the
-  warning is left for G1's real recordings.
-- **The always-on filmed calibration run (M4, performance).** `TestAnalyzeFilmed` (34 captures at
-  1920 x 1080 through the vision chain) takes about 2.9 s pinned to 4 CPUs, and `internal/calib`'s
-  other always-on read tests about 1.3 s, against M4's target of about 0.5 s per pull request: a
-  capture costs about 0.3 CPU-seconds of vision. Kept as the designer specified; a long-only move
-  is the alternative.
+  warning is left for M5.
+- **The always-on filmed calibration run (M4, performance).** A capture costs about 0.3
+  CPU-seconds of vision, so the 34-capture filmed run at 1920 x 1080 took about 2.9 s pinned to 4
+  CPUs; by the designer's ruling it is long only (`TestAnalyzeFilmedLong`), and the always-on
+  `TestAnalyzeFilmed` films 10 captures at 1280 x 720 with the same assertions. M4's sixth pull
+  request's always-on total is accepted at about 2.75 s.
+- **For M7: calibrate read's frame mappings sit outside its soft-bit count (`held`).** Up to
+  about 81 MiB for the largest plan a header can recover to, within the 1 GiB bound with the cap
+  and vision (section 13); counting them, or bounding the sizes a header may recover to, is for
+  the security pass.
 - **Making the calibration video (M4, performance, measured 2026-11-28).** With the embedded
   engine and 16 workers on a 16-thread machine: 848 x 480 (36 s of video, 9 segments, so 9
   workers busy) in 8.7 s; 1920 x 1080 (104 s, 567 MB) in 59 s; 3840 x 2160 (120 s, 1.42 GB) in
   241 s, about 4 minutes, against the about 15 minutes M4's plan expected. `calibrate make`'s
   estimate, `calib.EncodeCost` of 0.073 worker-seconds per million pixels spread over at most one
   worker per segment, is fitted to the 1080p run and gives 272 s for 4K and 7 s for 480p; a
-  machine with fewer cores, or the macos-26-intel runner, takes proportionally longer.
+  machine with fewer cores, or the macos-26-intel runner, takes proportionally longer. Pinned to
+  4 CPUs with 4 workers (review of M4's sixth pull request) it was within 0.7 to 1.4 times: 16 s
+  estimated against 23 s at 848 x 480, 73 s against 64 s at 1280 x 720.
 - **`calib.NetBytes` rebuilds a frame mapping on every call (M4, performance, not optimised
   now).** Section 11's net bytes per frame come from `frame.NewMapping`, built afresh each time:
   pinned to 4 CPUs, about 0.52 ms and 0.56 MB for a 320 x 180 grid, 1.4-1.7 ms and 1.7 MB for 480 x

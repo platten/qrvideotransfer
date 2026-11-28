@@ -97,6 +97,9 @@ func guideFor(command string, err error, last *qrvt.Stats, o *qrvt.DecodeOptions
 		g = shortGuidance(short, last, o, command == "inspect")
 	case errors.As(err, &cal):
 		g = calibrationGuidance(cal)
+		for _, w := range cal.Warnings {
+			g += " " + w.Text
+		}
 	case errors.Is(err, qrvt.ErrWrongPassphrase):
 		g = "Check the passphrase (and the --passphrase-file, if you used one) and try again."
 	case errors.Is(err, qrvt.ErrBadSignature):

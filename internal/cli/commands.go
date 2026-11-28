@@ -85,7 +85,7 @@ func (a *app) calibrateCmd() *cobra.Command {
 	read := &cobra.Command{
 		Use:     "read <recording>...",
 		Short:   "Measure a recording of the calibration video and recommend settings",
-		Long:    "Measure each step of the calibration video in one or more recordings and print the recommended encode command, with warnings for clipping, dropped frames, moire and exposure.",
+		Long:    "Measure each step of the calibration video in one or more recordings and print the recommended encode command, with warnings for clipping, dropped frames, exposure and a scaled video (moire is not detected yet).",
 		Example: "qrvt calibrate read IMG_0420.MOV",
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -115,7 +115,7 @@ func (a *app) calibrateCmd() *cobra.Command {
 				}
 				if rec.Measured {
 					fields = append(fields, ui.Field{Key: "Note", Value: "measured on your device: this setting is not established " +
-						"in general, and your recording passed it with margin"})
+						"at your camera's pixels per cell, and your recording passed it with margin"})
 				}
 				return &ui.Summary{Title: "Recommended settings", Warnings: rec.Warnings, Fields: append(fields, stepFields(rec.Steps)...)}, nil
 			})

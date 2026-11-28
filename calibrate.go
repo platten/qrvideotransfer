@@ -66,8 +66,12 @@ func AnalyzeCalibration(ctx context.Context, o AnalyzeOptions) (*Recommendation,
 		Progress: progress(o.Progress)})
 	var ce *calib.Error
 	if errors.As(err, &ce) {
-		return nil, &CalibrationError{Reason: CalibrationReason(ce.Reason), Captures: ce.Captures, Located: ce.Located,
+		e := &CalibrationError{Reason: CalibrationReason(ce.Reason), Captures: ce.Captures, Located: ce.Located,
 			HeadersRead: ce.HeadersRead, Calibration: ce.Calibration, Sizes: len(ce.Sizes)}
+		if a != nil {
+			e.Warnings = convertWarnings(a.Warnings)
+		}
+		return nil, e
 	}
 	if err != nil {
 		return nil, convertError(err)

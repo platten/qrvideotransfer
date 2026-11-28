@@ -118,6 +118,9 @@ type CalibrationError struct {
 	HeadersRead int64 // captures whose frame header was read
 	Calibration int64 // of those, captures whose header is a calibration frame's
 	Sizes       int   // the video sizes the calibration headers recover to
+	// Warnings are the analysis's warnings, which may explain why nothing passed (clipping, a
+	// scaled video); set with CalibrationNothingPassed, when the recordings were analysed.
+	Warnings []Warning
 }
 
 func (e *CalibrationError) Error() string {

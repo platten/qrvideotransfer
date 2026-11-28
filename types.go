@@ -217,7 +217,9 @@ const (
 	WarnFramesDropped   WarningCode = "FramesDropped"
 	WarnSkippedFile     WarningCode = "SkippedFile"
 	WarnDownscaled      WarningCode = "Downscaled"
-	WarnMoire           WarningCode = "Moire"
+	// WarnMoire: not raised yet; the vision chain cancels stripes without measuring them
+	// (DESIGN.md section 19, for M5).
+	WarnMoire WarningCode = "Moire"
 	// WarnEngineInProcess: no engine worker process could be started (the host did not call
 	// EngineWorker first in main, or starting one failed), so the video engine runs in this process
 	// with close-on-cancel on, with the same guarantees but 4 to 11 times slower.
