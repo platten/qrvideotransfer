@@ -160,7 +160,7 @@ func (a *app) run(cmd *cobra.Command, info ui.Info, d *qrvt.DecodeOptions, do jo
 		}
 		r.Event(e)
 	})
-	err = guide(err, last, d)
+	err = guideFor(info.Command, err, last, d)
 	var f *ui.Failure
 	if err != nil {
 		f = failure(err)
