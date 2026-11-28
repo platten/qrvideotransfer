@@ -38,13 +38,23 @@ type FinderDetector struct {
 	dark       []bool // small below its local midrange
 	sw, sh     int
 	clusters   []detectCluster
-	layouts    []*frame.Layout // of the grids decoded lately, at most confirmMaxLayouts
-	grids      [][2]int        // distinct grids used during this Detect
-	gateFailed bool            // the last confirmed quad decoded a grid that failed the 1.5-pixel gate
-	hidden     int             // the corner the last located quad predicted, or -1 with four in view
+	layouts    []*frame.Layout   // of the grids decoded lately, at most confirmMaxLayouts
+	grids      [][2]int          // distinct grids used during this Detect
+	gateFailed bool              // the last confirmed quad decoded a grid that failed the 1.5-pixel gate
+	hidden     int               // the corner the last located quad predicted, or -1 with four in view
+	finders    bool              // a quad's header was read during this Detect (Refusal)
+	reject     frame.HeaderError // the strongest header refusal of this Detect (Refusal)
 }
 
 var _ Detector = (*FinderDetector)(nil)
+
+// Refusal reports what the last Detect saw: whether any quad's header was read (four finders were
+// found, or three and a fourth placed by the three-finder search), and, when Detect reported no
+// quad, the strongest refusal among those headers (SlotReader.ReadReason; Reason HeaderOK when it
+// reported one, or read no header).
+func (d *FinderDetector) Refusal() (finders bool, reject frame.HeaderError) {
+	return d.finders, d.reject
+}
 
 // detectCluster is a finder candidate: the mean of the scan hits near one place.
 type detectCluster struct {
@@ -67,8 +77,18 @@ func (c *detectCluster) mod() float64 { return c.module / float64(c.hits) }
 // cells can mimic a finder at the finder's own scale, and a wrong quad is worse than none. Given
 // the previous capture's quad it first scans only around its finders, and falls back to the whole
 // capture. When the whole capture yields no quad and it was downscaled, it scans once more one
-// step finer.
+// step finer. Refusal then says what it saw.
 func (d *FinderDetector) Detect(f *video.Frame, prev *Quad) (Quad, bool) {
+	d.finders, d.reject = false, frame.HeaderError{}
+	q, ok := d.detect(f, prev)
+	if ok {
+		d.finders, d.reject = true, frame.HeaderError{}
+	}
+	return q, ok
+}
+
+// detect is Detect.
+func (d *FinderDetector) detect(f *video.Frame, prev *Quad) (Quad, bool) {
 	d.grids, d.gateFailed, d.hidden = d.grids[:0], false, -1
 	v, ok := geomView(f)
 	if !ok {

@@ -29,30 +29,76 @@ var _ HeaderReader = SlotReader{}
 // four, and returns each distinct header once, in the order found: normally one per frame index,
 // but two copies decoding the same index with different fields (a false CRC pass, or crafted
 // content) are both returned, so that a conflicting header cannot hide the true one.
-func (SlotReader) Read(f *video.Frame, q Quad) ([]frame.Header, bool) {
-	soft, ok := copySoft(f, q)
-	if !ok {
-		return nil, false
-	}
-	out := decodeCopies(&soft)
+func (r SlotReader) Read(f *video.Frame, q Quad) ([]frame.Header, bool) {
+	out, _ := r.ReadReason(f, q)
 	return out, len(out) > 0
 }
 
-// decodeCopies decodes the copies' soft bits as Read describes.
-func decodeCopies(soft *[4][frame.HeaderSlots]int8) []frame.Header {
+// ReadReason is Read, with the strongest refusal met when no header was read instead of a flag
+// (Reason HeaderOK when one was). The strongest is a Validate failure, which passed the CRC and so
+// names a refused value: an unknown version or registry id, say (FORMAT.md section 14). Then comes
+// a CRC failure, then HeaderLength, which here means that no soft bits were read: the quad could
+// not be sampled, or no copy's finder showed contrast. Among refusals of one strength the first is
+// kept, in Read's order of tries.
+func (SlotReader) ReadReason(f *video.Frame, q Quad) ([]frame.Header, frame.HeaderError) {
+	soft, ok := copySoft(f, q)
+	if !ok {
+		return nil, frame.HeaderError{Reason: frame.HeaderLength}
+	}
+	var rej frame.HeaderError
+	if out := decodeCopies(&soft, &rej); len(out) > 0 {
+		return out, frame.HeaderError{}
+	}
+	return nil, rej
+}
+
+// refusalRank orders refusals by strength (SlotReader.ReadReason): HeaderOK, which records none,
+// lowest.
+func refusalRank(r frame.HeaderReason) int {
+	switch r {
+	case frame.HeaderOK:
+		return 0
+	case frame.HeaderLength:
+		return 1
+	case frame.HeaderCRC:
+		return 2
+	}
+	return 3
+}
+
+// noteRefusal keeps e in *rej when it is stronger than the refusal held.
+func noteRefusal(rej *frame.HeaderError, e frame.HeaderError) {
+	if refusalRank(e.Reason) > refusalRank(rej.Reason) {
+		*rej = e
+	}
+}
+
+// decodeCopies decodes the copies' soft bits as Read describes. When rej is not nil it records in
+// it the strongest refusal of the tries (noteRefusal); a sum of copies without a single non-zero
+// soft bit counts as HeaderLength, no contrast, not as a CRC failure.
+func decodeCopies(soft *[4][frame.HeaderSlots]int8, rej *frame.HeaderError) []frame.Header {
 	var out []frame.Header
 	try := func(copies ...int) bool {
 		var sum [frame.HeaderSlots]int8
+		lit := false
 		for s := range sum {
 			t := 0
 			for _, c := range copies {
 				t += int(soft[c][s])
 			}
 			sum[s] = int8(max(-127, min(127, t)))
+			lit = lit || t != 0
 		}
-		h, ok := frame.DecodeHeader(sum[:])
+		h, r := frame.DecodeHeaderReason(sum[:])
+		ok := r == frame.HeaderOK
 		if ok && !slices.Contains(out, h) {
 			out = append(out, h)
+		}
+		if !ok && rej != nil {
+			if !lit {
+				h, r = frame.Header{}, frame.HeaderLength
+			}
+			noteRefusal(rej, frame.HeaderError{Reason: r, Header: h})
 		}
 		return ok
 	}
@@ -165,7 +211,7 @@ func headerModelLens(v *geomLuma, q Quad, withK2 bool) (geomModel, [4][frame.Hea
 		if score > bestScore {
 			best, bestSoft, bestScore, found, better = m, soft, score, true, true
 		}
-		if len(decodeCopies(&soft)) > 0 {
+		if len(decodeCopies(&soft, nil)) > 0 {
 			best, bestSoft, found = m, soft, true
 			return true, better
 		}

@@ -19,9 +19,24 @@ type Shortfall struct {
 	Have, Need int
 }
 
-// NotEnoughDataError reports that some blocks cannot be reconstructed yet.
+// NotEnoughDataError reports that some blocks cannot be reconstructed yet. Blocks is empty when no
+// stream descriptor was read. The other fields say what the recordings showed, for the failure
+// guidance of DESIGN.md section 13; they are zero when the error did not come from a decode.
 type NotEnoughDataError struct {
-	Blocks []Shortfall // only the blocks that are short
+	Blocks      []Shortfall // only the blocks that are short
+	Captures    int64       // captures read
+	Located     int64       // captures in which the code's finders were found (a header was tried, whether or not it was read)
+	HeadersRead int64       // captures whose frame header was read, of any transfer
+	Other       int64       // of those, captures of a transfer other than the one decoded, which were ignored
+	FramesSeen  int         // code frames of the decoded transfer seen
+	FramesTotal int         // its code frames; 0 when no header was read
+	Descriptor  bool        // the stream descriptor was read
+	// Reject names the header refusal the captures agree on, when no header was read: at least 3
+	// captures, half of those whose finders were found, gave the same reason with the same value,
+	// in headers naming at least two frame indices, such as "header reserved bits are not zero".
+	// An unsupported version or registry id is an UnsupportedVersionError instead.
+	Reject     string
+	LockedRate bool // the clean fraction did not change from pass to pass: the camera is locked to the display rate
 }
 
 // Error implements the error interface.

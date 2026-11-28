@@ -1,0 +1,1 @@
+Section 15, camera equal to the display rate: TestLockedRateGuidance and TestLockedRateRule always on; TestLockedRateSafety asserts the locked rate on every case that falls short. Section 17: the four hostile-cost ratios re-measured before and after the detector change.

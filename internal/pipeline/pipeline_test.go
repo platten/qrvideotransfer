@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -172,6 +173,13 @@ func TestFrameLoss(t *testing.T) {
 			wantShort := []Shortfall{{Block: 0, Have: res.K + res.M - n*per, Need: res.K}}
 			if !slices.Equal(short.Blocks, wantShort) {
 				t.Errorf("short blocks %+v, want %+v", short.Blocks, wantShort)
+			}
+			// The diagnostics of a lossless recording: every capture located, its header read.
+			k := int64(len(kept))
+			diag := ShortError{Blocks: short.Blocks, Captures: k, Located: k, HeadersRead: k, FramesSeen: len(kept), FramesTotal: res.Frames,
+				Descriptor: true}
+			if short.Reject != nil || short.LockedRate || !reflect.DeepEqual(*short, diag) {
+				t.Errorf("diagnostics %+v, want %+v", *short, diag)
 			}
 			if fs := filesUnder(t, out); len(fs) != 0 {
 				t.Errorf("files written: %v", fs)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	qrvt "github.com/platten/qrvideotransfer"
 )
@@ -98,7 +97,8 @@ func guide(err error, last *qrvt.Stats, o *qrvt.DecodeOptions) error {
 			g = "No flag raises it: the input is unusual, damaged or hostile."
 		}
 	case errors.As(err, &ver):
-		g = "This video was made by a newer qrvt or another program. Update qrvt."
+		g = fmt.Sprintf("The video uses %s %d, which this qrvt cannot read: it was made by a newer qrvt or another program. "+
+			"Update qrvt, or use the program that made the video.", ver.What, ver.Value)
 	case errors.Is(err, qrvt.ErrNotImplemented):
 		g = "This part of qrvt is not implemented yet in this build."
 	case errors.Is(err, context.Canceled):
@@ -112,28 +112,76 @@ func guide(err error, last *qrvt.Stats, o *qrvt.DecodeOptions) error {
 	return &guidedError{err, g}
 }
 
-// shortGuidance says how much data a decode lacks and what to record next, for example "2.1%
-// short: record one more loop and pass both files".
+// otherMin is the fewest captures of another transfer that make a shortfall's class "another
+// transfer", as the decoder's agreement on a refusal needs 3 captures.
+const otherMin = 3
+
+// shortGuidance says what a decode lacks, with its numbers, in one sentence, and what to do in
+// another (DESIGN.md section 13), by failure class: no code found, finders but no header read,
+// another transfer (when no blocks are known; beside a blocks shortfall it is a clause of the
+// shortfall's sentence), headers but no stream descriptor, and blocks short, for example "2.1%
+// short: 21 shards missing in 1 of 1 blocks (96 of 96 code frames seen). Record one more loop and
+// pass both files to qrvt decode." When the camera is locked to the display rate, the last two
+// ask for a faster camera instead. An error without diagnostics (no captures counted) gets the
+// blocks it names, if any, and the generic action.
 func shortGuidance(e *qrvt.NotEnoughDataError, last *qrvt.Stats, o *qrvt.DecodeOptions) string {
-	next := "record one more loop and pass all the recordings to qrvt decode"
+	more := "Record one more loop and pass all the recordings to qrvt decode."
 	switch {
 	case o != nil && o.StateDir != "":
-		next = "record one more loop and decode it with the same --state-dir"
+		more = "Record one more loop and decode it with the same --state-dir."
 	case o != nil && len(o.Recordings) == 1:
-		next = "record one more loop and pass both files to qrvt decode"
+		more = "Record one more loop and pass both files to qrvt decode."
 	}
-	missing, need := 0, 0
-	for _, s := range e.Blocks {
-		missing += max(s.Need-s.Have, 0)
-		need = max(need, s.Need)
+	frames := ""
+	if e.FramesTotal > 0 {
+		frames = fmt.Sprintf(" (%d of %d code frames seen)", e.FramesSeen, e.FramesTotal)
 	}
-	total := len(e.Blocks)
-	if last != nil && last.BlocksTotal > total {
-		total = last.BlocksTotal
+	var missing string
+	switch {
+	case e.Captures > 0 && e.Located == 0:
+		return fmt.Sprintf("No code was found in any of the %d captures. "+
+			"Film the whole code, in focus and filling most of the picture, and run qrvt decode again.", e.Captures)
+	case e.Captures > 0 && e.HeadersRead == 0:
+		why := ""
+		if e.Reject != "" {
+			why = " (" + e.Reject + ")"
+		}
+		return fmt.Sprintf("The code's corners were found in %d of %d captures, but no frame header could be read%s. "+
+			"Film closer and steadier, with the screen sharp and evenly lit, and check that the video was made by qrvt.",
+			e.Located, e.Captures, why)
+	case e.Other >= otherMin && len(e.Blocks) == 0:
+		return fmt.Sprintf("%d of the %d captures with a frame header showed another transfer, which was ignored: "+
+			"a decode follows the first transfer it reads. Decode each transfer's recordings separately.", e.Other, e.HeadersRead)
+	case len(e.Blocks) > 0:
+		shards, need := 0, 0
+		for _, s := range e.Blocks {
+			shards += max(s.Need-s.Have, 0)
+			need = max(need, s.Need)
+		}
+		total := len(e.Blocks)
+		if last != nil && last.BlocksTotal > total {
+			total = last.BlocksTotal
+		}
+		pct := float64(shards) * 100 / float64(max(need*total, 1))
+		missing = fmt.Sprintf("%.1f%% short: %d shards missing in %d of %d blocks%s", pct, shards, len(e.Blocks), total, frames)
+		if e.Other >= otherMin {
+			missing += fmt.Sprintf(", and %d of the %d captures with a frame header showed another transfer, which was ignored",
+				e.Other, e.HeadersRead)
+		}
+	case e.Captures > 0:
+		missing = fmt.Sprintf("Frame headers were read in %d of %d captures%s, but not the stream descriptor", e.HeadersRead,
+			e.Captures, frames)
+	default:
+		return more
 	}
-	if missing == 0 || need == 0 {
-		return strings.ToUpper(next[:1]) + next[1:] + "."
+	if e.LockedRate {
+		clean := ""
+		if last != nil && last.CleanFraction > 0 {
+			clean = fmt.Sprintf(", %.0f%% of each capture clean on average", 100*last.CleanFraction)
+		}
+		return missing + ", and every pass repeated the same frame mixing" + clean +
+			": the camera is locked to the display rate. Film again with a camera at least twice the display rate, " +
+			"such as 60 fps for a 30 fps video: more passes at this rate repeat the same mixing."
 	}
-	pct := float64(missing) * 100 / float64(need*total)
-	return fmt.Sprintf("%.1f%% short: %s (%d shards missing in %d blocks).", pct, next, missing, len(e.Blocks))
+	return missing + ". " + more
 }

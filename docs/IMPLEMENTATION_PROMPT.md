@@ -264,6 +264,18 @@ Then, if S2 has not been analysed because the recordings are missing, stop and a
 devices must recommend the setting the simulator is known to favour, within one step. A failed decode
 must say what is missing and what to do.
 
+M4 is built in seven sequential pull requests (owner's decision, 2026-11-20; the plan's eight, with
+`calibrate make` and `calibrate read` merged into one):
+
+1. Tooling.
+2. The header refusal reason (`frame.DecodeHeaderReason`).
+3. Failure diagnostics: the decoder's counts and agreed refusal, the guidance by failure class, and
+   the locked-rate guidance.
+4. `pipeline.Scan` and `inspect`.
+5. The calibration core (`internal/calib`, no video).
+6. `calibrate make` and `calibrate read`, one pull request, its commits grouped make first, then read.
+7. The exit test and the full long run.
+
 Then stop for **G1** (section 6).
 
 ### M5. Real devices (3 agents)

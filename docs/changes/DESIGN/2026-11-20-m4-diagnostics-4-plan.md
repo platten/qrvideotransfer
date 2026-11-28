@@ -1,0 +1,1 @@
+Section 18: M4 is seven sequential pull requests (owner's decision, 2026-11-20), listed in IMPLEMENTATION_PROMPT.md. Section 19: the frame-header reason's decoder consumer done; TestMktempHonoursTMPDIR's answer is not in CI's log (go test without -v hides a passing test's t.Log), so macOS's TMPDIR behaviour stays as read in Apple's source, not observed.

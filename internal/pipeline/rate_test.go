@@ -109,7 +109,8 @@ func lockedCamera(t *testing.T, exposure time.Duration) channel.Config {
 // TestLockedRateSafety: with the camera locked to the display rate (30 against 30 fps), some phase
 // offsets never decode, because every pass repeats the same frame mixing (DESIGN.md section 15).
 // Every modulation and protection at 4 and 8 ms exposure and 8 offsets, filmed for 4 passes, must
-// either give the files or end in a ShortError with nothing written: never a wrong result. Long
+// either give the files or end in a ShortError with nothing written: never a wrong result. The
+// ShortError must report the locked rate (ShortError.LockedRate), which gives the guidance. Long
 // only; the always-on safety case goes through the public API (the root package's
 // TestLockedRateNotEnoughData). Statistical: skipped under the race detector.
 func TestLockedRateSafety(t *testing.T) {
@@ -134,6 +135,9 @@ func TestLockedRateSafety(t *testing.T) {
 							if fs := filesUnder(t, out); len(fs) != 0 || dr != nil {
 								t.Errorf("not enough data, yet files written %v or a result %+v", fs, dr)
 							}
+							if !short.LockedRate {
+								t.Errorf("not enough data without the locked rate reported: %+v", *short)
+							}
 							t.Logf("not enough data: %v", err)
 						default:
 							t.Fatalf("got %v, want the files or a ShortError", err)
@@ -141,6 +145,71 @@ func TestLockedRateSafety(t *testing.T) {
 					})
 				}
 			}
+		}
+	}
+}
+
+// TestLockedRateGuidance: a recording that falls short with the camera locked to the display rate
+// says so (ShortError.LockedRate), so that the guidance can ask for a faster camera rather than
+// more passes (DESIGN.md section 13). The setting is TestLockedRateSafety's, `tripod` at 4 ms
+// exposure and 8 ms readout locked to 30 fps, at offset 1/8, on the smallest code, a 480 x 480
+// four greys `normal` code (120 x 120 grid, F = 4) filmed at 908 x 908 for 2 passes: every pass
+// repeats the same frame mixing. Long only (designer's ruling on the CI budget, 2026-11-20); the
+// always-on checks are the rule's, TestLockedRateRule, and the guidance's, internal/cli's
+// TestLockedRateGuidanceText. Statistical: skipped under the race detector.
+func TestLockedRateGuidance(t *testing.T) {
+	raceSkipStatistics(t)
+	if !rateLong() {
+		t.Skip("long test: QRVT_LONG_TESTS=1")
+	}
+	tr := rateCode(t, 2, 2, 480, 500)
+	c := preset(t, "tripod", 908, 908)
+	c.Timing.FPS, c.Timing.Exposure, c.Timing.Readout = 30, 4*time.Millisecond, 8*time.Millisecond
+	rec := filmFrames(t, tr.frames, 30, 4, c, channel.Run{Start: time.Second / 30 / 8, Captures: 2 * tr.res.Frames, Seed: 0x5eed + 1})
+	out, _, err := decodeTo(t, rec)
+	var short *ShortError
+	if !errors.As(err, &short) {
+		t.Fatalf("got %v, want a ShortError", err)
+	}
+	if fs := filesUnder(t, out); len(fs) != 0 {
+		t.Errorf("files written: %v", fs)
+	}
+	if !short.LockedRate || short.Captures != int64(2*tr.res.Frames) {
+		t.Errorf("locked rate %v after %d captures, want true after %d (%+v)", short.LockedRate, short.Captures, 2*tr.res.Frames, *short)
+	}
+	t.Logf("F %d: %+v", tr.res.Frames, *short)
+}
+
+// TestLockedRateRuleFilmed: the locked-rate check against cameras that are not locked to the
+// display but whose captures fall short (review M1 of M4's third pull request). A four greys
+// `normal` 30,000-byte code (F = 12) filmed by `tripod` at 1600 x 900 with 16 ms exposure and
+// 8 ms readout for 2 passes: at 24 fps the phase of each frame's capture rotates from pass to pass,
+// so each frame's clean fraction changes though their mean need not, and the camera must not read
+// as locked; at 25 fps a pass is exactly 10 captures, every pass repeats the same mixing, and it
+// must. Offsets k/120 s for k = 0 to 3. Long only. Statistical: skipped under the race detector.
+func TestLockedRateRuleFilmed(t *testing.T) {
+	raceSkipStatistics(t)
+	if !rateLong() {
+		t.Skip("long test: QRVT_LONG_TESTS=1")
+	}
+	tr := rateCode(t, 2, 2, 848, 30000)
+	for _, fps := range []int{24, 25} {
+		for k := range 4 {
+			t.Run(fmt.Sprintf("%dfps/offset%d", fps, k), func(t *testing.T) {
+				c := lockedCamera(t, 16*time.Millisecond)
+				c.Timing.FPS = fps
+				n := (2*tr.res.Frames*fps + 29) / 30
+				rec := filmFrames(t, tr.frames, 30, 4, c, channel.Run{Start: time.Duration(k) * time.Second / 120, Captures: n,
+					Seed: 0x5eed + uint64(k)})
+				_, _, err := decodeTo(t, rec)
+				var short *ShortError
+				if !errors.As(err, &short) {
+					t.Fatalf("F %d, %d captures: %v, want a ShortError", tr.res.Frames, n, err)
+				}
+				if short.LockedRate != (fps == 25) {
+					t.Errorf("locked rate %v at %d fps, want %v (%+v)", short.LockedRate, fps, fps == 25, *short)
+				}
+			})
 		}
 	}
 }
