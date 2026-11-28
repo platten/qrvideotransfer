@@ -1,0 +1,1 @@
+Review LOWs of M4's fourth pull request (no section text changes): StreamInfo.Width and Height are documented as the input video's size (a filmed recording's camera size, not the code's); Scan's test asserts an overexposed capture's clipped palette; the setup tests fail when ps fails.
