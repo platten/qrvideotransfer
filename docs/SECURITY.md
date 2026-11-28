@@ -398,11 +398,13 @@ claim, and the memory side between a refusal rule and M6's allocation work, and 
 soft-bit store counts against the decode's budget. These figures are for the engine in its worker processes; a decode that falls
 back to an in-process engine adds that instance's 512 MiB reservation to the heap (section 5).
 `TestInspectNoiseResources` (`internal/pipeline`, M4's fourth pull request) does the same for
-`inspect`: noise ends within 60 s and 1 GiB of Go heap growth with nothing known, 2 frames at 848 x
-480 always (0.2 s, 17 MiB) and 32 at 3840 x 2160 with GOMAXPROCS 16 and 32 in the long run (1.2 s and
-362 MiB each, as decode's 1.2 s and 360 MiB; linux amd64, development machine). Inspect reads as
-decode does, with the same vision workers and grid-stage gate, holds the soft bits of codeword 0
-only and stops once the descriptor decodes; it makes no shard store and checks no disk space.
+`inspect`, in the long run only: noise ends within 60 s and 1 GiB of Go heap growth with nothing
+known, 16 frames at 848 x 480 (0.2 s, 126 MiB) and 32 at 3840 x 2160 with GOMAXPROCS 16 and 32 (1.2
+s and 363 and 365 MiB, as decode's 1.2 s and 360 MiB; linux amd64, development machine). Inspect
+reads as decode does, through the same loop, vision workers and grid-stage gate, which the
+always-on decode case bounds; it holds the soft bits of codeword 0 only, stops once the descriptor
+decodes, makes no shard store and checks no disk space. It is long only for the always-on budget:
+a noise capture costs 0.1 to 0.3 s of detection.
 Further, `TestEvictionLoopCost` holds a decode at its
 256 MB cap for 200 captures within both bounds. Section 9.4's bit flips are asserted for every bit
 of a signed and encrypted stream, with the named error, no passphrase asked for and nothing

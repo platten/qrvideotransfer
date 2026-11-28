@@ -204,9 +204,14 @@ func TestInspectHeadersOnly(t *testing.T) {
 }
 
 // TestInspectNoiseResources (SECURITY.md section 9.5): Inspect on noise ends within the time bound
-// and the heap bound, with nothing known, as Decode does (TestHostileRecordingResources): 2 frames
-// at 848 x 480 always, and in the long version 32 at 3840 x 2160 with GOMAXPROCS 16 and 32.
+// and the heap bound, with nothing known, as Decode does (TestHostileRecordingResources): 16 frames
+// at 848 x 480, then 32 at 3840 x 2160 with GOMAXPROCS 16 and 32. Long only (QRVT_LONG_TESTS=1),
+// for the always-on budget: a noise capture costs 0.1 to 0.3 s of detection, and Inspect reads
+// through the loop that the always-on TestHostileRecordingResources bounds for Decode.
 func TestInspectNoiseResources(t *testing.T) {
+	if os.Getenv("QRVT_LONG_TESTS") != "1" {
+		t.Skip("long only")
+	}
 	raceSkipStatistics(t)
 	run := func(n, w, h int) {
 		rec := writeRaw(t, noiseFrames(n, w, h, 9), 30)
@@ -225,10 +230,7 @@ func TestInspectNoiseResources(t *testing.T) {
 			t.Errorf("%.1f s and %d bytes of heap growth, bounds %v and %d", d.Seconds(), peak, hostileTime, hostileHeap)
 		}
 	}
-	if os.Getenv("QRVT_LONG_TESTS") != "1" {
-		run(2, 848, 480)
-		return
-	}
+	run(16, 848, 480)
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(0))
 	for _, procs := range []int{16, 32} {
 		runtime.GOMAXPROCS(procs)

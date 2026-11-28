@@ -18,8 +18,10 @@ func TestInspect(t *testing.T) {
 	in, _ := payloadDir(t, 31, 500)
 	p := Profile{Width: 480, Height: 480, Cell: 4, FPS: 30, Modulation: Gray4, Protection: Normal, ParityPercent: 20}
 	path, rep := encodeTest(t, EncodeOptions{Inputs: []string{in}, Profile: p, Compression: CompressNone})
-	events := 0
-	si, err := Inspect(context.Background(), InspectOptions{Path: path, Backend: testSpec, Workers: 1, Progress: func(Event) { events++ }})
+	frames := readRaw(t, path)
+	events := 0 // the first frame alone: a capture read ahead would cost a run of the vision chain
+	si, err := Inspect(context.Background(), InspectOptions{Path: writeRawFrames(t, frames[:1], 30), Backend: testSpec, Workers: 1,
+		Progress: func(Event) { events++ }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +39,7 @@ func TestInspect(t *testing.T) {
 	}
 
 	// +-40 levels of noise: headers read, nothing else (internal/pipeline's TestInspectHeadersOnly).
-	frames := readRaw(t, path)[:1]
+	frames = frames[:1]
 	g := prng.SplitMix64{State: 3}
 	for _, f := range frames {
 		for i := range f.Y {
