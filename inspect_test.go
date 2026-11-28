@@ -3,6 +3,9 @@ package qrvt
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/platten/qrvideotransfer/internal/prng"
@@ -12,7 +15,7 @@ import (
 // TestInspect: Inspect on the encoder's own frames reports every field of StreamInfo, the display
 // rate from the stream descriptor among them; frames whose headers are read but whose stream
 // descriptor is not give the header's fields (Descriptor false) beside a NotEnoughDataError with
-// the failure diagnostics; noise gives the error alone. The smallest setting, a 480 x 480 code of
+// the failure diagnostics (noise: TestInspectNoise). The smallest setting, a 480 x 480 code of
 // 500 bytes (F = 4), since each capture costs a run of the vision chain.
 func TestInspect(t *testing.T) {
 	in, _ := payloadDir(t, 31, 500)
@@ -55,13 +58,54 @@ func TestInspect(t *testing.T) {
 	if si == nil || *si != *partial {
 		t.Errorf("partial %+v, want %+v", si, partial)
 	}
+}
 
-	noise := []*video.Frame{{W: 128, H: 128, Bits: 8, Y: make([]uint16, 128*128), Cb: make([]uint16, 64*64), Cr: make([]uint16, 64*64)}}
-	for i := range noise[0].Y {
-		noise[0].Y[i] = uint16(g.Next() & 0xff)
+// inspectNoiseAlloc is the ceiling on what TestInspectNoise's Inspect may allocate in all,
+// generous: 14.4 MiB were measured (linux amd64, 2026-11-28).
+const inspectNoiseAlloc = 128 << 20
+
+// TestInspectNoise: Inspect is an entry point for hostile input, so a short noise recording at the
+// smallest size, 3 captures at 480 x 480, is inspected always (the 60 s and 1 GiB bound at 4K is
+// internal/pipeline's long-only TestInspectNoiseResources). It ends in the typed NotEnoughDataError
+// with nothing known and a nil StreamInfo, as documented when no header is read; it makes no shard
+// store and writes nothing, in the temporary folder or beside the recording; and it allocates
+// under a generous ceiling.
+func TestInspectNoise(t *testing.T) {
+	g := prng.SplitMix64{State: 9}
+	var noise []*video.Frame
+	for range 3 {
+		f := &video.Frame{W: 480, H: 480, Bits: 8, Y: make([]uint16, 480*480), Cb: make([]uint16, 240*240), Cr: make([]uint16, 240*240)}
+		for _, p := range [][]uint16{f.Y, f.Cb, f.Cr} {
+			for i := range p {
+				p[i] = uint16(g.Next() & 0xff)
+			}
+		}
+		noise = append(noise, f)
 	}
-	si, err = Inspect(context.Background(), InspectOptions{Path: writeRawFrames(t, noise, 30), Backend: testSpec})
-	if !errors.As(err, &short) || si != nil || short.HeadersRead != 0 || short.Captures != 1 {
-		t.Errorf("noise: %+v, %v", si, err)
+	rec := writeRawFrames(t, noise, 30)
+	tmp := t.TempDir() // the temporary folder Inspect would use, were it to write
+	for _, v := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(v, tmp)
+	}
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	si, err := Inspect(context.Background(), InspectOptions{Path: rec, Backend: testSpec})
+	runtime.ReadMemStats(&after)
+	var short *NotEnoughDataError
+	if !errors.As(err, &short) || si != nil || short.Captures != 3 || short.HeadersRead != 0 || short.Descriptor ||
+		len(short.Blocks) != 0 || short.FramesTotal != 0 {
+		t.Errorf("noise: %+v, %v (%+v)", si, err, short)
+	}
+	if left, err := os.ReadDir(tmp); err != nil || len(left) != 0 {
+		t.Errorf("the temporary folder holds %v (%v)", left, err)
+	}
+	if beside, err := os.ReadDir(filepath.Dir(rec)); err != nil || len(beside) != 1 {
+		t.Errorf("beside the recording: %v (%v)", beside, err)
+	}
+	alloc := after.TotalAlloc - before.TotalAlloc
+	t.Logf("3 noise captures at 480 x 480: %.1f MiB allocated", float64(alloc)/(1<<20))
+	if alloc > inspectNoiseAlloc {
+		t.Errorf("%d bytes allocated, ceiling %d", alloc, inspectNoiseAlloc)
 	}
 }
