@@ -188,9 +188,7 @@ func Analyze(ctx context.Context, c AnalyzeConfig) (*Analysis, error) {
 			}
 			idx := base + cp.Index
 			last = idx
-			if err := a.capture(cp, idx); err != nil {
-				return false, err
-			}
+			a.capture(cp, idx)
 			if len(a.sizes) > 1 {
 				mixed = true // not a calibration video: stop reading
 				return true, nil
@@ -221,7 +219,6 @@ func Analyze(ctx context.Context, c AnalyzeConfig) (*Analysis, error) {
 	}
 	out := &Analysis{Plan: *a.plan, Camera: camera(c.Recordings, res.Probes), Captures: res.Captures}
 	a.warnings(res.Probes)
-	out.Warnings = warnings
 	var ms []Measurement
 	for si, s := range a.plan.Segments {
 		st := a.segs[si]
@@ -248,7 +245,7 @@ func Analyze(ctx context.Context, c AnalyzeConfig) (*Analysis, error) {
 }
 
 // capture adds one capture.
-func (a *analysis) capture(cp *pipeline.Capture, idx int) error {
+func (a *analysis) capture(cp *pipeline.Capture, idx int) {
 	if cp.Finders {
 		a.errs.Located++
 	}
@@ -259,12 +256,12 @@ func (a *analysis) capture(cp *pipeline.Capture, idx int) error {
 	}
 	sp.last, sp.n = cp.PTS, sp.n+1
 	if len(cp.Headers) == 0 {
-		return nil
+		return
 	}
 	a.errs.HeadersRead++
 	p, seg, err := Recover(cp.Headers[0])
 	if err != nil {
-		return nil
+		return
 	}
 	a.errs.Calibration++
 	sz := Size{p.Width, p.Height}
@@ -276,7 +273,7 @@ func (a *analysis) capture(cp *pipeline.Capture, idx int) error {
 		a.segs = make([]segStats, len(p.Segments))
 	}
 	if len(a.sizes) > 1 || !cp.Located {
-		return nil
+		return
 	}
 	si := slices.Index(a.plan.Segments, seg)
 	a.located++
@@ -292,11 +289,8 @@ func (a *analysis) capture(cp *pipeline.Capture, idx int) error {
 		if ph.Frame < seg.FirstIndex || ph.Frame >= seg.FirstIndex+uint32(seg.CodeFrames) { //nolint:gosec // small
 			continue // a frame of the next or previous segment, whose grid the header does not give
 		}
-		if err := a.add(si, seg, ph, idx); err != nil {
-			return err
-		}
+		a.add(si, seg, ph, idx)
 	}
-	return nil
 }
 
 // mapping returns the mapping of segment si decoded with inner code k.
@@ -313,7 +307,7 @@ func (a *analysis) mapping(si int, seg Segment, k int) *frame.Mapping {
 }
 
 // add sums one phase's soft bits into its frame.
-func (a *analysis) add(si int, seg Segment, ph pipeline.Phase, idx int) error {
+func (a *analysis) add(si int, seg Segment, ph pipeline.Phase, idx int) {
 	fr := a.open[ph.Frame]
 	if fr == nil {
 		fr = &openFrame{seg: si, last: -2}
@@ -343,7 +337,6 @@ func (a *analysis) add(si int, seg Segment, ph pipeline.Phase, idx int) error {
 	for a.held > a.softCap && len(a.open) > 0 {
 		a.finaliseOldest()
 	}
-	return nil
 }
 
 // finalise decodes every open frame that two captures have passed without, or every one with all.
