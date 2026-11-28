@@ -120,3 +120,51 @@ func TestFailureClassJSON(t *testing.T) {
 		}
 	}
 }
+
+// TestInspectGuidance: inspect's failure guidance follows the same classes as decode's, with its
+// own action: it never tells the user to pass recordings to qrvt decode or to decode them, as if
+// they had run decode; where it asks to try again, it names qrvt inspect.
+func TestInspectGuidance(t *testing.T) {
+	cases := []struct {
+		name  string
+		err   *qrvt.NotEnoughDataError
+		words []string
+	}{
+		{"no code", &qrvt.NotEnoughDataError{Captures: 12}, []string{"12 captures", "Film the whole code", "qrvt inspect again"}},
+		{"finders", &qrvt.NotEnoughDataError{Captures: 12, Located: 9}, []string{"9 of 12 captures", "no frame header"}},
+		{"headers, no descriptor", &qrvt.NotEnoughDataError{Captures: 12, Located: 12, HeadersRead: 11, FramesSeen: 3, FramesTotal: 4},
+			[]string{"11 of 12 captures", "not the stream descriptor", "Record", "qrvt inspect"}},
+		{"other transfer", &qrvt.NotEnoughDataError{Captures: 12, Located: 12, HeadersRead: 12, Other: 8, FramesTotal: 4},
+			[]string{"8 of the 12 captures", "another transfer", "inspect follows the first transfer"}},
+		{"locked rate", &qrvt.NotEnoughDataError{Captures: 16, Located: 16, HeadersRead: 16, FramesSeen: 4, FramesTotal: 4, LockedRate: true},
+			[]string{"stream descriptor", "locked to the display rate", "at least twice the display rate"}},
+		{"no diagnostics", &qrvt.NotEnoughDataError{}, []string{"qrvt inspect"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, text := splitGuidance(guideFor("inspect", tc.err, nil, nil))
+			if strings.Contains(text, "qrvt decode") || strings.Contains(text, "Decode ") || strings.Contains(text, "a decode") {
+				t.Errorf("inspect's guidance speaks of decode: %q", text)
+			}
+			for _, w := range tc.words {
+				if !strings.Contains(text, w) {
+					t.Errorf("%q does not contain %q", text, w)
+				}
+			}
+			if ss := sentences(text); tc.err.Captures > 0 && len(ss) != 2 {
+				t.Errorf("%d sentences, want 2: %q", len(ss), text)
+			}
+		})
+	}
+	// Through the command: inspect's partial result carries inspect's guidance.
+	f := newFiles(t)
+	partial := &qrvt.StreamInfo{Width: 1920, Height: 1080, GridX: 480, GridY: 270, Modulation: qrvt.Gray4, Protection: qrvt.Normal, Frames: 840}
+	_, _, err := run(t, &fakeAPI{info: partial, err: cases[2].err}, nil, "inspect", f.r1)
+	if _, g := splitGuidance(err); !strings.Contains(g, "qrvt inspect") || strings.Contains(g, "qrvt decode") {
+		t.Errorf("inspect command's guidance %q", g)
+	}
+	// Decode's guidance is unchanged by it.
+	if _, g := splitGuidance(guide(cases[2].err, nil, nil)); !strings.Contains(g, "qrvt decode") {
+		t.Errorf("decode's guidance %q", g)
+	}
+}

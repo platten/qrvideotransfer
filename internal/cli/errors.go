@@ -65,6 +65,9 @@ func ExitCode(err error) int {
 	return exitFailure
 }
 
+// guideFor is guide for the command named; not yet built.
+func guideFor(_ string, err error, last *qrvt.Stats, o *qrvt.DecodeOptions) error { return guide(err, last, o) }
+
 // guide adds failure guidance (DESIGN.md section 13) to the typed errors of the root package. last
 // is the latest decoding statistics and o the decode options, both possibly nil.
 func guide(err error, last *qrvt.Stats, o *qrvt.DecodeOptions) error {
