@@ -36,8 +36,14 @@ type Slot struct {
 // slotCells is Cells in increasing size, the order of the plan.
 var slotCells = []int{4, 8, 12, 16}
 
-// slots lists every slot in order; TotalFrames is the sum of their code frames.
-var slots, TotalFrames = func() ([]Slot, uint32) {
+// slots lists every slot in order.
+var slots = makeSlots()
+
+// TotalFrames is F, the header's frame count of every calibration video: the sum of every slot's
+// code frames, 4,896.
+var TotalFrames = slots[len(slots)-1].FirstIndex + uint32(slots[len(slots)-1].CodeFrames)
+
+func makeSlots() []Slot {
 	var out []Slot
 	var idx uint32
 	for _, r := range Rates {
@@ -49,8 +55,8 @@ var slots, TotalFrames = func() ([]Slot, uint32) {
 			}
 		}
 	}
-	return out, idx
-}()
+	return out
+}
 
 // Segment is a slot the video shows.
 type Segment struct {

@@ -24,7 +24,7 @@ func TestSlots(t *testing.T) {
 		if s.FirstIndex != idx || s.CodeFrames != s.Rate*SegmentSeconds {
 			t.Fatalf("slot %d: %+v, want first index %d", i, s, idx)
 		}
-		idx += uint32(s.CodeFrames) //nolint:gosec // small
+		idx += uint32(s.CodeFrames)
 	}
 }
 
@@ -104,7 +104,7 @@ func TestRecoverEveryFrame(t *testing.T) {
 		}
 		for _, s := range p.Segments {
 			for k := range s.CodeFrames {
-				h := s.Header(s.FirstIndex + uint32(k)) //nolint:gosec // small
+				h := s.Header(s.FirstIndex + uint32(k))
 				if k == 0 || k == s.CodeFrames-1 {
 					// The strict parser, on the first and last frame of each segment.
 					slots := h.Encode()
@@ -142,10 +142,10 @@ func TestRecoverUnique(t *testing.T) {
 			continue
 		}
 		for _, s := range p.Segments {
-			for _, idx := range []uint32{s.FirstIndex, s.FirstIndex + uint32(s.CodeFrames) - 1} { //nolint:gosec // small
+			for _, idx := range []uint32{s.FirstIndex, s.FirstIndex + uint32(s.CodeFrames) - 1} {
 				n := 0
 				for _, o := range slots {
-					if idx < o.FirstIndex || idx >= o.FirstIndex+uint32(o.CodeFrames) || o.Mode != s.Mode { //nolint:gosec // small
+					if idx < o.FirstIndex || idx >= o.FirstIndex+uint32(o.CodeFrames) || o.Mode != s.Mode {
 						continue
 					}
 					if seg, ok := segmentOf(o, s.GridX*o.Cell, s.GridY*o.Cell); ok && seg.GridX == s.GridX && seg.GridY == s.GridY {
@@ -210,7 +210,7 @@ func FuzzRecoverPlan(f *testing.F) {
 		h := s.Header(s.FirstIndex)
 		f.Add(h.Version, h.Session, h.FrameIndex, h.TotalFrames, h.GridX, h.GridY, h.Modulation, h.InnerCode, h.Reserved)
 	}
-	f.Add(uint8(1), uint16(Session), uint32(0), uint32(TotalFrames), uint16(2047), uint16(2047), uint8(1), uint8(2), uint8(0))
+	f.Add(uint8(1), uint16(Session), uint32(0), TotalFrames, uint16(2047), uint16(2047), uint8(1), uint8(2), uint8(0))
 	f.Fuzz(func(t *testing.T, version uint8, session uint16, idx, total uint32, gx, gy uint16, mode, inner, reserved uint8) {
 		h := frame.Header{Version: version, Session: session, FrameIndex: idx, TotalFrames: total,
 			GridX: gx, GridY: gy, Modulation: mode, InnerCode: inner, Reserved: reserved}
@@ -229,7 +229,7 @@ func FuzzRecoverPlan(f *testing.F) {
 		for _, s := range want.Segments {
 			found = found || s == rs
 		}
-		if !found || idx < rs.FirstIndex || idx >= rs.FirstIndex+uint32(rs.CodeFrames) || rs.Header(idx) != h { //nolint:gosec // small
+		if !found || idx < rs.FirstIndex || idx >= rs.FirstIndex+uint32(rs.CodeFrames) || rs.Header(idx) != h {
 			t.Fatalf("header %+v accepted as segment %+v of %dx%d", h, rs, rp.Width, rp.Height)
 		}
 	})

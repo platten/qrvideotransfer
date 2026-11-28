@@ -144,7 +144,7 @@ func NetBytes(gridX, gridY int, mode, inner uint8) float64 {
 	if gridX <= 0 || gridY <= 0 || gridX > 0xffff || gridY > 0xffff {
 		return 0
 	}
-	h := frame.Header{Version: frame.Version, TotalFrames: 4, GridX: uint16(gridX), GridY: uint16(gridY), Modulation: mode, InnerCode: inner} //nolint:gosec // checked above
+	h := frame.Header{Version: frame.Version, TotalFrames: 4, GridX: uint16(gridX), GridY: uint16(gridY), Modulation: mode, InnerCode: inner}
 	m, err := frame.NewMapping(h)
 	if err != nil {
 		return 0
