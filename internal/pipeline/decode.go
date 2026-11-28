@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/platten/qrvideotransfer/internal/fec"
 	"github.com/platten/qrvideotransfer/internal/fec/ldpc"
@@ -53,6 +52,7 @@ func decode(ctx context.Context, c DecodeConfig, seen **decoder) (*DecodeResult,
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 	d := &decoder{c: &c, emit: emitter(c.Progress), tmp: tmp, frames: map[uint32]*frameAcc{}, softCap: MaxSoftBytes}
+	d.scanRun = scanRun{backend: c.Backend, workers: c.Workers, emit: d.emit, warn: d.warn}
 	defer d.close()
 	if seen != nil {
 		*seen = d
@@ -130,12 +130,11 @@ type decoder struct {
 	softCap    int64    // MaxSoftBytes, for both; lower in tests
 	seen       []uint64 // frames seen, one bit each (F bits, at most 512 KiB)
 	framesSeen int
-	maxWaiting int          // most results held for in-order application at once
 	byConf     byConfidence // the frames holding soft bits, least confident first (evict.go)
 	bySeen     bySeen       // the frame records, the one seen least recently first
 	evictSteps int          // frames taken off the eviction order, for tests
-	gate       *stageGate   // the last recording's grid-stage gate, for tests
-	captures   int          // captures processed, across recordings, with a gap between recordings
+
+	scanRun // the reading of the recordings: captures processed, the stage gate (scan.go)
 
 	stats            Stats
 	located          int64
@@ -183,132 +182,18 @@ func (d *decoder) sendStats() {
 
 // recording reads one recording through the vision workers, adding every capture's soft bits.
 func (d *decoder) recording(ctx context.Context, path string) error {
-	info, err := d.c.Backend.Probe(ctx, path)
+	read, info, err := d.scanRun.recording(ctx, path, func(r *captureResult, read, frames int64) (bool, error) {
+		if err := d.apply(*r); err != nil {
+			return false, err
+		}
+		d.emit.stage(StageDecodeVideo, KindProgress, read, frames, UnitFrames)
+		if d.stats.Captures%statsEvery == 0 {
+			d.sendStats()
+		}
+		return d.complete(), nil
+	})
 	if err != nil {
 		return err
-	}
-	// The workers' captures and scratch must fit the decode's memory budget (memory.go).
-	workers, reduced := decodeWorkers(d.c.Workers, info.Width, info.Height)
-	if reduced {
-		d.warn(StageDecodeVideo, WarnWorkersReduced, fmt.Sprintf("%d workers asked for; %d, the most whose %d x %d captures fit "+
-			"the decode's memory budget, are used.", d.c.Workers, workers, info.Width, info.Height))
-	}
-	rctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	dec, err := d.c.Backend.NewDecoder(rctx, path, video.DecodeConfig{BitDepth: info.BitDepth})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dec.Close() }()
-	d.emit.stage(StageDecodeVideo, KindStarted, 0, info.Frames, UnitFrames)
-
-	type job struct {
-		f     *video.Frame
-		index int
-	}
-	free := make(chan *video.Frame, workers+2)
-	for range workers + 2 {
-		free <- &video.Frame{}
-	}
-	// A capture is read only with a token, returned once its result has been applied in order, so
-	// a stalled worker holds back the reading and at most workers+2 results wait to be applied.
-	tokens := make(chan struct{}, workers+2)
-	jobs := make(chan job)
-	results := make(chan captureResult, workers)
-	var readErr error
-	go func() {
-		defer close(jobs)
-		for i := 0; ; i++ {
-			select {
-			case tokens <- struct{}{}:
-			case <-rctx.Done():
-				return
-			}
-			var f *video.Frame
-			select {
-			case f = <-free:
-			case <-rctx.Done():
-				return
-			}
-			if err := dec.Next(f); err != nil {
-				if !errors.Is(err, io.EOF) {
-					readErr = err
-				}
-				return
-			}
-			select {
-			case jobs <- job{f, i}:
-			case <-rctx.Done():
-				return
-			}
-		}
-	}()
-	// The grid stage's memory is admitted by a gate sized from what the captures leave of the
-	// budget (memory.go), against each capture's own grid: a grid change mid-recording cannot raise
-	// it.
-	gate := newStageGate(stageBudget(workers, info.Width, info.Height))
-	d.gate = gate
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			w := captureWorker{enter: func(cells int) (func(), bool) {
-				release, err := gate.enter(rctx, cells)
-				return release, err == nil
-			}}
-			for j := range jobs {
-				r := processCapture(&w, j.f, j.index)
-				free <- j.f
-				results <- r
-			}
-		}()
-	}
-	go func() { wg.Wait(); close(results) }()
-
-	var applyErr error
-	base := d.captures
-	waiting := map[int]captureResult{}
-	next, read := 0, int64(0)
-	for r := range results {
-		waiting[r.index] = r
-		d.maxWaiting = max(d.maxWaiting, len(waiting))
-		for {
-			r, ok := waiting[next]
-			if !ok {
-				break
-			}
-			delete(waiting, next)
-			<-tokens
-			next++
-			read++
-			if d.complete() || rctx.Err() != nil {
-				continue // drain
-			}
-			r.index += base
-			if err := d.apply(r); err != nil {
-				cancel()
-				applyErr = err
-				continue
-			}
-			d.emit.stage(StageDecodeVideo, KindProgress, read, info.Frames, UnitFrames)
-			if d.stats.Captures%statsEvery == 0 {
-				d.sendStats()
-			}
-			if d.complete() {
-				cancel()
-			}
-		}
-	}
-	d.captures = base + next + 2 // captures of different recordings are never adjacent
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if applyErr != nil {
-		return applyErr
-	}
-	if readErr != nil && !d.complete() {
-		return readErr
 	}
 	if err := d.flush(); err != nil {
 		return err
@@ -448,15 +333,8 @@ func addSoftAbs(dst, src []int8, w int) int64 {
 // tryDescriptor decodes codeword 0's summed soft bits; once it decodes and validates, the plan and
 // the shard store are made and every frame seen so far is queued for an attempt.
 func (d *decoder) tryDescriptor() error {
-	if _, ok := d.code.Decode(d.shard, d.descSoft); !ok {
-		return nil
-	}
-	desc, err := frame.ParseDescriptor(d.shard, d.key.header(), d.geom.cpf)
-	if err != nil {
-		return err
-	}
-	plan, err := fec.NewPlan(desc.StreamLen, desc.ShardSize, desc.M, desc.OrderSeed)
-	if err != nil {
+	desc, plan, ok, err := decodeDescriptor(d.code, d.shard, d.descSoft, d.key, d.geom)
+	if !ok || err != nil {
 		return err
 	}
 	size, err := rs.StoreSize(plan)
@@ -481,6 +359,22 @@ func (d *decoder) tryDescriptor() error {
 		}
 	}
 	return nil
+}
+
+// decodeDescriptor decodes soft, codeword 0's summed soft bits, into shard and parses the
+// descriptor against the header of key, for Decode and Inspect alike: ok is false when the
+// codeword does not decode yet, and err is set when it decodes but the descriptor or its plan is
+// refused (FORMAT.md section 10).
+func decodeDescriptor(code *ldpc.Code, shard []byte, soft []int8, key *params, g *geometry) (frame.Descriptor, fec.Plan, bool, error) {
+	if _, ok := code.Decode(shard, soft); !ok {
+		return frame.Descriptor{}, fec.Plan{}, false, nil
+	}
+	desc, err := frame.ParseDescriptor(shard, key.header(), g.cpf)
+	if err != nil {
+		return desc, fec.Plan{}, true, err
+	}
+	plan, err := fec.NewPlan(desc.StreamLen, desc.ShardSize, desc.M, desc.OrderSeed)
+	return desc, plan, true, err
 }
 
 // attempt decodes every codeword of frame f that has soft bits and stores the shards that pass.

@@ -134,7 +134,9 @@ func (e *engine) check() error {
 }
 
 // job is the work of a command: it gets the renderer and the progress callback, and returns the
-// summary to print.
+// summary to print. A job that fails may still return a summary of what it found (inspect's
+// partial summary): the plain and dashboard renderers print it before the error, and the JSON
+// renderer prints only the error line, as the events schema allows one summary or error line.
 type job func(ctx context.Context, r ui.Renderer, progress func(qrvt.Event)) (*ui.Summary, error)
 
 // run runs a job with the renderer the output flags select, adds failure guidance to its error
@@ -161,7 +163,7 @@ func (a *app) run(cmd *cobra.Command, info ui.Info, d *qrvt.DecodeOptions, do jo
 	err = guide(err, last, d)
 	var f *ui.Failure
 	if err != nil {
-		sum, f = nil, failure(err)
+		f = failure(err)
 		a.reported = a.json
 	}
 	if ferr := r.Finish(sum, f); err == nil {

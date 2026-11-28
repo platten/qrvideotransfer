@@ -1,6 +1,9 @@
 package pipeline
 
 import (
+	"math"
+	"time"
+
 	"github.com/platten/qrvideotransfer/internal/frame"
 	"github.com/platten/qrvideotransfer/internal/modem"
 	"github.com/platten/qrvideotransfer/internal/prng"
@@ -65,6 +68,11 @@ type captureResult struct {
 	finders bool              // a quad's header was read, whether or not it was refused
 	reject  frame.HeaderError // when no header was read: the strongest refusal (vision.SlotReader.ReadReason)
 	first   uint32            // the first header's frame index, when one was read
+	// For Scan (scan.go); Decode does not read them.
+	headers       []frame.Header // the headers read
+	pixelsPerCell float64        // camera pixels per cell side, from the mesh, when located
+	clipped       float64        // share of the palette patches whose sampling clipped, when located
+	pts           time.Duration  // the capture's presentation time (Scan only)
 }
 
 // captureWorker runs the vision chain of DESIGN.md section 10 on captures. It owns its detector
@@ -123,7 +131,7 @@ func (w *captureWorker) see(f *video.Frame, r *captureResult, each func(g *geome
 		r.reject = rej
 		return
 	}
-	r.key, r.first = paramsOf(hs[0]), hs[0].FrameIndex
+	r.key, r.first, r.headers = paramsOf(hs[0]), hs[0].FrameIndex, hs
 	var idxs []uint32
 	for _, h := range hs {
 		if paramsOf(h) == r.key {
@@ -154,6 +162,8 @@ func (w *captureWorker) see(f *video.Frame, r *captureResult, each func(g *geome
 	w.pal = grow(w.pal, 32)
 	vision.FootprintSampler{}.Sample(obs, f, m, cells)
 	vision.SamplePalette(w.pal, f, m, g.layout)
+	r.pixelsPerCell = pixelsPerCell(m, g.layout)
+	r.clipped = clippedShare(w.pal)
 	gamma, ok := vision.PaletteGamma(w.pal, g.mod)
 	if !ok {
 		gamma = 0
@@ -172,6 +182,35 @@ func (w *captureWorker) see(f *video.Frame, r *captureResult, each func(g *geome
 			each(g, idx, soft)
 		}
 	}
+}
+
+// pixelsPerCell returns the camera pixels per cell side of the grid that mesh m maps: the square
+// root of the area of the image quadrilateral of the grid's corners over its cells; 0 when the
+// mesh gives no finite area.
+func pixelsPerCell(m *vision.Mesh, l *frame.Layout) float64 {
+	gx, gy := float64(l.GridX()), float64(l.GridY())
+	p := [4]vision.Point{m.At(0, 0), m.At(gx, 0), m.At(gx, gy), m.At(0, gy)}
+	area := 0.0
+	for i := range p {
+		q := p[(i+1)%4]
+		area += p[i].X*q.Y - q.X*p[i].Y
+	}
+	v := math.Sqrt(math.Abs(area) / 2 / (gx * gy))
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
+}
+
+// clippedShare returns the share of the observations obs whose sampling clipped.
+func clippedShare(obs []modem.Obs) float64 {
+	n := 0
+	for _, o := range obs {
+		if o.Saturated {
+			n++
+		}
+	}
+	return float64(n) / float64(max(len(obs), 1))
 }
 
 // grow returns s with length n, reusing its storage when it suffices.

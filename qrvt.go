@@ -150,9 +150,34 @@ func AnalyzeCalibration(ctx context.Context, o AnalyzeOptions) (*Recommendation,
 	return nil, ErrNotImplemented
 }
 
-// Inspect reports what a code video or a recording of one carries, without unpacking it.
+// Inspect reports what a code video or a recording of one carries, without unpacking it. It reads
+// the recording as Decode does, stops as soon as the stream descriptor decodes, and writes
+// nothing. When the recording ends first, it returns a *NotEnoughDataError with what the
+// recording showed, as Decode's, and, if a frame header was read, the partial StreamInfo of that
+// header (Descriptor false) beside it; when the captures agree on an unsupported format version,
+// modulation or inner code, it returns an *UnsupportedVersionError, as Decode does.
 func Inspect(ctx context.Context, o InspectOptions) (*StreamInfo, error) {
-	return nil, ErrNotImplemented
+	if o.Path == "" {
+		return nil, errors.New("qrvt: no video or recording")
+	}
+	be, err := backend(o.Backend, o.UnsandboxedHEVC)
+	if err != nil {
+		return nil, err
+	}
+	r, err := pipeline.Inspect(ctx, pipeline.InspectConfig{Path: o.Path, Backend: be, Workers: o.Workers,
+		Progress: progress(o.Progress)})
+	if r == nil || !r.HeaderRead {
+		return nil, convertError(err)
+	}
+	h := r.Header
+	si := &StreamInfo{Width: r.Probe.Width, Height: r.Probe.Height, GridX: int(h.GridX), GridY: int(h.GridY),
+		Modulation: Modulation(h.Modulation), Protection: Protection(h.InnerCode), Frames: int(h.TotalFrames)}
+	if d := r.Descriptor; d != nil {
+		si.Descriptor = true
+		si.Session, si.FPS, si.StreamLen, si.ShardSize = d.Session, int(d.DisplayFPS), d.StreamLen, d.ShardSize
+		si.Blocks, si.K, si.M, si.StreamHash = d.Blocks, d.K, d.M, d.StreamHash
+	}
+	return si, convertError(err)
 }
 
 // GenerateKey returns a new Ed25519 signing key pair in qrvt's key-file encoding (SECURITY.md
