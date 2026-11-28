@@ -36,8 +36,8 @@ func TestRecommendHighest(t *testing.T) {
 	if !ok || r.Setting != (Setting{30, 4, ModeGray4, Normal}) || r.Measured || r.Standing != EstablishedAt {
 		t.Fatalf("%+v", r)
 	}
-	if want := PlanningRate(r.Setting, 480, 270, float64(r.Decoded)/float64(r.Codewords)*float64(r.Seen)/float64(r.Frames)); r.Rate < want*0.999 || r.Rate > want*1.001 {
-		t.Errorf("rate %.0f, want %.0f", r.Rate, want)
+	if want := PlanningRate(r.Setting, 480, 270, float64(r.Decoded)/float64(r.Codewords)*float64(r.Seen)/float64(r.Frames)); r.BytesPerSec < want*0.999 || r.BytesPerSec > want*1.001 {
+		t.Errorf("rate %.0f, want %.0f", r.BytesPerSec, want)
 	}
 	if _, ok := Recommend(cam4K60, ms[3:]); ok {
 		t.Error("recommended with nothing established that passes")
@@ -137,8 +137,8 @@ func TestRecommendMonotone(t *testing.T) {
 		cam := Camera{FPS: []float64{30, 60, 120}[trial%3], Bitrate: 20e6 + 100e6*rng.Float64(), H264: trial%5 == 0, Floor: FloorHandheld}
 		r0, ok0 := Recommend(cam, ms)
 		r1, ok1 := Recommend(cam, worse)
-		if ok1 && (!ok0 || r1.Rate > r0.Rate) {
-			t.Fatalf("trial %d: worse measurements give %+v at %.0f B/s, better %+v at %.0f (%v)", trial, r1.Setting, r1.Rate, r0.Setting, r0.Rate, ok0)
+		if ok1 && (!ok0 || r1.BytesPerSec > r0.BytesPerSec) {
+			t.Fatalf("trial %d: worse measurements give %+v at %.0f B/s, better %+v at %.0f (%v)", trial, r1.Setting, r1.BytesPerSec, r0.Setting, r0.BytesPerSec, ok0)
 		}
 	}
 }

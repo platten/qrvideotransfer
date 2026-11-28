@@ -53,8 +53,16 @@ func (a *app) calibrateCmd() *cobra.Command {
 				return err
 			}
 			o := qrvt.CalibrationOptions{Output: mk.output, Width: w, Height: h, Backend: mk.backend, Workers: mk.jobs}
-			info := ui.Info{Command: "calibrate make", Output: o.Output, Video: []ui.Field{{Key: "Size", Value: fmt.Sprintf("%dx%d", w, h)}},
-				Stages: []qrvt.Stage{qrvt.StageRender, qrvt.StageEncodeVideo}}
+			plan, err := qrvt.PlanCalibration(o)
+			if err != nil {
+				return usagef("--resolution %dx%d: no calibration step fits it: the video needs a cell of 4, 8, 12 or 16 pixels "+
+					"that divides both sides into a grid of at least 120 x 90 cells", w, h)
+			}
+			info := ui.Info{Command: "calibrate make", Output: o.Output, ShowVideo: true, Video: []ui.Field{
+				{Key: "Size", Value: fmt.Sprintf("%dx%d", w, h)},
+				{Key: "Steps", Value: fmt.Sprintf("%d, of 4 s each: %s of video at 60 fps", plan.Steps, plan.Duration)},
+				{Key: "Estimate", Value: "about " + roundEstimate(plan.Estimate) + " to make with the embedded engine"},
+			}, Stages: []qrvt.Stage{qrvt.StageRender, qrvt.StageEncodeVideo}}
 			return a.run(cmd, info, nil, func(ctx context.Context, _ ui.Renderer, progress func(qrvt.Event)) (*ui.Summary, error) {
 				o.Progress = progress
 				if err := a.env.API.CalibrationVideo(ctx, o); err != nil {
@@ -77,7 +85,7 @@ func (a *app) calibrateCmd() *cobra.Command {
 	read := &cobra.Command{
 		Use:     "read <recording>...",
 		Short:   "Measure a recording of the calibration video and recommend settings",
-		Long:    "Measure each step of the calibration video in one or more recordings and print the recommended encode command, with warnings for clipping, dropped frames, moire and exposure.",
+		Long:    "Measure each step of the calibration video in one or more recordings and print the recommended encode command, with warnings for clipping, dropped frames, exposure and a scaled video (moire is not detected yet).",
 		Example: "qrvt calibrate read IMG_0420.MOV",
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -99,12 +107,17 @@ func (a *app) calibrateCmd() *cobra.Command {
 					return nil, err
 				}
 				p := rec.Profile
-				return &ui.Summary{Title: "Recommended settings", Warnings: rec.Warnings, Fields: []ui.Field{
+				fields := []ui.Field{
 					{Key: "Command", Value: rec.Command},
 					{Key: "Video", Value: fmt.Sprintf("%dx%d at %d fps, %s, cell %d", p.Width, p.Height, p.FPS, modeName(p.Modulation), p.Cell)},
 					{Key: "Protection", Value: fmt.Sprintf("%s, parity %d%%", protectionName(p.Protection), p.ParityPercent)},
 					{Key: "Planning rate", Value: ui.FormatBytes(int64(rec.BytesPerSec)) + "/s"},
-				}}, nil
+				}
+				if rec.Measured {
+					fields = append(fields, ui.Field{Key: "Note", Value: "measured on your device: this setting is not established " +
+						"at your camera's pixels per cell, and your recording passed it with margin"})
+				}
+				return &ui.Summary{Title: "Recommended settings", Warnings: rec.Warnings, Fields: append(fields, stepFields(rec.Steps)...)}, nil
 			})
 		},
 	}
@@ -354,4 +367,43 @@ func (a *app) demoCmd() *cobra.Command {
 	}
 	cmd.Flags().DurationVar(&delay, "delay", 60*time.Millisecond, "Pause between events.\nExample: --delay 20ms")
 	return cmd
+}
+
+// roundEstimate rounds an expected duration for a person: whole seconds under a minute, else whole
+// minutes.
+func roundEstimate(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%d s", max(1, int(d.Round(time.Second).Seconds())))
+	}
+	return fmt.Sprintf("%d min", int(d.Round(time.Minute).Minutes()))
+}
+
+// stepFields are the calibration's per-step table as summary fields: one per step of the video
+// (display rate, cell size and mode), with each protection level's share of codewords decoded.
+func stepFields(steps []qrvt.CalibrationStep) []ui.Field {
+	var out []ui.Field
+	for i := 0; i < len(steps); {
+		s := steps[i]
+		key := fmt.Sprintf("Step %d fps, cell %d, %s", s.FPS, s.Cell, modeName(s.Modulation))
+		val := fmt.Sprintf("%d of %d frames seen, %.1f camera pixels per cell;", s.FramesSeen, s.Frames, s.PixelsPerCell)
+		for ; i < len(steps) && steps[i].FPS == s.FPS && steps[i].Cell == s.Cell && steps[i].Modulation == s.Modulation; i++ {
+			p := steps[i]
+			pct := 0.0
+			if p.Codewords > 0 {
+				pct = 100 * float64(p.Decoded) / float64(p.Codewords)
+			}
+			mark := ""
+			switch {
+			case p.Passed && p.Established:
+				mark = ", passed"
+			case p.Margin:
+				mark = ", passed with margin"
+			case p.Passed:
+				mark = ", passed, not established"
+			}
+			val += fmt.Sprintf(" %s %.0f%%%s", protectionName(p.Protection), pct, mark)
+		}
+		out = append(out, ui.Field{Key: key, Value: val})
+	}
+	return out
 }

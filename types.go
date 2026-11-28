@@ -109,6 +109,17 @@ type CalibrationOptions struct {
 	Backend       string
 	Workers       int
 	Progress      func(Event)
+	TempDir       string // "": the system temporary directory
+}
+
+// CalibrationPlan describes the video [CalibrationVideo] makes for a monitor, as
+// [PlanCalibration] reports it before any work starts.
+type CalibrationPlan struct {
+	Width, Height int
+	Steps         int           // segments: one display rate, cell size and mode each
+	Frames        int           // video frames, at 60 fps
+	Duration      time.Duration // the video's length
+	Estimate      time.Duration // the expected time to make it with the embedded engine
 }
 
 // AnalyzeOptions are the inputs of [AnalyzeCalibration].
@@ -206,7 +217,9 @@ const (
 	WarnFramesDropped   WarningCode = "FramesDropped"
 	WarnSkippedFile     WarningCode = "SkippedFile"
 	WarnDownscaled      WarningCode = "Downscaled"
-	WarnMoire           WarningCode = "Moire"
+	// WarnMoire: not raised yet; the vision chain cancels stripes without measuring them
+	// (DESIGN.md section 19, for M5).
+	WarnMoire WarningCode = "Moire"
 	// WarnEngineInProcess: no engine worker process could be started (the host did not call
 	// EngineWorker first in main, or starting one failed), so the video engine runs in this process
 	// with close-on-cancel on, with the same guarantees but 4 to 11 times slower.
@@ -284,4 +297,30 @@ type Recommendation struct {
 	Command     string  // the suggested encode command line
 	BytesPerSec float64 // planning rate
 	Warnings    []Warning
+	// Measured is set when the setting is not established (DESIGN.md section 11) and only the
+	// user's own recording supports it: its step passed with margin. It is shown as "measured on
+	// your device" and holds for this user's recommendation only.
+	Measured bool
+	// Steps are what each step of the calibration video measured, by display rate, cell size and
+	// mode in the video's order, then fast, normal and robust.
+	Steps []CalibrationStep
+}
+
+// CalibrationStep is one step of the calibration video, decoded with one protection level, as
+// [AnalyzeCalibration] measured it.
+type CalibrationStep struct {
+	FPS           int // display rate
+	Cell          int
+	Modulation    Modulation
+	Protection    Protection
+	GridX, GridY  int
+	PixelsPerCell float64 // camera pixels per cell side, measured
+	Frames        int     // the step's code frames
+	FramesSeen    int
+	Codewords     int // codewords of the frames seen
+	Decoded       int // of those, decoded to the calibration's all-zero codeword
+	Passed        bool
+	Margin        bool    // passed with margin
+	Established   bool    // established at the camera pixels per cell measured (DESIGN.md section 11)
+	BytesPerSec   float64 // planning rate, scaled by the share of the step's codewords decoded
 }

@@ -1,24 +1,9 @@
 package qrvt
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 )
-
-func TestNotImplemented(t *testing.T) {
-	ctx := context.Background()
-	var errs []error
-	errs = append(errs, CalibrationVideo(ctx, CalibrationOptions{}))
-	_, err := AnalyzeCalibration(ctx, AnalyzeOptions{})
-	errs = append(errs, err)
-	for i, err := range errs {
-		if !errors.Is(err, ErrNotImplemented) {
-			t.Errorf("call %d: got %v, want ErrNotImplemented", i, err)
-		}
-	}
-}
 
 func TestErrorMessages(t *testing.T) {
 	cases := []struct {
@@ -30,6 +15,11 @@ func TestErrorMessages(t *testing.T) {
 		{&UnsafeArchiveError{Path: "../x", Reason: "parent component"}, `"../x": parent component`},
 		{&LimitError{Limit: "total size", Value: 10, Max: 5}, "total size 10 exceeds the limit 5"},
 		{&UnsupportedVersionError{What: "modulation", Value: 7}, "unsupported modulation 7"},
+		{&CalibrationError{Reason: CalibrationNoCode, Captures: 3}, "no code in any of the 3 captures"},
+		{&CalibrationError{Reason: CalibrationNoHeader, Located: 2, Captures: 3}, "found in 2 of 3 captures, but no frame header"},
+		{&CalibrationError{Reason: CalibrationTransfer, HeadersRead: 4}, "the 4 captures with a frame header show a transfer"},
+		{&CalibrationError{Reason: CalibrationMixedSizes, Sizes: 2}, "recover to 2 video sizes"},
+		{&CalibrationError{Reason: CalibrationNothingPassed, Calibration: 5}, "no step of the calibration video passed in its 5 captures"},
 	}
 	for _, c := range cases {
 		if got := c.err.Error(); !strings.Contains(got, c.want) {
