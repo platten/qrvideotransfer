@@ -268,7 +268,8 @@ func TestBWRobustBelowRows(t *testing.T) {
 	s11, l11 := design(t, "## 11. Expected performance")
 	for _, row := range table(t, l11, "| Camera (handheld) |") {
 		c := rowCamera(t, s11, row[0])
-		top, _ := Best(c, presets, []int{4})
+		sz, want := parseRecommended(t, row[1])
+		top := Planned{Rate: PlanningRate(want, sz.W/4, sz.H/4, 1)}
 		var bw Planned
 		for _, sz := range presets {
 			for _, cell := range Cells {

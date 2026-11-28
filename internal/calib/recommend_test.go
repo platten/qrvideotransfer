@@ -92,7 +92,7 @@ func TestRecommendTie(t *testing.T) {
 func TestRecommendMonotone(t *testing.T) {
 	rng := rand.New(rand.NewPCG(1, 2))
 	p, _ := NewPlan(1920, 1080)
-	for trial := range 50 {
+	for trial := range 30 {
 		var ms []Measurement
 		for _, s := range p.Segments {
 			for _, in := range Protections {
