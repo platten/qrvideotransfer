@@ -872,6 +872,22 @@ M6). The encoder renders runs of an even number of frames on one worker each, ev
 H.264 elementary stream, joined by `Concat`; parity shards are kept in a file of their own beside
 the spooled stream.
 
+**Scan and inspect (M4's fourth pull request).** The reading of a recording, the probe, the
+workers fitted to the memory budget, the grid-stage gate and the in-order application under
+workers + 2 tokens, is one loop that `Decode` and two other callers share. `pipeline.Scan` hands
+each capture to a sink in order, recording after recording, summing nothing: whether the finders
+were found, the headers read or the strongest refusal, whether it was located, each code frame's
+soft bits by bit position (descrambled), the data and clean cells, the camera pixels per cell side
+from the fitted mesh (the square root of the image area of the grid's corners over its cells), the
+share of the 32 palette patches that clipped, and the presentation time; a sink that stops ends
+the reading. It is the calibration's input (M4's fifth and sixth). `pipeline.Inspect` reads one
+recording through the same loop and sums codeword 0 only, with `Decode`'s lock onto the first
+located transfer, its weights (rule 7) and its descriptor checks; it stops once the descriptor
+decodes, never makes the shard store and never checks disk space. Without the descriptor it ends
+in the same `ShortError` as `Decode` would, its diagnostics and agreed refusal included. `Decode`'s
+behaviour is unchanged: its errors, results, events and memory are those of before, and its tests
+pass unchanged.
+
 ## 11. Expected performance
 
 Net bytes per frame are fixed by the format: `(C - 1) x shard size x K / (K + M)`, where C is codewords
@@ -1350,8 +1366,9 @@ qrvt profiles | version | completion | man
   (96 of 96 code frames seen). Record one more loop and pass both files to qrvt decode." The
   decoder counts what the captures showed (`NotEnoughDataError`: captures, captures in which the
   code's finders were found, a header tried whether or not it was read (`Located`), headers read,
-  captures of another transfer, code frames seen and total, whether the stream descriptor was
-  read) and the guidance follows the first class that fits (M4, `internal/cli`): no code found in
+  captures of another transfer than the one decoded or, when none was decoded, the one read most
+  often (`Other`), code frames seen and total, whether the stream descriptor was read) and the
+  guidance follows the first class that fits (M4, `internal/cli`): no code found in
   any capture (film the whole code, in focus and filling most of the picture); finders but no
   header read (film closer and steadier, and check that the video was made by qrvt); at least 3
   captures of another transfer and no blocks known (decode each transfer's recordings
@@ -1388,6 +1405,16 @@ qrvt profiles | version | completion | man
   against 30 fps on a short loop) moves the mixing too little over a few passes and reads as
   locked: the advice, condition 1, holds for it too. A camera at twice the display rate or more
   shows each frame clean in one capture of its pass, so its best is near 1.
+- **inspect.** Reads the recording as `decode` does (section 10, "Scan and inspect"), stops as soon
+  as the stream descriptor decodes, and prints the header's and the descriptor's fields: session,
+  video size, grid, mode, protection, frames and the display rate (descriptor byte 37, FORMAT.md
+  section 10), the stream's length and hash, the shard size and the blocks. It makes no shard store,
+  checks no disk space and writes nothing. A recording that ends first falls short as a decode does,
+  with the same diagnostics and guidance (exit 3): when a frame header was read, the header's fields
+  are printed first as a partial summary, titled as such (`StreamInfo.Descriptor` false); with
+  `--json` only the error line is printed, the events schema allowing one summary or error line,
+  and the header's frame count is in the `stats` events. An agreed unsupported format version,
+  modulation or inner code is an `UnsupportedVersionError` (exit 5), by the same rule as `decode`.
 - **calibrate.** `make` writes a test video stepping through modes, densities and display rates. `read`
   measures each step in a recording and prints a table with the recommended `encode` command, plus
   warnings for clipping, dropped frames, moire and exposure.
@@ -2600,7 +2627,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   pull request:** a capture whose header is refused reports the strongest reason
   (`vision.SlotReader.ReadReason`, `FinderDetector.Refusal`), and a refusal agreed by the captures
   reaches the failure guidance, an unsupported version as `UnsupportedVersionError` (section 13);
-  `inspect` (M4's fourth) remains.
+  **`inspect`, done in M4's fourth pull request**, ends with the same diagnostics and the same
+  agreed refusal (section 13, "inspect").
   The real-device check took 210-500 s per recording (about 2,300-4,800 captures at up to 4K, 16 threads; the public decode of recording
   1, 255 s); a round-trip matrix row takes 3-14 s alone.
 - **Main red at df8e9b5: `TestWatchdogUnderLoad` (2026-11-18).** Main's push run 44400775718 failed
@@ -2781,7 +2809,14 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   130 must pass every cleanup check as before; one that still dies of the interrupt without its
   trap met the residual, which is logged, cleaned up and tried again, at most 3 times per
   interrupt, failing after 3 in a row (the wait would then be wrong); the count of such hits is
-  logged for each shell. **setup.sh on macOS is verified only by CI** (PR #56's
+  logged for each shell. **Two follow-ups, M4's fourth pull request (test only):** the wait now
+  matches the watchdog of the `bounded` under test by its parentage, a `sleep` of the limit whose
+  parent, the watchdog's subshell, is a child of the test's shell, so that a sleep of the same
+  limit left by an earlier `bounded` cannot satisfy it; and the checks that no watchdog's sleep
+  outlived `bounded` poll for up to 5 s instead of looking once after a fixed 300 ms, which was
+  sensitive to load on macos-26-intel. Locally (Linux, sh being dash) 60 of 60 runs passed at
+  `-count=20` under sh, dash and bash, with no residual hit. **setup.sh on macOS is verified
+  only by CI** (PR #56's
   first run): macOS `mktemp -d` without a template does not use TMPDIR, taking the per-user folder
   of `confstr(_CS_DARWIN_USER_TEMP_DIR)` and reading TMPDIR only if that fails (Apple shell_cmds
   `mktemp.c`), so `TestSetupShBoundedMktempFails`, which failed it through a missing TMPDIR, failed
@@ -2795,7 +2830,8 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   observed (no `-v` was added to CI for it). This is the second BSD/GNU `mktemp` difference this
   pull request found (the first, `mktemp -u`, above), so a change to the shell scripts gets a
   macOS CI run before it is called done. Checked for other GNU-only reliance in the setup tests:
-  `pkill -f`/`-P`/`-KILL`, `ps -eo args`, `sleep` with whole seconds, `sh -n`, `trap`, `kill -0` and
+  `pkill -f`/`-P`/`-KILL`, `ps -eo args` and `ps -eo pid=,ppid=,args=`, `sleep` with whole
+  seconds, `sh -n`, `trap`, `kill -0` and
   `$$` are all POSIX or BSD-compatible.
 - **A cache-restore error in the check job on macos-26-intel (2026-11-19).** In each of the
   eight job logs read, the "Vulnerability scan" step logged about 17,000 lines of
@@ -2807,6 +2843,29 @@ Thresholds, fallbacks, ownership and exit tests are in IMPLEMENTATION_PROMPT.md.
   cache, which it did not need. Harmless, but it cost a 563 MB download and 15 s of extraction a
   run and buried any real error in the log. **Fixed in M4's tooling pull request:** the action's
   step sets `cache: false`.
+- **The isolated race step's peak memory (M4's fourth pull request).** PR #59's second run lost
+  its macos-26-intel runner ("The hosted runner lost communication with the server", run
+  46074852378, the job log gone) during "Race tests, isolated packages (Unix)", which runs the root
+  package, `internal/pipeline` and `internal/video` one after another, each alone. Measured
+  locally (linux amd64, 16 threads, 15 GiB, at b55f71d): each package's race test binary built as
+  the step builds it (`CGO_ENABLED=1`, `-race`, the release tags) and run alone with
+  `-test.timeout=18m -test.count=1`, its peak resident memory as `/usr/bin/time -v` reports it
+  (the largest single process) and the sum over its process tree, the engine's worker processes
+  included, sampled every 0.2 s:
+
+  | Package | GOMAXPROCS 4, the runner's CPUs: largest process / tree | GOMAXPROCS 16 | Time at 4 |
+  | --- | --- | --- | --- |
+  | root | 2,178 / 2,497 MiB | 2,181 / 2,508 MiB | 30 s |
+  | `internal/pipeline` | 838 / 839 MiB | 1,562 / 1,563 MiB | 58 s |
+  | `internal/video` | 3,061 / 3,541 MiB | 5,928 / 6,188 MiB | 299 s |
+
+  The macos-26-intel runner has 4 CPUs and 14 GB of memory (GitHub's table of standard
+  GitHub-hosted runners for public repositories,
+  https://docs.github.com/en/actions/reference/runners/github-hosted-runners, read 2026-11-27).
+  The step's peak is therefore `internal/video`'s, about 3.5 GiB at the runner's CPU count, a
+  quarter of its memory: the figures do not call for a change, and the step is unchanged. Not
+  measured: macOS's own accounting of the race detector's shadow memory and of the engine's 512 MiB
+  reservations, and what the runner itself holds besides.
 
 ## 20. Sources
 
