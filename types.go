@@ -239,6 +239,10 @@ type StreamInfo struct {
 	ShardSize     int
 	Blocks, K, M  int
 	StreamHash    [16]byte // first 16 bytes of the SHA-256 of the stream
+	// Descriptor is set when the stream descriptor was read. When it is not, [Inspect] returns the
+	// frame header's fields only (Width, Height, GridX, GridY, Modulation, Protection, Frames)
+	// beside its error, and the rest is zero.
+	Descriptor bool
 }
 
 // EncodeReport describes a finished (or, with DryRun, planned) encode.
